@@ -1,36 +1,88 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DroneView AI - Gayrimenkul Sanal Drone Video Platformu
 
-## Getting Started
+AI destekli gayrimenkul sanal drone video oluşturma platformu. Parsel verisi yükleyin, dakikalar içinde profesyonel sinematik drone tanıtım videosu alın.
 
-First, run the development server:
+## Özellikler
+
+- **Parsel Yükleme**: GeoJSON, KML dosyası veya koordinat girişi
+- **3D Harita Görünümü**: MapLibre GL JS ile interaktif harita, kırmızı parsel sınırları
+- **Drone Animasyonu**: 4 farklı açıdan sinematik kamera hareketleri (Kuzeydoğu, Güneybatı, Kuşbakışı, Alçak İrtifa)
+- **İrtifa Kontrolü**: 100m, 200m, 300m, 500m seçenekleri
+- **Video Süresi**: 30s, 45s, 60s seçenekleri
+- **AI Seslendirme**: Türkçe otomatik veya özel metin seslendirme
+- **Çevre Analizi**: Yakındaki hastane, okul, market, sahil vb. 5 önemli nokta
+- **Danışman Bilgileri**: Profil fotoğrafı, logo, telefon, yetki belgesi overlay
+- **Glassmorphism UI**: Premium, futuristik, minimal koyu tema
+- **Üyelik Sistemi**: Google ve email/şifre ile giriş (Supabase)
+- **Dashboard**: Projeler, parseller, kredi sistemi, ayarlar
+- **MP4 İndirme**: Oluşturulan videoyu indirin ve paylaşın
+- **QR Kod**: Video için QR kod oluşturma
+- **Mobil Uyumlu**: Tam responsive tasarım
+
+## Teknolojiler
+
+- **Frontend**: Next.js 16, React, TailwindCSS v4
+- **Harita**: MapLibre GL JS
+- **Backend**: Supabase (Auth + Database)
+- **Kimlik Doğrulama**: Google Login, Email/Password
+- **UI**: Glassmorphism, Framer Motion, Lucide Icons
+- **Dil**: TypeScript
+
+## Kurulum
 
 ```bash
+# Bağımlılıkları yükleyin
+npm install
+
+# .env.example'ı kopyalayın ve düzenleyin
+cp .env.example .env.local
+
+# Geliştirme sunucusunu başlatın
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+[http://localhost:3000](http://localhost:3000) adresini açın.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Ortam Değişkenleri
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`.env.local` dosyasında aşağıdaki değişkenleri ayarlayın:
 
-## Learn More
+```
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+ELEVENLABS_API_KEY=your-elevenlabs-api-key (opsiyonel)
+OPENAI_API_KEY=your-openai-api-key (opsiyonel)
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Proje Yapısı
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+src/
+├── app/                    # Next.js App Router sayfaları
+│   ├── api/               # API route handlers
+│   ├── auth/              # Giriş/Kayıt sayfaları
+│   └── dashboard/         # Dashboard sayfaları
+├── components/
+│   ├── auth/              # Kimlik doğrulama bileşenleri
+│   ├── dashboard/         # Dashboard bileşenleri
+│   ├── layout/            # Navbar, footer
+│   ├── map/               # Harita ve parsel yükleme
+│   ├── overlays/          # Video overlay bileşenleri
+│   ├── ui/                # Temel UI bileşenleri
+│   └── video/             # Drone, seslendirme, render
+├── hooks/                 # React hooks (Auth, ProjectStore)
+├── lib/                   # Yardımcı fonksiyonlar
+└── types/                 # TypeScript tipleri
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Dağıtım
 
-## Deploy on Vercel
+Vercel üzerinde dağıtım için:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run build
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Lisans
+
+MIT
