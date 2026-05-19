@@ -35,7 +35,7 @@ export function RenderPanel({
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'sanalparsel-video.mp4';
+      a.download = 'sanalparsel-1080x1920.mp4';
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -51,6 +51,9 @@ export function RenderPanel({
         <Card className="text-center py-8">
           <Film className="w-16 h-16 text-primary/30 mx-auto mb-4" />
           <h3 className="text-lg font-semibold mb-2">Video Oluşturmaya Hazır</h3>
+          <p className="text-sm text-muted mb-2">
+            Çözünürlük: <span className="text-primary font-semibold">1080x1920px (Dikey)</span>
+          </p>
           <p className="text-sm text-muted mb-6 max-w-md mx-auto">
             Tüm ayarlarınız tamamlandı. Profesyonel drone videosunu oluşturmak için
             aşağıdaki butona tıklayın.
@@ -70,7 +73,7 @@ export function RenderPanel({
             </div>
             <h3 className="text-lg font-semibold">Video Oluşturuluyor...</h3>
             <p className="text-sm text-muted mt-1">
-              Lütfen bekleyin, bu işlem birkaç dakika sürebilir.
+              1080x1920px çözünürlüğünde işleniyor...
             </p>
           </div>
           <ProgressBar progress={renderProgress} label="İşlem Durumu" />
@@ -99,21 +102,24 @@ export function RenderPanel({
       {videoUrl && (
         <div className="space-y-4">
           <Card>
-            <div className="aspect-video bg-black rounded-xl overflow-hidden mb-4">
-              <video
-                src={videoUrl}
-                controls
-                className="w-full h-full object-contain"
-              />
+            <div className="flex justify-center mb-4">
+              {/* 1080x1920 portrait container for video player */}
+              <div className="rounded-xl overflow-hidden bg-black border border-border" style={{ width: '540px', aspectRatio: '9/16' }}>
+                <video
+                  src={videoUrl}
+                  controls
+                  className="w-full h-full object-contain"
+                />
+              </div>
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3 justify-center">
               <Button variant="secondary">
                 <Eye className="w-4 h-4 mr-2" />
                 Önizleme
               </Button>
               <Button onClick={handleDownload}>
                 <Download className="w-4 h-4 mr-2" />
-                MP4 İndir
+                MP4 İndir (1080x1920)
               </Button>
               <Button variant="ghost" onClick={() => setShowQR(!showQR)}>
                 <QrCode className="w-4 h-4 mr-2" />
