@@ -13,13 +13,12 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY backend/package*.json ./
 
 # Install dependencies
 RUN npm ci --production --ignore-scripts
 
-COPY src/ ./src/
-COPY tmp/ ./tmp/
+COPY backend/src/ ./src/
 
 # Create directories
 RUN mkdir -p /app/tmp /app/output && \
