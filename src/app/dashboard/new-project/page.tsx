@@ -97,7 +97,7 @@ export default function NewProjectPage() {
         body: JSON.stringify({
           imageUrls: [`https://tile.googleapis.com/v1/ortho?projectId=${parcelCenter[1]},${parcelCenter[0]},16`],
           geoJson: parcelGeoJSON,
-          titleText: consultantProfile.companyName || 'SanalParsel',
+          titleText: consultantProfile.officeName || consultantProfile.fullName || 'SanalParsel',
           duration: droneSettings.duration,
           width: droneSettings.resolution.width,
           height: droneSettings.resolution.height,
