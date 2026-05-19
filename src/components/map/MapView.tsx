@@ -39,8 +39,8 @@ export function MapView({
       type: 'fill',
       source: 'parcel',
       paint: {
-        'fill-color': '#dc2626',
-        'fill-opacity': 0.2,
+        'fill-color': '#22c55e',
+        'fill-opacity': 0.15,
       },
     });
 
@@ -49,9 +49,10 @@ export function MapView({
       type: 'line',
       source: 'parcel',
       paint: {
-        'line-color': '#dc2626',
+        'line-color': '#22c55e',
         'line-width': 3,
-        'line-opacity': 0.9,
+        'line-opacity': 1,
+        'line-dasharray': [2, 2],
       },
     });
 
@@ -60,10 +61,11 @@ export function MapView({
       type: 'line',
       source: 'parcel',
       paint: {
-        'line-color': '#ef4444',
-        'line-width': 8,
-        'line-opacity': 0.15,
-        'line-blur': 4,
+        'line-color': '#4ade80',
+        'line-width': 6,
+        'line-opacity': 0.3,
+        'line-blur': 2,
+        'line-dasharray': [2, 2],
       },
     });
   }, []);
