@@ -26,6 +26,25 @@ export function RenderPanel({
     progressRef.current = renderProgress;
   }, [renderProgress]);
 
+  const handleDownload = async () => {
+    if (!videoUrl) return;
+    
+    try {
+      const response = await fetch(videoUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sanalparsel-video.mp4';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Download failed:', error);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {!videoUrl && !isRendering && (
@@ -92,12 +111,10 @@ export function RenderPanel({
                 <Eye className="w-4 h-4 mr-2" />
                 Önizleme
               </Button>
-              <a href={videoUrl} download>
-                <Button>
-                  <Download className="w-4 h-4 mr-2" />
-                  MP4 İndir
-                </Button>
-              </a>
+              <Button onClick={handleDownload}>
+                <Download className="w-4 h-4 mr-2" />
+                MP4 İndir
+              </Button>
               <Button variant="ghost" onClick={() => setShowQR(!showQR)}>
                 <QrCode className="w-4 h-4 mr-2" />
                 QR Kod

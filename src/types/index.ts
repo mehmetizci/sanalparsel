@@ -35,6 +35,7 @@ export interface NearbyPlace {
 export interface DroneSettings {
   altitude: 100 | 200 | 300 | 500;
   duration: 30 | 45 | 60;
+  resolution: { width: number; height: number; label: string; aspectRatio: string };
   cameraAngles: CameraAngle[];
 }
 

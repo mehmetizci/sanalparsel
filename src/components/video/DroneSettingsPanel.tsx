@@ -1,8 +1,8 @@
 'use client';
 
 import { Card } from '@/components/ui/Card';
-import { DRONE_ALTITUDES, VIDEO_DURATIONS } from '@/lib/constants';
-import { Plane, Clock, Mountain } from 'lucide-react';
+import { DRONE_ALTITUDES, VIDEO_DURATIONS, VIDEO_RESOLUTIONS } from '@/lib/constants';
+import { Plane, Clock, Monitor, Mountain } from 'lucide-react';
 import type { DroneSettings } from '@/types';
 
 interface DroneSettingsPanelProps {
@@ -16,6 +16,33 @@ export function DroneSettingsPanel({
 }: DroneSettingsPanelProps) {
   return (
     <div className="space-y-6">
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <Monitor className="w-5 h-5 text-primary" />
+          <h3 className="font-semibold">Video Çözünürlüğü</h3>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {VIDEO_RESOLUTIONS.map((res) => (
+            <Card
+              key={res.aspectRatio}
+              hover
+              onClick={() => onChange({ resolution: res })}
+              className={`text-center py-4 ${
+                settings.resolution?.aspectRatio === res.aspectRatio
+                  ? 'border-primary bg-primary/10'
+                  : ''
+              }`}
+            >
+              <Monitor className="w-5 h-5 mx-auto mb-2 text-primary" />
+              <span className="text-lg font-bold">{res.width}x{res.height}</span>
+              <p className="text-xs text-muted mt-1">
+                {res.label}
+              </p>
+            </Card>
+          ))}
+        </div>
+      </div>
+
       <div>
         <div className="flex items-center gap-2 mb-4">
           <Mountain className="w-5 h-5 text-primary" />

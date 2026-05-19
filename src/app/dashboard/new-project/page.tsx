@@ -27,6 +27,7 @@ import {
 const defaultDroneSettings: DroneSettings = {
   altitude: 200,
   duration: 45,
+  resolution: { width: 1080, height: 1920, label: 'Dikey (9:16)', aspectRatio: '9:16' },
   cameraAngles: [
     { name: 'Kuzeydoğu', heading: 45, pitch: -30, altitude: 200, duration: 10 },
     { name: 'Güneybatı', heading: 225, pitch: -30, altitude: 200, duration: 10 },
@@ -85,7 +86,8 @@ export default function NewProjectPage() {
         if (prev >= 100) {
           clearInterval(interval);
           setIsRendering(false);
-          setVideoUrl('/demo-video.mp4');
+          // Using a sample video URL for demo - in production this would be the generated video
+          setVideoUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
           return 100;
         }
         return prev + 2;

@@ -41,6 +41,7 @@ type ProjectContextType = ProjectState & ProjectActions;
 const defaultDroneSettings: DroneSettings = {
   altitude: 200,
   duration: 45,
+  resolution: { width: 1080, height: 1920, label: 'Dikey (9:16)', aspectRatio: '9:16' },
   cameraAngles: [
     { name: 'Kuzeydoğu', heading: 45, pitch: -30, altitude: 200, duration: 10 },
     { name: 'Güneybatı', heading: 225, pitch: -30, altitude: 200, duration: 10 },

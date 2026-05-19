@@ -1,5 +1,10 @@
 export const DRONE_ALTITUDES = [100, 200, 300, 500] as const;
 export const VIDEO_DURATIONS = [30, 45, 60] as const;
+export const VIDEO_RESOLUTIONS = [
+  { width: 1080, height: 1920, label: 'Dikey (9:16)', aspectRatio: '9:16' },
+  { width: 1920, height: 1080, label: 'Yatay (16:9)', aspectRatio: '16:9' },
+  { width: 1080, height: 1080, label: 'Kare (1:1)', aspectRatio: '1:1' },
+] as const;
 
 export const CAMERA_PRESETS = [
   { name: 'Kuzeydoğu Açısı', heading: 45, pitch: -30, label: 'NE' },
