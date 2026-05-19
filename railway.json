@@ -10,7 +10,7 @@
     "restartPolicyMaxRetries": 10,
     "idleTimeout": 300,
     "gracePeriodSeconds": 30,
-    "memoryLimit": 1024,
+    "memoryLimit": 2048,
     "cpuLimit": 1
   }
 }
