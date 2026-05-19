@@ -1,9 +1,6 @@
-# Simpler Dockerfile for Railway
-# Uses @ffmpeg-installer which works within Railway memory limits
+FROM node:18-bullseye
 
-FROM node:18-alpine
-
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     ffmpeg \
     ca-certificates \
     curl \
@@ -15,18 +12,16 @@ WORKDIR /app
 
 COPY backend/package*.json ./
 
-# Install dependencies
 RUN npm install --omit=dev
 
 COPY backend/src/ ./src/
 
-# Create directories
 RUN mkdir -p /app/tmp /app/output && \
     chmod 755 /app/tmp /app/output
 
 ENV NODE_ENV=production
 ENV PORT=8080
-ENV FFPEG_THREADS=1
+ENV FFMPEG_THREADS=1
 
 EXPOSE 8080
 
