@@ -77,22 +77,62 @@ export default function NewProjectPage() {
     []
   );
 
-  const handleRender = () => {
+  const handleRender = async () => {
+    if (!parcelGeoJSON || !parcelCenter) {
+      alert('Lütfen önce parsel yükleyin');
+      return;
+    }
+
     setIsRendering(true);
     setRenderProgress(0);
+    setVideoUrl(null);
 
-    const interval = setInterval(() => {
-      setRenderProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsRendering(false);
-          // Using a sample video URL for demo - in production this would be the generated video
-          setVideoUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
-          return 100;
-        }
-        return prev + 2;
+    try {
+      // Call Railway backend
+      const response = await fetch('https://sanalparsel-backend-production.up.railway.app/render', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageUrls: [`https://tile.googleapis.com/v1/ortho?projectId=${parcelCenter[1]},${parcelCenter[0]},16`],
+          geoJson: parcelGeoJSON,
+          titleText: consultantProfile.companyName || 'SanalParsel',
+          duration: droneSettings.duration,
+          width: droneSettings.resolution.width,
+          height: droneSettings.resolution.height,
+        }),
       });
-    }, 200);
+
+      if (!response.ok) {
+        throw new Error('Render failed');
+      }
+
+      const result = await response.json();
+      const jobId = result.jobId;
+
+      // Poll for status
+      const pollInterval = setInterval(async () => {
+        const statusResponse = await fetch(`https://sanalparsel-backend-production.up.railway.app/render/${jobId}`);
+        const status = await statusResponse.json();
+
+        setRenderProgress(status.progress);
+
+        if (status.status === 'completed') {
+          clearInterval(pollInterval);
+          setVideoUrl(`https://sanalparsel-backend-production.up.railway.app${status.videoUrl}`);
+          setIsRendering(false);
+        } else if (status.status === 'failed') {
+          clearInterval(pollInterval);
+          setIsRendering(false);
+          alert('Video oluşturma hatası: ' + status.error);
+        }
+      }, 2000);
+    } catch (error) {
+      console.error('Render error:', error);
+      setIsRendering(false);
+      alert('Video oluşturma sırasında hata oluştu');
+    }
   };
 
   const canProceed = () => {
