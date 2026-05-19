@@ -155,72 +155,75 @@ export function VideoPreview({
   };
 
   return (
-    <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-card border border-border">
-      <div ref={mapContainerRef} className="absolute inset-0" />
+    <div className="flex justify-center w-full">
+      {/* 1080x1920 portrait container (9:16 aspect ratio) */}
+      <div className="relative rounded-2xl overflow-hidden bg-card border border-border" style={{ width: '540px', aspectRatio: '9/16' }}>
+        <div ref={mapContainerRef} className="absolute inset-0" />
 
-      {/* Title overlay */}
-      <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none">
-        <div className="glass rounded-xl px-4 py-2">
-          <p className="text-xs text-muted">PARSEL</p>
-          <p className="text-sm font-semibold text-white">{parcelName || 'İsimsiz Parsel'}</p>
-        </div>
-        <div className="glass rounded-xl px-3 py-1.5">
-          <p className="text-xs text-primary font-mono">
-            {droneSettings.altitude}m | {droneSettings.duration}s
-          </p>
-        </div>
-      </div>
-
-      {/* Nearby places - left side */}
-      {showOverlays && nearbyPlaces.length > 0 && (
-        <div className="absolute left-4 top-1/2 -translate-y-1/2 w-64 pointer-events-none">
-          <NearbyPlacesOverlay places={nearbyPlaces} animated />
-        </div>
-      )}
-
-      {/* Consultant overlay - bottom right */}
-      {showOverlays && consultantProfile.fullName && (
-        <div className="absolute bottom-16 right-4 pointer-events-none">
-          <ConsultantOverlay profile={consultantProfile} animated />
-        </div>
-      )}
-
-      {/* Controls */}
-      <div className="absolute bottom-4 left-4 right-4">
-        {/* Progress bar */}
-        <div className="mb-3">
-          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary rounded-full transition-all duration-100"
-              style={{ width: `${progress}%` }}
-            />
+        {/* Title overlay */}
+        <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none">
+          <div className="glass rounded-xl px-4 py-2">
+            <p className="text-xs text-muted">PARSEL</p>
+            <p className="text-sm font-semibold text-white">{parcelName || 'İsimsiz Parsel'}</p>
+          </div>
+          <div className="glass rounded-xl px-3 py-1.5">
+            <p className="text-xs text-primary font-mono">
+              {droneSettings.altitude}m | {droneSettings.duration}s
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 pointer-events-auto">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handlePlay}
-            className="glass border-0"
-          >
-            {isPlaying ? (
-              <Pause className="w-4 h-4" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleReset}
-            className="glass border-0"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </Button>
-          <span className="text-xs text-white/60 ml-2">
-            {Math.round((progress / 100) * droneSettings.duration)}s / {droneSettings.duration}s
-          </span>
+        {/* Nearby places - left side */}
+        {showOverlays && nearbyPlaces.length > 0 && (
+          <div className="absolute left-4 top-1/2 -translate-y-1/2 w-32 pointer-events-none">
+            <NearbyPlacesOverlay places={nearbyPlaces} animated />
+          </div>
+        )}
+
+        {/* Consultant overlay - bottom right */}
+        {showOverlays && consultantProfile.fullName && (
+          <div className="absolute bottom-16 right-4 pointer-events-none">
+            <ConsultantOverlay profile={consultantProfile} animated />
+          </div>
+        )}
+
+        {/* Controls */}
+        <div className="absolute bottom-4 left-4 right-4">
+          {/* Progress bar */}
+          <div className="mb-3">
+            <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-100"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pointer-events-auto">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handlePlay}
+              className="glass border-0"
+            >
+              {isPlaying ? (
+                <Pause className="w-4 h-4" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleReset}
+              className="glass border-0"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </Button>
+            <span className="text-xs text-white/60 ml-2">
+              {Math.round((progress / 100) * droneSettings.duration)}s / {droneSettings.duration}s
+            </span>
+          </div>
         </div>
       </div>
     </div>
