@@ -6,7 +6,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger.js';
 
@@ -92,7 +92,6 @@ export async function renderVideo(options, outputPath) {
  */
 async function downloadAndPrepareImages(imageUrls, framesDir) {
   const downloadedImages = [];
-  const { execSync } = require('child_process');
   
   for (let i = 0; i < imageUrls.length; i++) {
     const imageUrl = imageUrls[i];
@@ -132,7 +131,6 @@ async function downloadAndPrepareImages(imageUrls, framesDir) {
  */
 async function createSlideshow(images, framesDir, params) {
   const { slideDuration, width, height, titleText } = params;
-  const { execSync } = require('child_process');
   
   const concatFile = path.join(framesDir, 'concat.txt');
   const outputFile = path.join(framesDir, 'slideshow.mp4');
@@ -180,7 +178,6 @@ async function createSlideshow(images, framesDir, params) {
  */
 async function addAudioTrack(videoPath, options) {
   const { voiceAudioUrl, backgroundMusicUrl } = options;
-  const { execSync } = require('child_process');
   const outputPath = videoPath.replace('.mp4', '_audio.mp4');
   
   let audioFilter = '';
@@ -229,7 +226,6 @@ async function addAudioTrack(videoPath, options) {
  */
 async function exportFinalVideo(inputPath, outputPath, options) {
   const { quality, width, height } = options;
-  const { execSync } = require('child_process');
   
   // Quality presets
   const qualityPresets = {
@@ -259,7 +255,6 @@ async function exportFinalVideo(inputPath, outputPath, options) {
  */
 export async function generateThumbnail(videoUrl, outputPath, options) {
   const { timePosition = '00:00:01', format = 'jpg' } = options;
-  const { execSync } = require('child_process');
   
   // Download video if it's a URL
   let videoPath = videoUrl;
