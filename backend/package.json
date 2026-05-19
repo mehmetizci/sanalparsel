@@ -1,0 +1,24 @@
+{
+  "name": "sanalparsel-backend",
+  "version": "1.0.0",
+  "description": "FFmpeg video rendering backend for SanalParsel",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "fluent-ffmpeg": "^2.1.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["ffmpeg", "video", "render", "railway"],
+  "license": "MIT"
+}
