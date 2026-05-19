@@ -104,7 +104,7 @@ export function RenderPanel({
           <Card>
             <div className="flex justify-center mb-4">
               {/* 1080x1920 portrait container for video player */}
-              <div className="rounded-xl overflow-hidden bg-black border border-border" style={{ width: '540px', aspectRatio: '9/16' }}>
+              <div className="rounded-xl overflow-hidden bg-black border border-border" style={{ width: '1080px', aspectRatio: '9/16' }}>
                 <video
                   src={videoUrl}
                   controls

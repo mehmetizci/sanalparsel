@@ -157,7 +157,7 @@ export function VideoPreview({
   return (
     <div className="flex justify-center w-full">
       {/* 1080x1920 portrait container (9:16 aspect ratio) */}
-      <div className="relative rounded-2xl overflow-hidden bg-card border border-border" style={{ width: '540px', aspectRatio: '9/16' }}>
+      <div className="relative rounded-2xl overflow-hidden bg-card border border-border" style={{ width: '1080px', aspectRatio: '9/16' }}>
         <div ref={mapContainerRef} className="absolute inset-0" />
 
         {/* Title overlay */}
