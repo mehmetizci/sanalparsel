@@ -9,6 +9,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
+import { execSync } from 'child_process';
 
 import renderRouter from './routes/render.js';
 import thumbnailRouter from './routes/thumbnail.js';
@@ -48,7 +49,6 @@ app.get('/health', (req, res) => {
 // Check FFmpeg availability
 function checkFFmpeg() {
   try {
-    const { execSync } = require('child_process');
     execSync('ffmpeg -version', { encoding: 'utf-8', stdio: 'pipe' });
     return 'available';
   } catch {
