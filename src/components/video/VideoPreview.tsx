@@ -311,9 +311,9 @@ export function VideoPreview({
   return (
     <div className="space-y-4">
       <Card className="p-0 overflow-hidden">
-        <div className="relative w-full aspect-[9/16] bg-black overflow-hidden" style={{ maxHeight: '75vh' }}>
+        <div className="relative w-full bg-black overflow-hidden">
           {/* Map */}
-          <div ref={mapContainer} className="absolute inset-0" />
+          <div ref={mapContainer} className="w-full h-[500px]" />
           
           {/* Overlays - allow pointer events on map */}
           <div className="absolute inset-0">
