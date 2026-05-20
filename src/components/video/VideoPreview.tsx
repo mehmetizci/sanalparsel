@@ -238,36 +238,25 @@ export function VideoPreview({
         bearing = 30;
         center = centroid as [number, number];
       } else if (progress < 0.5) {
-        // Phase 3: Spiral descent approach (30-50%) - NEW: Spiral dönüş + alçalma
-        const p = (progress - 0.3) / 0.2;
-        // Spiral: 1.5 tam tur dönerken merkeze yaklaş
-        const spiralAngle = p * Math.PI * 3; // 1.5 full rotations
-        const spiralRadius = 1 - easeInOutCubic(p) * 0.6; // Radius küçülür
-        // Offset from centroid using spiral path
-        const offsetLng = Math.cos(spiralAngle) * spiralRadius * 0.003;
-        const offsetLat = Math.sin(spiralAngle) * spiralRadius * 0.003;
-        zoom = 14 + easeInOutCubic(p) * 3; // Zoom IN (yakınlaşır) - 14 → 17
-        pitch = 45 + easeInOutCubic(p) * 15; // Alçalır
-        bearing = p * 540; // 1.5 full rotations during descent
-        center = [centroid[0] + offsetLng, centroid[1] + offsetLat] as [number, number];
+        // Phase 3: Smooth descent toward parcel (30-50%)
+        const p = Math.max(0, Math.min(1, (progress - 0.3) / 0.2));
+        zoom = 14 + p * 4; // 14 → 18
+        pitch = 45 + p * 25; // 45° → 70°
+        bearing = 30 + p * 180; // 30° → 210°
+        center = centroid as [number, number]; // NO offset
       } else if (progress < 0.8) {
-        // Phase 4: Final approach - tight spiral to parcel (50-80%)
-        const p = (progress - 0.5) / 0.3;
-        // Tighter spiral as we get closer
-        const spiralAngle = p * Math.PI * 2; // 1 full rotation
-        const spiralRadius = (1 - easeInOutCubic(p)) * 0.4; // Get very close
-        const offsetLng = Math.cos(spiralAngle) * spiralRadius * 0.001;
-        const offsetLat = Math.sin(spiralAngle) * spiralRadius * 0.001;
-        zoom = 17 + easeInOutCubic(p) * 1.5; // Zoom closer - 17 → 18.5
-        pitch = 60 - easeInOutCubic(p) * 15; // Steeper angle
-        bearing = 540 + p * 360; // Another full rotation
-        center = [centroid[0] + offsetLng, centroid[1] + offsetLat] as [number, number];
+        // Phase 4: Close hover (50-80%)
+        const p = Math.max(0, Math.min(1, (progress - 0.5) / 0.3));
+        zoom = 18 - p * 1; // 18 → 17
+        pitch = 70 - p * 30; // 70° → 40°
+        bearing = 210 + p * 150; // 210° → 360°
+        center = centroid as [number, number];
       } else {
-        // Phase 5: Low altitude reveal + hover (80-100%)
-        const p = (progress - 0.8) / 0.2;
-        zoom = 18.5 + easeInOutCubic(p) * 0.5;
-        pitch = 35 + easeInOutCubic(p) * 10;
-        bearing = 720 + p * 45;
+        // Phase 5: Final hover (80-100%)
+        const p = Math.max(0, Math.min(1, (progress - 0.8) / 0.2));
+        zoom = 17 + p * 0.5;
+        pitch = 40 + p * 5;
+        bearing = 360 + p * 30;
         center = centroid as [number, number];
       }
 
@@ -301,22 +290,48 @@ export function VideoPreview({
 
   const togglePlay = () => {
     if (isPlaying) {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      // Pause
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = 0;
+      }
       setIsPlaying(false);
     } else {
+      // Play - restart if at end
+      if (currentTime >= duration - 1) {
+        setCurrentTime(0);
+        startTime.current = Date.now();
+      }
       setIsPlaying(true);
-      if (currentTime >= duration - 0.5) setCurrentTime(0);
     }
   };
 
   const seekTo = (seconds: number) => {
+    // Stop animation first
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = 0;
+    }
+    setIsPlaying(false);
     setCurrentTime(seconds);
     if (!map.current) return;
     
     const progress = seconds / duration;
-    const zoom = 12 + progress * 7;
-    map.current.flyTo({ center: centroid as [number, number], zoom, pitch: 45, bearing: progress * 360, duration: 500 });
-    setCameraInfo({ zoom: Math.round(zoom * 10) / 10, pitch: 45, bearing: Math.round(progress * 360) % 360, alt: Math.round(500 - (zoom - 12) * 40) });
+    const zoom = 12 + progress * 6;
+    const pitch = 45 + progress * 25;
+    map.current.flyTo({ 
+      center: centroid as [number, number], 
+      zoom, 
+      pitch, 
+      bearing: progress * 360, 
+      duration: 300 
+    });
+    setCameraInfo({ 
+      zoom: Math.round(zoom * 10) / 10, 
+      pitch: Math.round(pitch), 
+      bearing: Math.round(progress * 360) % 360, 
+      alt: Math.round(500 - (zoom - 12) * 40) 
+    });
   };
 
   return (
