@@ -105,7 +105,7 @@ export default function HomePage() {
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link href="/auth/register">
                 <Button size="lg" className="text-base">
-                  <Video className="w-5 h-5 mr-2" />
+                  <Drone className="w-5 h-5 mr-2" />
                   Ücretsiz Başlayın
                   <ArrowRight className="w-5 h-5 ml-2" />
                 </Button>
@@ -125,7 +125,7 @@ export default function HomePage() {
               <div className="absolute inset-0 bg-gradient-to-br from-background via-card to-primary/5 flex items-center justify-center">
                 <div className="text-center">
                   <div className="w-20 h-20 rounded-2xl bg-red-500/20 flex items-center justify-center mx-auto mb-4">
-                    <Video className="w-10 h-10 text-red-500" />
+                    <Drone className="w-10 h-10 text-red-500" />
                   </div>
                   <p className="text-lg font-semibold">Video Önizleme</p>
                   <p className="text-sm text-muted mt-1">
@@ -252,7 +252,7 @@ export default function HomePage() {
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded bg-red-500 flex items-center justify-center">
-                <Video className="w-3 h-3 text-white" />
+                <Drone className="w-3 h-3 text-white" />
               </div>
               <span className="text-sm font-semibold">DroneView AI</span>
             </div>
