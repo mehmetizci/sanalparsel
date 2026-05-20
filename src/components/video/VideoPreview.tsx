@@ -238,19 +238,30 @@ export function VideoPreview({
         bearing = 30;
         center = centroid as [number, number];
       } else if (progress < 0.5) {
-        // Phase 3: 360° orbit (30-50%)
+        // Phase 3: Spiral descent approach (30-50%) - NEW: Spiral dönüş + alçalma
         const p = (progress - 0.3) / 0.2;
-        zoom = 16 + Math.sin(p * Math.PI) * 0.5;
-        pitch = 45 + Math.sin(p * Math.PI * 2) * 10;
-        bearing = 30 + p * 360;
-        center = centroid as [number, number];
+        // Spiral: 1.5 tam tur dönerken merkeze yaklaş
+        const spiralAngle = p * Math.PI * 3; // 1.5 full rotations
+        const spiralRadius = 1 - easeInOutCubic(p) * 0.6; // Radius küçülür
+        // Offset from centroid using spiral path
+        const offsetLng = Math.cos(spiralAngle) * spiralRadius * 0.003;
+        const offsetLat = Math.sin(spiralAngle) * spiralRadius * 0.003;
+        zoom = 14 + easeInOutCubic(p) * 3; // Zoom IN (yakınlaşır) - 14 → 17
+        pitch = 45 + easeInOutCubic(p) * 15; // Alçalır
+        bearing = p * 540; // 1.5 full rotations during descent
+        center = [centroid[0] + offsetLng, centroid[1] + offsetLat] as [number, number];
       } else if (progress < 0.8) {
-        // Phase 4: Spiral descent - Hero Shot (50-80%)
+        // Phase 4: Final approach - tight spiral to parcel (50-80%)
         const p = (progress - 0.5) / 0.3;
-        zoom = 16 + easeInOutCubic(p) * 3;
-        pitch = 45 - easeInOutCubic(p) * 10;
-        bearing = p * 720; // 2 full rotations
-        center = centroid as [number, number];
+        // Tighter spiral as we get closer
+        const spiralAngle = p * Math.PI * 2; // 1 full rotation
+        const spiralRadius = (1 - easeInOutCubic(p)) * 0.4; // Get very close
+        const offsetLng = Math.cos(spiralAngle) * spiralRadius * 0.001;
+        const offsetLat = Math.sin(spiralAngle) * spiralRadius * 0.001;
+        zoom = 17 + easeInOutCubic(p) * 1.5; // Zoom closer - 17 → 18.5
+        pitch = 60 - easeInOutCubic(p) * 15; // Steeper angle
+        bearing = 540 + p * 360; // Another full rotation
+        center = [centroid[0] + offsetLng, centroid[1] + offsetLat] as [number, number];
       } else {
         // Phase 5: Low altitude reveal + hover (80-100%)
         const p = (progress - 0.8) / 0.2;
