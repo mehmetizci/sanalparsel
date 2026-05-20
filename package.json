@@ -13,6 +13,7 @@
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.0",
     "@types/geojson": "^7946.0.16",
+    "@types/maplibre-gl": "^1.13.2",
     "cesium": "^1.141.0",
     "clsx": "^2.1.1",
     "framer-motion": "^12.39.0",

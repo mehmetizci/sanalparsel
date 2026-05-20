@@ -1,262 +1,332 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { Feature, FeatureCollection, Point, Polygon } from 'geojson';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import type { Feature, FeatureCollection, Polygon } from 'geojson';
 
 interface MapViewProps {
   geoJson: FeatureCollection | Feature | null;
   onParcelSelect?: (feature: Feature) => void;
 }
 
-interface ParcelData {
-  center: [number, number];
-  bounds: [[number, number], [number, number]];
+interface ParcelProperties {
+  ParselNo?: string;
+  Alan?: string;
+  Mevkii?: string;
+  Nitelik?: string;
+  Ada?: string;
+  Il?: string;
+  Ilce?: string;
+  Pafta?: string;
+  Mahalle?: string;
 }
 
-function getParcelData(geoJson: FeatureCollection | Feature | null): ParcelData | null {
-  if (!geoJson) return null;
-  const features = 'features' in geoJson ? geoJson.features : [geoJson];
-  let coords: number[][] = [];
-  for (const f of features) {
-    if (!f.geometry) continue;
-    const g = f.geometry;
-    if (g.type === 'Point') coords.push((g as Point).coordinates as number[]);
-    else if (g.type === 'Polygon' && g.coordinates?.[0]) coords.push(...g.coordinates[0]);
-  }
-  if (coords.length === 0) return null;
-  const lngs = coords.map(c => c[0]), lats = coords.map(c => c[1]);
-  return {
-    center: [(Math.min(...lngs) + Math.max(...lngs)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2],
-    bounds: [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]]
-  };
-}
-
-interface Camera {
-  pitch: number;
-  zoom: number;
-  bearing: number;
-}
-
-// Live Mapbox satellite style URL
-const MAPBOX_SATELLITE = 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9';
+// Sample GeoJSON for testing
+const SAMPLE_GEOJSON: FeatureCollection = {
+  type: 'FeatureCollection',
+  features: [{
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [26.85749, 38.66965],
+        [26.85725, 38.66916],
+        [26.85733, 38.66911],
+        [26.85739, 38.66905],
+        [26.85753, 38.66895],
+        [26.85764, 38.66889],
+        [26.85778, 38.66882],
+        [26.85789, 38.66878],
+        [26.85793, 38.66887],
+        [26.85799, 38.66897],
+        [26.85807, 38.66911],
+        [26.85829, 38.66955],
+        [26.85845, 38.66951],
+        [26.85846, 38.66954],
+        [26.85847, 38.66956],
+        [26.85851, 38.66962],
+        [26.85862, 38.66982],
+        [26.85843, 38.66987],
+        [26.85804, 38.66999],
+        [26.85785, 38.67003],
+        [26.85783, 38.66996],
+        [26.85781, 38.66991],
+        [26.85776, 38.66988],
+        [26.85773, 38.66986],
+        [26.85757, 38.6699],
+        [26.85749, 38.66965]
+      ]]
+    },
+    properties: {
+      ParselNo: '467',
+      Alan: '8.656,88',
+      Mevkii: 'Camilimağara',
+      Nitelik: 'Kule Ve Beş Zeytinli Tarla',
+      Ada: '506130',
+      Il: 'İzmir',
+      Ilce: 'Foça',
+      Pafta: 'K17-C-08-D-1-B',
+      Mahalle: 'Hacıveli'
+    }
+  }]
+};
 
 export function MapView({ geoJson, onParcelSelect }: MapViewProps) {
-  const container = useRef<HTMLDivElement>(null);
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<maplibregl.Map | null>(null);
   const [loading, setLoading] = useState(true);
-  const [parcel, setParcel] = useState<ParcelData | null>(null);
-  const [camera, setCamera] = useState<Camera>({ pitch: 45, zoom: 12, bearing: 0 });
-  const [mapError, setMapError] = useState<string | null>(null);
+  const [popup, setPopup] = useState<{ x: number; y: number; props: ParcelProperties } | null>(null);
+  const [hoveredFeature, setHoveredFeature] = useState<Feature | null>(null);
 
-  // Generate Mapbox static image URL
-  const getMapImageUrl = useCallback((center: [number, number], zoom: number): string => {
-    const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
-    if (!token) {
-      // Fallback to Esri world imagery
-      return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${Math.floor(zoom)}/${Math.floor((90 - center[1]) / Math.pow(2, 18 - zoom))}/${Math.floor((center[0] + 180) / Math.pow(2, 18 - zoom))}`;
-    }
-    return `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/static/${center[0]},${center[1]},${zoom},${camera.bearing}/800x600@2x?access_token=${token}`;
-  }, [camera.bearing]);
+  // Use sample GeoJSON if no geoJson provided
+  const dataToUse = geoJson || SAMPLE_GEOJSON as FeatureCollection;
 
+  // Initialize map
   useEffect(() => {
-    if (geoJson) {
-      setLoading(true);
-      setMapError(null);
-      const p = getParcelData(geoJson);
-      setParcel(p);
+    if (!mapContainer.current || map.current) return;
+
+    map.current = new maplibregl.Map({
+      container: mapContainer.current,
+      style: {
+        version: 8,
+        sources: {
+          'esri-satellite': {
+            type: 'raster',
+            tiles: [
+              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+            ],
+            tileSize: 256,
+            attribution: '© Esri'
+          }
+        },
+        layers: [
+          {
+            id: 'satellite',
+            type: 'raster',
+            source: 'esri-satellite',
+            minzoom: 0,
+            maxzoom: 19
+          }
+        ]
+      },
+      center: [26.857, 38.669],
+      zoom: 16,
+      pitch: 45, // Google Earth havası için eğim
+      bearing: 0,
+    });
+
+    map.current.on('load', () => {
+      if (!map.current) return;
+
+      // Add GeoJSON source
+      map.current.addSource('parcel', {
+        type: 'geojson',
+        data: dataToUse as any,
+        tolerance: 2
+      });
+
+      // Fill layer (içi hafif şeffaf kırmızı)
+      map.current.addLayer({
+        id: 'parcel-fill',
+        type: 'fill',
+        source: 'parcel',
+        paint: {
+          'fill-color': 'rgba(255, 0, 0, 0.1)',
+          'fill-outline-color': 'rgba(255, 0, 0, 0.3)'
+        }
+      });
+
+      // Line layer (kırmızı çizgi)
+      map.current.addLayer({
+        id: 'parcel-line',
+        type: 'line',
+        source: 'parcel',
+        paint: {
+          'line-color': '#FF0000',
+          'line-width': 3,
+          'line-opacity': 0.9
+        }
+      });
+
+      // Fit bounds to GeoJSON
+      const bounds = new maplibregl.LngLatBounds();
+      const features = 'features' in dataToUse ? (dataToUse as FeatureCollection).features : [dataToUse as Feature];
       
-      // Fly animation
-      let frame = 0;
-      const anim = () => {
-        frame++;
-        const progress = frame / 50;
-        if (progress < 0.3) setCamera(c => ({ ...c, pitch: 60 - progress * 20, zoom: 10 + progress * 4 }));
-        else if (progress < 0.6) setCamera(c => ({ ...c, pitch: 50 - (progress - 0.3) * 25, zoom: 12 + (progress - 0.3) * 3 }));
-        else setCamera(c => ({ ...c, pitch: 40, zoom: 14, bearing: progress * 10 }));
-        
-        if (frame < 50) requestAnimationFrame(anim);
-      };
-      requestAnimationFrame(anim);
-      setTimeout(() => setLoading(false), 800);
+      for (const feature of features) {
+        if (!feature.geometry) continue;
+        const geom = feature.geometry as Polygon;
+        if (geom.coordinates && geom.coordinates[0]) {
+          for (const coord of geom.coordinates[0]) {
+            bounds.extend(coord as [number, number]);
+          }
+        }
+      }
+
+      map.current.fitBounds(bounds, {
+        padding: 60,
+        maxZoom: 17,
+        duration: 1500
+      });
+
+      setLoading(false);
+    });
+
+    // Click event
+    map.current.on('click', 'parcel-fill', (e) => {
+      if (!e.features || !e.features[0]) return;
+      const feature = e.features[0];
+      const props = feature.properties as ParcelProperties;
+      if (props) {
+        setPopup({ x: e.point.x, y: e.point.y, props });
+        onParcelSelect?.(feature as Feature);
+      }
+    });
+
+    // Hover events
+    map.current.on('mouseenter', 'parcel-fill', () => {
+      if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+    });
+    
+    map.current.on('mouseleave', 'parcel-fill', () => {
+      if (map.current) map.current.getCanvas().style.cursor = '';
+      setHoveredFeature(null);
+    });
+
+    map.current.on('mousemove', 'parcel-fill', (e) => {
+      if (!e.features || !e.features[0]) return;
+      setHoveredFeature(e.features[0] as Feature);
+    });
+
+    return () => {
+      if (map.current) {
+        map.current.remove();
+        map.current = null;
+      }
+    };
+  }, []);
+
+  // Update GeoJSON data when it changes
+  useEffect(() => {
+    if (!map.current || !map.current.isStyleLoaded()) return;
+    
+    const source = map.current.getSource('parcel') as maplibregl.GeoJSONSource;
+    if (source) {
+      source.setData(dataToUse as any);
+      
+      // Re-fit bounds
+      const bounds = new maplibregl.LngLatBounds();
+      const features = 'features' in dataToUse ? (dataToUse as FeatureCollection).features : [dataToUse as Feature];
+      
+      for (const feature of features) {
+        if (!feature.geometry) continue;
+        const geom = feature.geometry as Polygon;
+        if (geom.coordinates && geom.coordinates[0]) {
+          for (const coord of geom.coordinates[0]) {
+            bounds.extend(coord as [number, number]);
+          }
+        }
+      }
+      
+      map.current.fitBounds(bounds, {
+        padding: 60,
+        maxZoom: 17,
+        duration: 1000
+      });
     }
   }, [geoJson]);
 
-  const handleZoomIn = useCallback(() => setCamera(c => ({ ...c, zoom: Math.min(18, c.zoom + 1) })), []);
-  const handleZoomOut = useCallback(() => setCamera(c => ({ ...c, zoom: Math.max(10, c.zoom - 1) })), []);
-  const handleRotateCW = useCallback(() => setCamera(c => ({ ...c, bearing: (c.bearing + 15) % 360 })), []);
-  const handleRotateCCW = useCallback(() => setCamera(c => ({ ...c, bearing: (c.bearing - 15 + 360) % 360 })), []);
-  const handleReset = useCallback(() => setCamera({ pitch: 45, zoom: 12, bearing: 0 }), []);
-
-  // Fallback satellite background
-  const satelliteUrl = parcel ? `https://mt1.google.com/vt/lyrs=s&x=${Math.floor(parcel.center[0] * 10)}&y=${Math.floor(parcel.center[1] * 10)}&z=${Math.min(18, camera.zoom + 1)}` : '';
-
-  if (loading) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-black">
-        <div className="text-center">
-          <div className="w-14 h-14 border-3 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" style={{ borderWidth: 3 }} />
-          <p className="text-gray-400 text-sm">Uydu görüntüsü yükleniyor...</p>
-        </div>
-      </div>
-    );
-  }
+  const closePopup = () => setPopup(null);
 
   return (
-    <div ref={container} className="w-full h-full relative overflow-hidden bg-black select-none">
-      {/* === LIVE SATELLITE IMAGERY === */}
-      <div 
-        className="absolute inset-0"
-        style={{
-          backgroundImage: `
-            linear-gradient(180deg, rgba(10,15,20,0.3) 0%, transparent 30%),
-            linear-gradient(0deg, rgba(0,0,0,0.4) 100%, transparent 70%),
-            url('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/15/24500/16500')
-          `,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
-      >
-        {/* Realistic terrain overlay */}
-        <div className="absolute inset-0" style={{
-          background: `
-            radial-gradient(circle at 30% 20%, rgba(30,50,30,0.15) 0%, transparent 40%),
-            radial-gradient(circle at 70% 60%, rgba(20,40,20,0.1) 0%, transparent 35%),
-            radial-gradient(ellipse at 50% 100%, rgba(0,0,0,0.3) 0%, transparent 50%)
-          `,
-        }} />
-        
-        {/* Roads overlay */}
-        <div className="absolute inset-0 opacity-40">
-          {/* Main roads */}
-          <div className="absolute left-[20%] top-0 bottom-0 w-1.5 bg-gray-500/50" />
-          <div className="absolute left-[45%] top-0 bottom-0 w-2 bg-gray-400/60" />
-          <div className="absolute left-[70%] top-0 bottom-0 w-1.5 bg-gray-500/50" />
-          <div className="absolute top-[25%] left-0 right-0 h-1.5 bg-gray-500/50" />
-          <div className="absolute top-[50%] left-0 right-0 h-2 bg-gray-400/60" />
-          <div className="absolute top-[75%] left-0 right-0 h-1.5 bg-gray-500/50" />
-        </div>
-        
-        {/* Buildings */}
-        <div className="absolute inset-0">
-          {[18, 28, 42, 58, 65, 78].map((x, i) => (
-            <div key={x} className="absolute bg-gray-800/40" style={{
-              left: `${x}%`, top: `${20 + (i % 3) * 22}%`, 
-              width: `${4 + (i % 2) * 2}%`, height: `${3 + (i % 2) * 2}%`
-            }} />
-          ))}
-          {[15, 35, 55, 75].map((x, i) => (
-            <div key={x} className="absolute bg-gray-700/35" style={{
-              left: `${x}%`, top: `${45 + (i % 2) * 20}%`, 
-              width: `${3 + (i % 2)}%`, height: `${4 + (i % 2)}%`
-            }} />
-          ))}
-        </div>
-        
-        {/* Parks */}
-        <div className="absolute inset-0">
-          <div className="absolute w-20 h-14 bg-green-800/25 rounded-xl" style={{ left: '8%', top: '55%' }} />
-          <div className="absolute w-16 h-12 bg-green-800/20 rounded-full" style={{ left: '52%', top: '18%' }} />
-          <div className="absolute w-14 h-10 bg-green-800/25 rounded-lg" style={{ left: '72%', top: '60%' }} />
-        </div>
-        
-        {/* Trees */}
-        <div className="absolute inset-0">
-          {[...Array(35)].map((_, i) => (
-            <div key={i} className="absolute w-1.5 h-1.5 bg-green-700/40 rounded-full" style={{ left: `${Math.random() * 95}%`, top: `${Math.random() * 95}%` }} />
-          ))}
-        </div>
-        
-        {/* Grid */}
-        <div className="absolute inset-0 opacity-8">
-          {[...Array(16)].map((_, i) => <div key={i} className="absolute w-full h-px bg-green-600" style={{ top: `${(i + 1) * 6.25}%` }} />)}
-          {[...Array(16)].map((_, i) => <div key={i} className="absolute h-full w-px bg-green-600" style={{ left: `${(i + 1) * 6.25}%` }} />)}
-        </div>
-      </div>
+    <div className="w-full h-full relative">
+      {/* Map container */}
+      <div ref={mapContainer} className="w-full h-full" />
       
-      {/* === PARCEL BOUNDARY === */}
-      {parcel && (
+      {/* Loading indicator */}
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
+          <div className="text-center">
+            <div className="w-12 h-12 border-3 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" style={{ borderWidth: 3 }} />
+            <p className="text-gray-400 text-sm">Harita yükleniyor...</p>
+          </div>
+        </div>
+      )}
+      
+      {/* Hover tooltip */}
+      {hoveredFeature && (hoveredFeature.properties as ParcelProperties) && (
+        <div className="absolute top-4 left-4 bg-black/85 px-4 py-3 rounded-lg border border-red-500/50 z-10">
+          <h3 className="text-red-500 font-bold">Parsel: {(hoveredFeature.properties as ParcelProperties).ParselNo}</h3>
+          <p className="text-gray-400 text-sm">{(hoveredFeature.properties as ParcelProperties).Mahalle}</p>
+        </div>
+      )}
+      
+      {/* Click popup */}
+      {popup && (
         <div 
-          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
+          className="absolute z-20 bg-black/95 border border-red-500 rounded-xl p-4 min-w-[280px] shadow-2xl"
+          style={{ 
+            left: Math.min(popup.x, typeof window !== 'undefined' ? window.innerWidth - 300 : 400), 
+            top: popup.y 
+          }}
         >
-          <div className="relative">
-            {/* Pulse */}
-            <div className="absolute -inset-4 border-2 border-red-500/40 rounded-lg animate-ping" />
-            {/* Glow */}
-            <div className="absolute -inset-2 border border-red-500/60 rounded-lg" style={{ boxShadow: '0 0 25px rgba(239,68,68,0.5)' }} />
-            {/* Main */}
-            <div 
-              className="w-36 h-28 border-2 border-red-500 rounded-lg relative"
-              style={{ 
-                boxShadow: '0 0 15px rgba(239,68,68,0.6), inset 0 0 15px rgba(239,68,68,0.1)',
-                background: 'rgba(239,68,68,0.05)'
-              }}
-            >
-              {/* Corners */}
-              {[[0, 0], [100, 0], [0, 100], [100, 100]].map((pos, idx) => (
-                <div key={idx} className="absolute w-3 h-3 bg-red-500" style={{ left: `${pos[0]}%`, top: `${pos[1]}%`, transform: 'translate(-50%, -50%)' }} />
-              ))}
-              {/* Center */}
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                <div className="w-6 h-6 bg-red-600 rounded-full flex items-center justify-center">
-                  <div className="w-3 h-3 bg-white rounded-full" />
-                </div>
+          <button onClick={closePopup} className="absolute top-2 right-2 text-gray-400 hover:text-white">✕</button>
+          
+          <div className="space-y-3">
+            <div className="border-b border-gray-700 pb-2">
+              <h3 className="text-red-500 font-bold text-lg">Parsel {popup.props.ParselNo}</h3>
+              <p className="text-gray-400 text-sm">{popup.props.Mahalle}, {popup.props.Ilce}</p>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <p className="text-gray-500">İl</p>
+                <p className="text-white">{popup.props.Il}</p>
               </div>
-              {/* Label */}
-              <div className="absolute -top-7 left-1/2 transform -translate-x-1/2 text-xs text-red-400 whitespace-nowrap" style={{ textShadow: '0 0 8px rgba(0,0,0,0.8)' }}>
-                📍 {parcel.center[1].toFixed(4)}°N, {parcel.center[0].toFixed(4)}°E
+              <div>
+                <p className="text-gray-500">İlçe</p>
+                <p className="text-white">{popup.props.Ilce}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Mahalle</p>
+                <p className="text-white">{popup.props.Mahalle}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Ada</p>
+                <p className="text-white">{popup.props.Ada}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Parsel No</p>
+                <p className="text-white">{popup.props.ParselNo}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Alan</p>
+                <p className="text-white">{popup.props.Alan} m²</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-gray-500">Mevkii</p>
+                <p className="text-white">{popup.props.Mevkii}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-gray-500">Nitelik</p>
+                <p className="text-green-400">{popup.props.Nitelik}</p>
               </div>
             </div>
           </div>
         </div>
       )}
       
-      {/* Overlay */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/50 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/50 to-transparent" />
-        <div className="absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.5)]" />
-      </div>
-      
-      {/* Top-Left HUD */}
-      <div className="absolute top-4 left-4">
-        <div className="bg-black/75 px-3 py-2 rounded-lg border border-red-600/30">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-            <span className="text-red-500 text-xs font-bold uppercase">Uydu Görünümü</span>
-          </div>
-          <div className="text-xs text-gray-400 mt-1">
-            <span>Zoom: </span><span className="text-green-400">{camera.zoom}</span>
-            <span className="ml-2">°: </span><span className="text-green-400">{camera.bearing}°</span>
-          </div>
-        </div>
-        {parcel && (
-          <div className="bg-black/75 px-3 py-2 rounded-lg mt-2 text-xs font-mono">
-            <div><span className="text-gray-500">LAT: </span><span className="text-green-400">{parcel.center[1].toFixed(6)}°N</span></div>
-            <div><span className="text-gray-500">LNG: </span><span className="text-green-400">{parcel.center[0].toFixed(6)}°E</span></div>
-          </div>
-        )}
-      </div>
-      
-      {/* Controls */}
-      <div className="absolute top-4 right-4 flex flex-col gap-2">
-        <button onClick={handleZoomIn} className="w-10 h-10 bg-red-600/90 hover:bg-red-500 rounded-lg flex items-center justify-center text-xl font-bold">+</button>
-        <button onClick={handleZoomOut} className="w-10 h-10 bg-red-600/90 hover:bg-red-500 rounded-lg flex items-center justify-center text-xl">−</button>
-        <button onClick={handleRotateCW} className="w-10 h-10 bg-red-600/90 hover:bg-red-500 rounded-lg flex items-center justify-center text-lg">↻</button>
-        <button onClick={handleRotateCCW} className="w-10 h-10 bg-red-600/90 hover:bg-red-500 rounded-lg flex items-center justify-center text-lg transform scale-x-[-1]">↻</button>
-        <button onClick={handleReset} className="w-10 h-10 bg-gray-700/90 hover:bg-gray-600 rounded-lg flex items-center justify-center text-xs">RST</button>
-      </div>
-      
       {/* Legend */}
-      <div className="absolute bottom-4 right-4 bg-black/75 px-3 py-2 rounded-lg text-xs">
-        <div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 border-2 border-red-500 rounded-sm" /><span className="text-gray-400">Parsel</span></div>
-        <div className="flex items-center gap-2 mb-1"><div className="w-3 h-3 bg-gray-500/40" /><span className="text-gray-400">Bina</span></div>
-        <div className="flex items-center gap-2"><div className="w-3 h-0.5 bg-gray-400/60" /><span className="text-gray-400">Yol</span></div>
-      </div>
-      
-      {!parcel && !loading && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-gray-500">Parsel verisi yükleyin</p>
+      <div className="absolute bottom-4 right-4 bg-black/85 px-3 py-2 rounded-lg text-xs z-10">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-4 h-1 bg-red-600" />
+          <span className="text-gray-400">Parsel Sınırı</span>
         </div>
-      )}
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 bg-red-500/20 border border-red-500/30" />
+          <span className="text-gray-400">Parsel Alanı</span>
+        </div>
+      </div>
     </div>
   );
 }
