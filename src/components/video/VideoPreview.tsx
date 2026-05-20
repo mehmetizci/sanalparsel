@@ -148,7 +148,7 @@ export function VideoPreview({
         layers: [{ id: 'satellite', type: 'raster', source: 'esri-satellite', minzoom: 0, maxzoom: 19 }]
       },
       center: centroid as [number, number],
-      zoom: 12,
+      zoom: 16,
       pitch: 45,
       bearing: 0,
       interactive: true
