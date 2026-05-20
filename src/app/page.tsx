@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import {
-  Video,
   Upload,
   Sparkles,
   Download,
@@ -16,6 +15,7 @@ import {
   Shield,
   Zap,
   Globe,
+  Drone,
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -79,13 +79,13 @@ export default function HomePage() {
     <div className="relative">
       {/* Hero Section */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent" />
-        <div className="absolute top-20 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
-        <div className="absolute top-40 right-1/4 w-64 h-64 bg-primary/5 rounded-full blur-3xl" />
+        <div className="absolute inset-0 bg-gradient-to-b from-red-500/5 via-transparent to-transparent" />
+        <div className="absolute top-20 left-1/4 w-96 h-96 bg-red-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-40 right-1/4 w-64 h-64 bg-red-500/5 rounded-full blur-3xl" />
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-32">
           <div className="text-center max-w-4xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass text-sm text-primary mb-8">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass text-sm text-red-500 mb-8">
               <Sparkles className="w-4 h-4" />
               AI Destekli Drone Video Platformu
             </div>
@@ -120,12 +120,12 @@ export default function HomePage() {
 
           {/* Demo preview */}
           <div className="mt-20 relative">
-            <div className="absolute -inset-4 bg-gradient-to-r from-primary/20 via-primary/10 to-primary/20 rounded-3xl blur-xl" />
+            <div className="absolute -inset-4 bg-gradient-to-r from-red-500/20 via-primary/10 to-primary/20 rounded-3xl blur-xl" />
             <div className="relative aspect-video max-w-5xl mx-auto rounded-2xl overflow-hidden border border-border bg-card">
               <div className="absolute inset-0 bg-gradient-to-br from-background via-card to-primary/5 flex items-center justify-center">
                 <div className="text-center">
-                  <div className="w-20 h-20 rounded-2xl bg-primary/20 flex items-center justify-center mx-auto mb-4">
-                    <Video className="w-10 h-10 text-primary" />
+                  <div className="w-20 h-20 rounded-2xl bg-red-500/20 flex items-center justify-center mx-auto mb-4">
+                    <Video className="w-10 h-10 text-red-500" />
                   </div>
                   <p className="text-lg font-semibold">Video Önizleme</p>
                   <p className="text-sm text-muted mt-1">
@@ -154,7 +154,7 @@ export default function HomePage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature) => (
               <Card key={feature.title} hover className="group">
-                <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-4 group-hover:bg-primary group-hover:text-white transition-all duration-300">
+                <div className="w-12 h-12 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center mb-4 group-hover:bg-red-500 group-hover:text-white transition-all duration-300">
                   {feature.icon}
                 </div>
                 <h3 className="text-lg font-semibold mb-2">{feature.title}</h3>
@@ -181,9 +181,9 @@ export default function HomePage() {
             {steps.map((item, i) => (
               <div key={item.step} className="relative">
                 {i < steps.length - 1 && (
-                  <div className="hidden lg:block absolute top-8 left-full w-full h-px bg-gradient-to-r from-primary/30 to-transparent" />
+                  <div className="hidden lg:block absolute top-8 left-full w-full h-px bg-gradient-to-r from-red-500/30 to-transparent" />
                 )}
-                <div className="text-5xl font-black text-primary/10 mb-4">
+                <div className="text-5xl font-black text-red-500/10 mb-4">
                   {item.step}
                 </div>
                 <h3 className="text-lg font-semibold mb-2">{item.title}</h3>
@@ -216,7 +216,7 @@ export default function HomePage() {
               },
             ].map((item) => (
               <Card key={item.title} className="text-center">
-                <div className="w-16 h-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 rounded-2xl bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-4">
                   {item.icon}
                 </div>
                 <h3 className="text-lg font-semibold mb-2">{item.title}</h3>
@@ -251,7 +251,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-primary flex items-center justify-center">
+              <div className="w-6 h-6 rounded bg-red-500 flex items-center justify-center">
                 <Video className="w-3 h-3 text-white" />
               </div>
               <span className="text-sm font-semibold">DroneView AI</span>

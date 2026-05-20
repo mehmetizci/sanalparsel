@@ -1,5 +1,5 @@
 {
-  "name": "drone-video-platform",
+  "name": "sanalparsel",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -34,6 +34,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vercel": "^41.0.0"
   }
 }

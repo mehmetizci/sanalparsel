@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/Button';
-import { LogOut, User, Video, Menu, X } from 'lucide-react';
+import { LogOut, User, Video, Menu, X, Drone } from 'lucide-react';
 import { useState } from 'react';
 import { APP_NAME } from '@/lib/constants';
 
@@ -16,8 +16,8 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Video className="w-4 h-4 text-white" />
+            <div className="w-8 h-8 rounded-lg bg-red-500 flex items-center justify-center">
+              <Drone className="w-4 h-4 text-white" />
             </div>
             <span className="text-lg font-bold gradient-text">{APP_NAME}</span>
           </Link>
@@ -39,8 +39,8 @@ export function Navbar() {
                   Yeni Proje
                 </Link>
                 <div className="flex items-center gap-3 ml-4 pl-4 border-l border-border">
-                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-                    <User className="w-4 h-4 text-primary" />
+                  <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center">
+                    <User className="w-4 h-4 text-red-500" />
                   </div>
                   <span className="text-sm text-foreground">
                     {user.email?.split('@')[0]}
@@ -122,7 +122,7 @@ export function Navbar() {
               </Link>
               <Link
                 href="/auth/register"
-                className="block py-2 text-sm text-primary hover:text-primary-hover"
+                className="block py-2 text-sm text-red-500 hover:text-red-400"
                 onClick={() => setMenuOpen(false)}
               >
                 Kayıt Ol

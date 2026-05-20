@@ -70,3 +70,34 @@ export interface UserCredits {
   used: number;
   remaining: number;
 }
+
+export interface VideoBrandingOptions {
+  showProfilePhoto: boolean;
+  showFullName: boolean;
+  showPhoneNumber: boolean;
+  showCompanyName: boolean;
+  showOfficeAddress: boolean;
+  showAuthorizationCertificate: boolean;
+  showLogo: boolean;
+}
+
+export const defaultBrandingOptions: VideoBrandingOptions = {
+  showProfilePhoto: true,
+  showFullName: true,
+  showPhoneNumber: true,
+  showCompanyName: false,
+  showOfficeAddress: false,
+  showAuthorizationCertificate: false,
+  showLogo: false,
+};
+
+export interface RenderJob {
+  id: string;
+  projectId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  videoUrl?: string;
+  error?: string;
+  startedAt: string;
+  completedAt?: string;
+}
