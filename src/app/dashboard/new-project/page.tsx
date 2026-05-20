@@ -12,8 +12,10 @@ import { NarrationPanel } from '@/components/video/NarrationPanel';
 import { RenderPanel } from '@/components/video/RenderPanel';
 import { Upload, MapPin, Settings, Mic, Play, ArrowLeft, ArrowRight, FileJson, X } from 'lucide-react';
 import type { FeatureCollection } from 'geojson';
+import { VideoPreview } from '@/components/video/VideoPreview';
 
 type Step = 'upload' | 'map' | 'branding' | 'drone' | 'narration' | 'render';
+
 
 const steps: { key: Step; label: string; icon: React.ElementType }[] = [
   { key: 'upload', label: 'Parsel Yükle', icon: Upload },
@@ -310,13 +312,22 @@ export default function NewProjectPage() {
 
           {/* Render Step */}
           {currentStep === 'render' && (
-            <Card>
-              <h2 className="text-xl font-semibold mb-4">Video Oluştur</h2>
-              <p className="text-sm text-muted mb-6">
-                Videoyu oluşturmaya hazır mısınız?
-              </p>
-              <RenderPanel />
-            </Card>
+            <div className="space-y-4">
+              <VideoPreview 
+                parcelName={parcelName}
+                parcelProps={{
+                  ParselNo: '467',
+                  Mahalle: 'Hacıveli',
+                  Ilce: 'Foça',
+                  Il: 'İzmir',
+                  Ada: '506130',
+                  Alan: '8.656,88',
+                  Mevkii: 'Camilimağara',
+                  Nitelik: 'Kule Ve Beş Zeytinli Tarla'
+                }}
+                settings={{ duration: 30, altitude: 150 }}
+              />
+            </div>
           )}
         </div>
 
