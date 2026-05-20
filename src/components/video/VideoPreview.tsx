@@ -69,6 +69,7 @@ const ENV_PLACES = [
 
 export function VideoPreview({ 
   parcelName, 
+  geoJson,
   parcelProps, 
   branding = {
     showProfilePhoto: true,
@@ -136,30 +137,40 @@ export function VideoPreview({
     map.current.on('load', () => {
       setMapLoaded(true);
       
+      // Use provided geoJson or sample
+      const parcelData = geoJson || {
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [26.85749, 38.66965], [26.85725, 38.66916], [26.85733, 38.66911],
+              [26.85739, 38.66905], [26.85753, 38.66895], [26.85764, 38.66889],
+              [26.85778, 38.66882], [26.85789, 38.66878], [26.85793, 38.66887],
+              [26.85799, 38.66897], [26.85807, 38.66911], [26.85829, 38.66955],
+              [26.85845, 38.66951], [26.85846, 38.66954], [26.85847, 38.66956],
+              [26.85851, 38.66962], [26.85862, 38.66982], [26.85843, 38.66987],
+              [26.85804, 38.66999], [26.85785, 38.67003], [26.85783, 38.66996],
+              [26.85781, 38.66991], [26.85776, 38.66988], [26.85773, 38.66986],
+              [26.85757, 38.6699], [26.85749, 38.66965]
+            ]]
+          },
+          properties: {
+            ParselNo: '467',
+            Mahalle: 'Hacıveli',
+            Ilce: 'Foça',
+            Il: 'İzmir',
+            Ada: '506130',
+            Alan: '8.656,88'
+          }
+        }]
+      };
+      
       // Add parcel source
       map.current?.addSource('parcel', {
         type: 'geojson',
-        data: {
-          type: 'FeatureCollection',
-          features: [{
-            type: 'Feature',
-            geometry: {
-              type: 'Polygon',
-              coordinates: [[
-                [26.85749, 38.66965], [26.85725, 38.66916], [26.85733, 38.66911],
-                [26.85739, 38.66905], [26.85753, 38.66895], [26.85764, 38.66889],
-                [26.85778, 38.66882], [26.85789, 38.66878], [26.85793, 38.66887],
-                [26.85799, 38.66897], [26.85807, 38.66911], [26.85829, 38.66955],
-                [26.85845, 38.66951], [26.85846, 38.66954], [26.85847, 38.66956],
-                [26.85851, 38.66962], [26.85862, 38.66982], [26.85843, 38.66987],
-                [26.85804, 38.66999], [26.85785, 38.67003], [26.85783, 38.66996],
-                [26.85781, 38.66991], [26.85776, 38.66988], [26.85773, 38.66986],
-                [26.85757, 38.6699], [26.85749, 38.66965]
-              ]]
-            },
-            properties: {}
-          }]
-        }
+        data: parcelData
       });
 
       // Fill layer
@@ -185,11 +196,43 @@ export function VideoPreview({
         }
       });
 
-      // Fit bounds
-      map.current?.fitBounds([
-        [26.857, 38.668],
-        [26.8588, 38.6705]
-      ], { padding: 80, maxZoom: 16, duration: 1500 });
+      // Fit bounds based on geoJson
+      const bounds = new maplibregl.LngLatBounds();
+      const features = parcelData.features || [];
+      for (const feature of features) {
+        if (!feature.geometry) continue;
+        const geom = feature.geometry;
+        if (geom.type === 'Polygon' && geom.coordinates?.[0]) {
+          for (const coord of geom.coordinates[0]) {
+            bounds.extend(coord as [number, number]);
+          }
+        }
+      }
+      
+      map.current?.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 1500 });
+      
+      // Click event - show parcel info
+      map.current?.on('click', 'parcel-fill', (e) => {
+        if (!e.features || !e.features[0]) return;
+        const props = e.features[0].properties;
+        alert(
+          `Parsel Bilgileri:\n` +
+          `İl: ${props?.Il || '-'}\n` +
+          `İlçe: ${props?.Ilce || '-'}\n` +
+          `Mahalle: ${props?.Mahalle || '-'}\n` +
+          `Ada: ${props?.Ada || '-'}\n` +
+          `Parsel No: ${props?.ParselNo || '-'}\n` +
+          `Alan: ${props?.Alan || '-'} m²`
+        );
+      });
+      
+      // Cursor pointer on hover
+      map.current?.on('mouseenter', 'parcel-fill', () => {
+        if (map.current) map.current.getCanvas().style.cursor = 'pointer';
+      });
+      map.current?.on('mouseleave', 'parcel-fill', () => {
+        if (map.current) map.current.getCanvas().style.cursor = '';
+      });
     });
 
     return () => {
@@ -198,7 +241,7 @@ export function VideoPreview({
         map.current = null;
       }
     };
-  }, []);
+  }, [geoJson]);
 
   // Animation loop
   useEffect(() => {

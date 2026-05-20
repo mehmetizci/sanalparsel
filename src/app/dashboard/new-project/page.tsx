@@ -313,8 +313,9 @@ export default function NewProjectPage() {
           {/* Render Step */}
           {currentStep === 'render' && (
             <div className="space-y-4">
-              <VideoPreview 
+              <VideoPreview
                 parcelName={parcelName}
+                geoJson={geoJson}
                 parcelProps={{
                   ParselNo: '467',
                   Mahalle: 'Hacıveli',
