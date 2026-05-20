@@ -1,12 +1,19 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { X, Play, Pause, Volume2, VolumeX, Maximize2, Download, Settings, Share2 } from 'lucide-react';
+import { 
+  Play, Pause, Volume2, VolumeX, Maximize2, Download, Share2, 
+  MapPin, Building2, GraduationCap, ShoppingCart, Palmtree, Store, 
+  User, Phone, Award, ChevronRight, ChevronLeft
+} from 'lucide-react';
 
 interface VideoPreviewProps {
   parcelName?: string;
+  geoJson?: any;
   parcelProps?: {
     Il?: string;
     Ilce?: string;
@@ -26,180 +33,390 @@ interface VideoPreviewProps {
     showAuthorizationCertificate: boolean;
     showLogo: boolean;
   };
+  consultant?: {
+    fullName?: string;
+    phone?: string;
+    companyName?: string;
+    officeAddress?: string;
+    certificateNumber?: string;
+    profilePhotoUrl?: string;
+    companyLogoUrl?: string;
+  };
   settings?: {
     duration: 30 | 45 | 60;
     altitude: number;
+    cameraAngle?: 'orbit' | 'topdown' | 'flyover';
   };
 }
 
-const NearbyPlacesSample = [
-  { name: 'Foça Devlet Hastanesi', type: 'hospital', distance: 4.2, unit: 'km' },
-  { name: 'Hacıveli İlkokulu', type: 'school', distance: 1.8, unit: 'km' },
-  { name: 'A101 Market', type: 'market', distance: 0.9, unit: 'km' },
-  { name: 'İzmir-Çeşme Otoyolu', type: 'highway', distance: 5.5, unit: 'km' },
-  { name: 'Foça Plajı', type: 'beach', distance: 3.2, unit: 'km' },
+// Sample drone path for animation
+const DRONE_PATH = [
+  { lng: 26.857, lat: 38.669, alt: 500, pitch: 45, bearing: 0 },
+  { lng: 26.857, lat: 38.6695, alt: 400, pitch: 50, bearing: 15 },
+  { lng: 26.8575, lat: 38.6695, alt: 300, pitch: 55, bearing: 30 },
+  { lng: 26.8575, lat: 38.669, alt: 200, pitch: 60, bearing: 45 },
+  { lng: 26.857, lat: 38.669, alt: 150, pitch: 50, bearing: 60 },
 ];
 
-export function VideoPreview({ parcelName, parcelProps, branding, settings }: VideoPreviewProps) {
+const ENV_PLACES = [
+  { name: 'Foça Devlet Hastanesi', type: 'hospital', distance: 4.2, icon: Building2, color: 'text-red-500' },
+  { name: 'Hacıveli İlkokulu', type: 'school', distance: 1.8, icon: GraduationCap, color: 'text-blue-500' },
+  { name: 'A101 Market', type: 'market', distance: 0.9, icon: ShoppingCart, color: 'text-green-500' },
+  { name: 'İzmir-Çeşme Otoyolu', type: 'highway', distance: 5.5, icon: MapPin, color: 'text-yellow-500' },
+  { name: 'Foça Plajı', type: 'beach', distance: 3.2, icon: Palmtree, color: 'text-cyan-500' },
+  { name: 'Foça AVM', type: 'mall', distance: 6.1, icon: Store, color: 'text-purple-500' },
+];
+
+export function VideoPreview({ 
+  parcelName, 
+  parcelProps, 
+  branding = {
+    showProfilePhoto: true,
+    showFullName: true, 
+    showPhoneNumber: true,
+    showCompanyName: false,
+    showOfficeAddress: false,
+    showAuthorizationCertificate: false,
+    showLogo: false
+  },
+  consultant = {
+    fullName: 'Ahmet Yılmaz',
+    phone: '+90 532 123 45 67',
+    companyName: 'XYZ Gayrimenkul'
+  },
+  settings = { duration: 30, altitude: 150 }
+}: VideoPreviewProps) {
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<maplibregl.Map | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  
-  const duration = settings?.duration || 30;
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const animationRef = useRef<number>(0);
+  const [showEnvPlaces, setShowEnvPlaces] = useState(false);
 
-  // Simulate playback
+  const duration = settings.duration || 30;
+  const progress = (currentTime / duration) * 100;
+
+  // Initialize map for video
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setCurrentTime((prev) => {
-          if (prev >= duration) {
-            setIsPlaying(false);
-            return duration;
-          }
-          return prev + 0.1;
-        });
-      }, 100);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, duration]);
+    if (!mapContainer.current || map.current) return;
 
-  const togglePlay = () => setIsPlaying(!isPlaying);
+    map.current = new maplibregl.Map({
+      container: mapContainer.current,
+      style: {
+        version: 8,
+        sources: {
+          'esri-satellite': {
+            type: 'raster',
+            tiles: [
+              'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+            ],
+            tileSize: 256,
+            attribution: '© Esri'
+          }
+        },
+        layers: [
+          {
+            id: 'satellite',
+            type: 'raster',
+            source: 'esri-satellite',
+            minzoom: 0,
+            maxzoom: 19
+          }
+        ]
+      },
+      center: [26.857, 38.669],
+      zoom: 15,
+      pitch: 45,
+      bearing: 0,
+      interactive: false
+    });
+
+    map.current.on('load', () => {
+      setMapLoaded(true);
+      
+      // Add parcel source
+      map.current?.addSource('parcel', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[
+                [26.85749, 38.66965], [26.85725, 38.66916], [26.85733, 38.66911],
+                [26.85739, 38.66905], [26.85753, 38.66895], [26.85764, 38.66889],
+                [26.85778, 38.66882], [26.85789, 38.66878], [26.85793, 38.66887],
+                [26.85799, 38.66897], [26.85807, 38.66911], [26.85829, 38.66955],
+                [26.85845, 38.66951], [26.85846, 38.66954], [26.85847, 38.66956],
+                [26.85851, 38.66962], [26.85862, 38.66982], [26.85843, 38.66987],
+                [26.85804, 38.66999], [26.85785, 38.67003], [26.85783, 38.66996],
+                [26.85781, 38.66991], [26.85776, 38.66988], [26.85773, 38.66986],
+                [26.85757, 38.6699], [26.85749, 38.66965]
+              ]]
+            },
+            properties: {}
+          }]
+        }
+      });
+
+      // Fill layer
+      map.current?.addLayer({
+        id: 'parcel-fill',
+        type: 'fill',
+        source: 'parcel',
+        paint: {
+          'fill-color': 'rgba(255, 0, 0, 0.08)',
+          'fill-outline-color': 'rgba(255, 0, 0, 0.3)'
+        }
+      });
+
+      // Line layer
+      map.current?.addLayer({
+        id: 'parcel-line',
+        type: 'line',
+        source: 'parcel',
+        paint: {
+          'line-color': '#FF0000',
+          'line-width': 3,
+          'line-opacity': 0.9
+        }
+      });
+
+      // Fit bounds
+      map.current?.fitBounds([
+        [26.857, 38.668],
+        [26.8588, 38.6705]
+      ], { padding: 80, maxZoom: 16, duration: 1500 });
+    });
+
+    return () => {
+      if (map.current) {
+        map.current.remove();
+        map.current = null;
+      }
+    };
+  }, []);
+
+  // Animation loop
+  useEffect(() => {
+    if (!isPlaying || !mapLoaded) return;
+
+    let frame = 0;
+    const animate = () => {
+      frame++;
+      const frameProgress = (frame % 300) / 300;
+      
+      // Update time
+      setCurrentTime(frameProgress * duration);
+      
+      // Animate camera
+      const pathIndex = Math.floor(frameProgress * DRONE_PATH.length);
+      const pathPoint = DRONE_PATH[Math.min(pathIndex, DRONE_PATH.length - 1)];
+      
+      if (map.current) {
+        map.current.setPaintProperty('parcel-line', 'line-opacity', 0.5 + Math.sin(frameProgress * 10) * 0.4);
+      }
+      
+      // Show env places after 2 seconds
+      if (frameProgress > 0.15) setShowEnvPlaces(true);
+
+      if (isPlaying) {
+        animationRef.current = requestAnimationFrame(animate);
+      }
+    };
+    
+    animationRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
+  }, [isPlaying, mapLoaded, duration]);
+
+  const togglePlay = () => {
+    setIsPlaying(!isPlaying);
+    if (!isPlaying) setCurrentTime(0);
+  };
+
   const toggleMute = () => setIsMuted(!isMuted);
+
+  const seekTo = (seconds: number) => {
+    setCurrentTime(seconds);
+    map.current?.flyTo({
+      center: [26.857, 38.669 + (seconds / duration) * 0.0005],
+      zoom: 15 + (seconds / duration) * 0.5,
+      pitch: 45 + (seconds / duration) * 15,
+      duration: 500
+    });
+  };
 
   return (
     <div className="space-y-4">
       <Card className="p-0 overflow-hidden">
-        {/* Video Preview Area - 9:16 aspect ratio */}
+        {/* Video Preview - 9:16 ratio */}
         <div 
-          className="relative w-full aspect-[9/16] bg-black"
-          style={{ maxHeight: '70vh' }}
+          className="relative w-full aspect-[9/16] bg-black overflow-hidden"
+          style={{ maxHeight: '75vh' }}
         >
-          {/* Simulated drone footage */}
-          <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
-            {/* Background */}
-            <div className="absolute inset-0" style={{
-              background: `
-                radial-gradient(ellipse 140% 90% at 50% 110%, #1a2f1a 0%, transparent 50%),
-                radial-gradient(ellipse 80% 60% at 30% 70%, #152515 0%, transparent 40%),
-                linear-gradient(180deg, #0a150a 0%, #080d08 100%)
-              `
-            }} />
-            
-            {/* Roads */}
-            <div className="absolute inset-0 opacity-30">
-              <div className="absolute left-[20%] top-0 bottom-0 w-1 bg-gray-500/50" />
-              <div className="absolute left-[50%] top-0 bottom-0 w-1.5 bg-gray-400/60" />
-              <div className="absolute left-[80%] top-0 bottom-0 w-1 bg-gray-500/50" />
-              <div className="absolute top-[30%] left-0 right-0 h-1 bg-gray-500/50" />
-              <div className="absolute top-[60%] left-0 right-0 h-1 bg-gray-500/50" />
-            </div>
-            
-            {/* Buildings */}
-            <div className="absolute inset-0">
-              {[18, 28, 42, 58, 68, 78].map((x, i) => (
-                <div key={x} className="absolute bg-gray-700/30" style={{
-                  left: `${x}%`, top: `${20 + (i % 3) * 20}%`, 
-                  width: `${3 + (i % 2) * 2}%`, height: `${3 + (i % 2) * 2}%`
-                }} />
-              ))}
-            </div>
-            
-            {/* Parcel boundary - animated */}
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <div className="relative">
-                <div className="absolute -inset-3 border border-red-500/30 rounded-lg animate-ping" style={{ animationDuration: '2s' }} />
-                <div className="w-28 h-20 border-2 border-red-500 rounded-lg" style={{
-                  boxShadow: '0 0 20px rgba(239,68,68,0.5)'
-                }} />
-                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                  <div className="w-4 h-4 bg-red-500 rounded-full" />
-                </div>
+          {/* MapLibre Map */}
+          <div ref={mapContainer} className="absolute inset-0" />
+          
+          {/* Gradient overlays */}
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/70 to-transparent" />
+            <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/80 to-transparent" />
+            <div className="absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.6)]" />
+          </div>
+
+          {/* === TOP-LEFT: Drone Info === */}
+          <div className="absolute top-4 left-4 z-10">
+            <div className="glass-strong px-3 py-2 rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                <span className="text-red-500 font-bold text-xs uppercase tracking-wider">Drone View</span>
               </div>
-            </div>
-            
-            {/* Overlays */}
-            <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.5)]" />
-            <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-black/60 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/70 to-transparent" />
-            
-            {/* Top-left overlay - Drone info */}
-            <div className="absolute top-4 left-4">
-              <div className="bg-black/70 px-3 py-2 rounded-lg border border-red-500/30">
-                <div className="text-xs">
-                  <span className="text-red-500">● </span>
-                  <span className="text-green-500 font-mono">DRONE VIEW</span>
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  <span>Alt: {settings?.altitude || 150}m</span>
-                </div>
+              <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                <span>Alt: <span className="text-green-500">{settings.altitude || 150}m</span></span>
+                <span>•</span>
+                <span>Pitch: <span className="text-green-500">45°</span></span>
               </div>
-            </div>
-            
-            {/* Top-right - Duration */}
-            <div className="absolute top-4 right-4">
-              <div className="bg-black/70 px-3 py-2 rounded-lg">
-                <span className="text-xs font-mono text-green-500">
-                  {Math.floor(currentTime / 60)}:{(Math.floor(currentTime) % 60).toString().padStart(2, '0')}
-                </span>
-                <span className="text-gray-500 text-xs"> / {duration}s</span>
-              </div>
-            </div>
-            
-            {/* Bottom-left - Parcel info */}
-            <div className="absolute bottom-20 left-4">
-              <Card className="glass-strong p-2 max-w-[180px]">
-                <p className="text-green-400 text-xs font-medium">{parcelName || 'Parsel ' + (parcelProps?.ParselNo || '467')}</p>
-                <p className="text-gray-400 text-xs">
-                  {parcelProps?.Mahalle || 'Hacıveli'}, {parcelProps?.Ilce || 'Foça'}
-                </p>
-                <p className="text-gray-500 text-xs mt-1">
-                  {parcelProps?.Alan || '8.656,88'} m²
-                </p>
-              </Card>
-            </div>
-            
-            {/* Bottom-right - Nearby places */}
-            <div className="absolute bottom-20 right-4">
-              <Card className="glass-strong p-2 max-w-[160px]">
-                <p className="text-red-500 text-xs mb-2">Yakın Çevre</p>
-                {NearbyPlacesSample.slice(0, 3).map((place, i) => (
-                  <div key={i} className="flex justify-between text-xs">
-                    <span className="text-gray-400 truncate">{place.name}</span>
-                    <span className="text-green-500">{place.distance}km</span>
-                  </div>
-                ))}
-              </Card>
             </div>
           </div>
-          
-          {/* Video controls */}
-          <div className="absolute bottom-4 left-0 right-0 flex items-center justify-center gap-4 px-4">
-            <button onClick={toggleMute} className="p-2 rounded-full bg-black/50 hover:bg-black/70">
-              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </button>
-            <button onClick={togglePlay} className="p-3 rounded-full bg-red-600 hover:bg-red-500">
-              {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-            </button>
-            <button className="p-2 rounded-full bg-black/50 hover:bg-black/70">
-              <Maximize2 className="w-4 h-4" />
-            </button>
+
+          {/* === TOP-RIGHT: Timer === */}
+          <div className="absolute top-4 right-4 z-10">
+            <div className="glass-strong px-3 py-2 rounded-lg">
+              <span className="text-green-500 font-mono text-sm">
+                {String(Math.floor(currentTime / 60)).padStart(2, '0')}:
+                {String(Math.floor(currentTime % 60)).padStart(2, '0')}
+              </span>
+              <span className="text-gray-500 text-xs"> / {duration}s</span>
+            </div>
+          </div>
+
+          {/* === BOTTOM-LEFT: Consultant Branding === */}
+          {(branding.showProfilePhoto || branding.showFullName || branding.showPhoneNumber || branding.showCompanyName) && (
+            <div className="absolute bottom-24 left-4 z-10">
+              <div className="glass-strong p-3 rounded-lg flex items-center gap-3 max-w-[180px]">
+                {branding.showProfilePhoto && consultant.profilePhotoUrl && (
+                  <img src={consultant.profilePhotoUrl} alt="Profile" className="w-10 h-10 rounded-full object-cover" />
+                )}
+                {!consultant.profilePhotoUrl && branding.showProfilePhoto && (
+                  <div className="w-10 h-10 rounded-full bg-red-600/30 flex items-center justify-center">
+                    <User className="w-5 h-5 text-red-500" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  {branding.showFullName && (
+                    <p className="text-white font-medium text-sm truncate">{consultant.fullName}</p>
+                  )}
+                  {branding.showPhoneNumber && (
+                    <p className="text-gray-400 text-xs">{consultant.phone}</p>
+                  )}
+                  {branding.showCompanyName && (
+                    <p className="text-gray-400 text-xs truncate">{consultant.companyName}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* === BOTTOM-RIGHT: Environment Analysis === */}
+          <div className="absolute bottom-24 right-4 z-10">
+            <div className="glass-strong p-3 rounded-lg max-w-[160px]">
+              <p className="text-red-500 text-xs font-medium mb-2">Yakın Çevre</p>
+              <div className="space-y-1.5">
+                {ENV_PLACES.slice(0, 5).map((place, i) => {
+                  const Icon = place.icon;
+                  return (
+                    <div 
+                      key={i} 
+                      className="flex items-center gap-2 opacity-0 animate-slide-up"
+                      style={{ animationDelay: `${0.2 + i * 0.1}s`, animationFillMode: 'forwards' }}
+                    >
+                      <Icon className={`w-3 h-3 ${place.color}`} />
+                      <span className="text-gray-300 text-xs truncate flex-1">{place.name}</span>
+                      <span className="text-green-500 text-xs">{place.distance}km</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* === PARCEL INFO === */}
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10">
+            <div className="glass-strong px-4 py-3 rounded-lg text-center">
+              <p className="text-green-500 font-bold text-lg">{parcelProps?.ParselNo || '467'}</p>
+              <p className="text-gray-300 text-sm">{parcelProps?.Mahalle || 'Hacıveli'}</p>
+              <p className="text-gray-400 text-xs mt-1">{parcelProps?.Alan || '8.656,88'} m²</p>
+            </div>
+          </div>
+
+          {/* === TIMELINE === */}
+          <div className="absolute bottom-4 left-4 right-4 z-10">
+            <div className="glass-strong px-2 py-2 rounded-lg">
+              {/* Progress bar */}
+              <div 
+                className="h-1 bg-gray-700 rounded-full overflow-hidden mb-2 cursor-pointer"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const percent = (e.clientX - rect.left) / rect.width;
+                  seekTo(percent * duration);
+                }}
+              >
+                <div 
+                  className="h-full bg-red-500 transition-all duration-100"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              
+              {/* Controls */}
+              <div className="flex items-center justify-between">
+                <button onClick={toggleMute} className="p-1.5 rounded-lg hover:bg-white/10">
+                  {isMuted ? <VolumeX className="w-4 h-4 text-gray-400" /> : <Volume2 className="w-4 h-4 text-gray-400" />}
+                </button>
+                
+                <div className="flex items-center gap-2">
+                  <button onClick={() => seekTo(Math.max(0, currentTime - 5))} className="p-1.5 rounded-lg hover:bg-white/10">
+                    <ChevronLeft className="w-4 h-4 text-gray-400" />
+                  </button>
+                  
+                  <button onClick={togglePlay} className="p-2.5 rounded-full bg-red-600 hover:bg-red-500">
+                    {isPlaying ? (
+                      <Pause className="w-5 h-5 text-white" />
+                    ) : (
+                      <Play className="w-5 h-5 text-white ml-0.5" />
+                    )}
+                  </button>
+                  
+                  <button onClick={() => seekTo(Math.min(duration, currentTime + 5))} className="p-1.5 rounded-lg hover:bg-white/10">
+                    <ChevronRight className="w-4 h-4 text-gray-400" />
+                  </button>
+                </div>
+                
+                <button className="p-1.5 rounded-lg hover:bg-white/10">
+                  <Maximize2 className="w-4 h-4 text-gray-400" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </Card>
-      
-      {/* Action buttons */}
+
+      {/* Action Buttons */}
       <div className="grid grid-cols-3 gap-3">
-        <Button variant="secondary" onClick={() => {}}>
+        <Button variant="secondary" onClick={() => setIsPlaying(!isPlaying)}>
           <Play className="w-4 h-4 mr-2" />
-          Önizle
+          {isPlaying ? 'Durdur' : 'Önizle'}
         </Button>
-        <Button onClick={() => {}}>
+        <Button onClick={() => alert('İndirme özelliği yakında!')}>
           <Download className="w-4 h-4 mr-2" />
           İndir
         </Button>
-        <Button variant="ghost" onClick={() => {}}>
+        <Button variant="ghost" onClick={() => alert('Paylaşım özelliği yakında!')}>
           <Share2 className="w-4 h-4 mr-2" />
           Paylaş
         </Button>
