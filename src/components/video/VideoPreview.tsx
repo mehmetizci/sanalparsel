@@ -151,7 +151,7 @@ export function VideoPreview({
       zoom: 12,
       pitch: 45,
       bearing: 0,
-      interactive: false
+      interactive: true
     });
 
     map.current.on('load', () => {
@@ -315,15 +315,15 @@ export function VideoPreview({
           {/* Map */}
           <div ref={mapContainer} className="absolute inset-0" />
           
-          {/* Overlays */}
-          <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/70 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/80 to-transparent" />
-            <div className="absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.6)]" />
+          {/* Overlays - allow pointer events on map */}
+          <div className="absolute inset-0">
+            <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none" />
+            <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+            <div className="absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.6)] pointer-events-none" />
           </div>
 
           {/* Drone HUD - Top Left */}
-          <div className="absolute top-4 left-4 z-10">
+          <div className="absolute top-4 left-4 z-10 pointer-events-none">
             <div className="glass-strong px-3 py-2 rounded-lg">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
