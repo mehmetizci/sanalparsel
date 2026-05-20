@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -10,7 +10,8 @@ import { BrandingTogglePanel } from '@/components/video/BrandingTogglePanel';
 import { DroneSettingsPanel } from '@/components/video/DroneSettingsPanel';
 import { NarrationPanel } from '@/components/video/NarrationPanel';
 import { RenderPanel } from '@/components/video/RenderPanel';
-import { Upload, MapPin, Settings, Mic, Play, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Upload, MapPin, Settings, Mic, Play, ArrowLeft, ArrowRight, FileJson, X } from 'lucide-react';
+import type { FeatureCollection } from 'geojson';
 
 type Step = 'upload' | 'map' | 'branding' | 'drone' | 'narration' | 'render';
 
@@ -26,10 +27,109 @@ const steps: { key: Step; label: string; icon: React.ElementType }[] = [
 export default function NewProjectPage() {
   const [currentStep, setCurrentStep] = useState<Step>('upload');
   const [parcelName, setParcelName] = useState('');
-  const [geoJson, setGeoJson] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [geoJson, setGeoJson] = useState<FeatureCollection | null>(null);
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+  const [fileName, setFileName] = useState('');
+  const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   const stepIndex = steps.findIndex((s) => s.key === currentStep);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name);
+    setError('');
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        let parsed: FeatureCollection;
+
+        if (file.name.endsWith('.json') || file.name.endsWith('.geojson')) {
+          parsed = JSON.parse(text);
+        } else if (file.name.endsWith('.kml')) {
+          // Basic KML parsing - extract coordinates
+          const coordMatch = text.match(/<coordinates>([\s\S]*?)<\/coordinates>/);
+          if (coordMatch) {
+            const coords = coordMatch[1].trim().split(/\s+/).map((c) => {
+              const [lng, lat] = c.split(',').map(Number);
+              return { type: 'Point' as const, coordinates: [lng, lat] };
+            });
+            parsed = {
+              type: 'FeatureCollection' as const,
+              features: coords.map((coord) => ({
+                type: 'Feature' as const,
+                geometry: coord,
+                properties: {},
+              })),
+            };
+          } else {
+            throw new Error('Invalid KML format');
+          }
+        } else {
+          setError('Sadece GeoJSON, JSON veya KML dosyaları desteklenir');
+          return;
+        }
+
+        if (parsed.type === 'FeatureCollection' && parsed.features) {
+          setGeoJson(parsed);
+          if (!parcelName) {
+            setParcelName(file.name.replace(/\.(json|geojson|kml)$/i, ''));
+          }
+        } else {
+          setError('Geçersiz dosya formatı');
+        }
+      } catch {
+        setError('Dosya okunamadı. Lütfen geçerli bir GeoJSON dosyası yükleyin.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleCoordsSubmit = () => {
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      setError('Geçerli koordinat girin');
+      return;
+    }
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setError('Koordinat aralıkları dışında (-90,90) / (-180,180)');
+      return;
+    }
+
+    const parsed: FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [lng, lat],
+          },
+          properties: { name: parcelName || 'Parsel' },
+        },
+      ],
+    };
+
+    setGeoJson(parsed);
+    setError('');
+  };
+
+  const clearFile = () => {
+    setGeoJson(null);
+    setFileName('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   const goNext = () => {
     const nextIdx = stepIndex + 1;
@@ -95,18 +195,70 @@ export default function NewProjectPage() {
                   placeholder="Örn: İzmir Urla - Deniz Manzaralı Arsa"
                 />
 
-                <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
-                  <Upload className="w-8 h-8 text-muted mx-auto mb-4" />
-                  <p className="text-sm mb-2">Dosya yüklemek için tıklayın</p>
-                  <p className="text-xs text-muted">GeoJSON, KML desteklenir</p>
+                {/* File Upload */}
+                <div>
+                  <label className="block text-sm font-medium text-muted mb-1.5">Dosya Yükle</label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json,.geojson,.kml"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-red-500/50 hover:bg-card-hover transition-all"
+                  >
+                    {fileName ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <FileJson className="w-8 h-8 text-green-500" />
+                        <p className="text-sm mb-0">{fileName}</p>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearFile();
+                          }}
+                          className="p-1 hover:bg-card rounded"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="w-8 h-8 text-muted mx-auto mb-4" />
+                        <p className="text-sm mb-2">Dosya yüklemek için tıklayın</p>
+                        <p className="text-xs text-muted">GeoJSON, KML desteklenir</p>
+                      </>
+                    )}
+                  </div>
                 </div>
+
+                {error && (
+                  <p className="text-sm text-red-500">{error}</p>
+                )}
 
                 <div className="text-center text-sm text-muted">veya</div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <Input label="Enlem" placeholder="38.4237" />
-                  <Input label="Boylam" placeholder="27.1428" />
+                  <Input
+                    label="Enlem"
+                    value={latitude}
+                    onChange={(e) => setLatitude(e.target.value)}
+                    placeholder="38.4237"
+                  />
+                  <Input
+                    label="Boylam"
+                    value={longitude}
+                    onChange={(e) => setLongitude(e.target.value)}
+                    placeholder="27.1428"
+                  />
                 </div>
+
+                {(latitude && longitude) && (
+                  <Button onClick={handleCoordsSubmit} variant="secondary" className="w-full">
+                    Koordinatı Kullan
+                  </Button>
+                )}
               </div>
             </Card>
           )}
