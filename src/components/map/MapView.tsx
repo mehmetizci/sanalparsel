@@ -1,252 +1,171 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Feature, FeatureCollection, Point, Polygon } from 'geojson';
-import { Loader2, ZoomIn, ZoomOut, RotateCcw, Maximize2, Navigation } from 'lucide-react';
 
 interface MapViewProps {
   geoJson: FeatureCollection | Feature | null;
   onParcelSelect?: (feature: Feature) => void;
-  interactive?: boolean;
 }
 
-interface CameraState {
-  zoom: number;
-  rotation: number;
-  pitch: number;
-  x: number;
-  y: number;
-}
-
-interface ParcelGeometry {
+interface ParcelData {
   center: [number, number];
-  bounds: [[number, number], [number, number]];
 }
 
-function extractParcelGeometry(geoJson: FeatureCollection | Feature | null): ParcelGeometry | null {
+function getCenter(geoJson: FeatureCollection | Feature | null): ParcelData | null {
   if (!geoJson) return null;
-
   const features = 'features' in geoJson ? geoJson.features : [geoJson];
+  let coords: number[][] = [];
   
-  let allCoords: number[][] = [];
-  
-  for (const feature of features) {
-    if (!feature.geometry) continue;
-    
-    const geom = feature.geometry;
-    
-    if (geom.type === 'Point') {
-      allCoords.push((geom as Point).coordinates as number[]);
-    } else if (geom.type === 'Polygon') {
-      const coords = (geom as Polygon).coordinates;
-      if (coords?.[0]) {
-        allCoords = [...allCoords, ...coords[0]];
-      }
-    } else if (geom.type === 'LineString') {
-      allCoords = [...allCoords, ...(geom as any).coordinates];
-    }
+  for (const f of features) {
+    if (!f.geometry) continue;
+    const g = f.geometry;
+    if (g.type === 'Point') coords.push((g as Point).coordinates as number[]);
+    else if (g.type === 'Polygon' && g.coordinates?.[0]) coords.push(...g.coordinates[0]);
+    else if (g.type === 'LineString') coords.push(...(g as any).coordinates);
   }
-
-  if (allCoords.length === 0) return null;
-
-  const lngs = allCoords.map(c => c[0]);
-  const lats = allCoords.map(c => c[1]);
-
-  const center: [number, number] = [
-    (Math.min(...lngs) + Math.max(...lngs)) / 2,
-    (Math.min(...lats) + Math.max(...lats)) / 2,
-  ];
-
-  const bounds: [[number, number], [number, number]] = [
-    [Math.min(...lngs), Math.min(...lats)],
-    [Math.max(...lngs), Math.max(...lats)],
-  ];
-
-  return { center, bounds };
+  
+  if (coords.length === 0) return null;
+  const lngs = coords.map(c => c[0]);
+  const lats = coords.map(c => c[1]);
+  return { center: [(Math.min(...lngs) + Math.max(...lngs)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2] };
 }
 
-export function MapView({
-  geoJson,
-  onParcelSelect,
-  interactive = true,
-}: MapViewProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+export function MapView({ geoJson, onParcelSelect }: MapViewProps) {
+  const container = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
-  const [parcelGeom, setParcelGeom] = useState<ParcelGeometry | null>(null);
-  const [camera, setCamera] = useState<CameraState>({
-    zoom: 0,
-    rotation: 0,
-    pitch: 0,
-    x: 0,
-    y: 0,
-  });
+  const [parcel, setParcel] = useState<ParcelData | null>(null);
+  const [zoom, setZoom] = useState(0.3);
+  const [bearing, setBearing] = useState(0);
+  const [stage, setStage] = useState<'space' | 'city' | 'parcel'>('space');
 
   useEffect(() => {
     if (geoJson) {
-      const geom = extractParcelGeometry(geoJson);
-      setParcelGeom(geom);
+      setLoading(true);
+      const p = getCenter(geoJson);
+      setParcel(p);
+      setStage('space');
+      setZoom(0.1);
+      setBearing(0);
       
-      if (geom) {
-        let frame = 0;
-        const maxFrames = 60;
-        
-        const animate = () => {
-          frame++;
-          const progress = frame / maxFrames;
-          
-          setCamera({
-            zoom: progress * 0.8,
-            rotation: progress * 15,
-            pitch: progress * 10,
-            x: Math.sin(progress * Math.PI * 2) * 5 * (1 - progress),
-            y: (1 - progress) * 30,
-          });
-          
-          if (frame < maxFrames) {
-            requestAnimationFrame(animate);
-          } else {
-            setCamera({ zoom: 0.8, rotation: 15, pitch: 10, x: 0, y: 0 });
-          }
-        };
-        
-        requestAnimationFrame(animate);
-      }
+      // Fly animation
+      let f = 0;
+      const anim = () => {
+        f++;
+        const prog = f / 60;
+        if (prog < 0.3) setZoom(prog * 0.4);
+        else if (prog < 0.6) { setZoom(0.1 + (prog - 0.3) * 1.5); setStage('city'); }
+        else { setZoom(0.6 + (prog - 0.6) * 0.3); setStage('parcel'); setBearing((prog - 0.6) * 30); }
+        if (f < 60) requestAnimationFrame(anim);
+      };
+      requestAnimationFrame(anim);
+      setTimeout(() => setLoading(false), 1000);
     }
-    
-    const timer = setTimeout(() => setLoading(false), 1000);
-    return () => clearTimeout(timer);
   }, [geoJson]);
 
-  const handleZoom = (delta: number) => {
-    setCamera(prev => ({
-      ...prev,
-      zoom: Math.max(0, Math.min(1, prev.zoom + delta * 0.1)),
-    }));
-  };
+  const handleZoomIn = () => setZoom(z => Math.min(1, z + 0.1));
+  const handleZoomOut = () => setZoom(z => Math.max(0.1, z - 0.1));
+  const handleRotateR = () => setBearing(b => b + 15);
+  const handleRotateL = () => setBearing(b => b - 15);
+  const handleReset = () => { setZoom(0.3); setBearing(0); setStage('space'); };
 
-  const resetView = () => {
-    setCamera({ zoom: 0, rotation: 0, pitch: 0, x: 0, y: 0 });
+  const styles = {
+    transform: `perspective(600px) rotateX(45deg) translateZ(${-zoom * 150}px) rotateY(${bearing}deg)`,
+    transformOrigin: '50% 50%',
   };
 
   if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-card">
+      <div className="w-full h-full flex items-center justify-center bg-black">
         <div className="text-center">
-          <Loader2 className="w-10 h-10 text-red-500 animate-spin mx-auto mb-4" />
-          <p className="text-sm text-muted">Harita yükleniyor...</p>
+          <div className="w-12 h-12 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-sm text-gray-400">Harita yükleniyor...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full relative overflow-hidden">
-      {/* Google Earth-style satellite background */}
-      <div
-        className="absolute inset-0 transition-all duration-700"
-        style={{
-          transform: `perspective(1000px) rotateX(${camera.pitch}deg) translateY(${camera.y}%) rotate(${camera.rotation}deg)`,
-          transformOrigin: '50% 60%',
-        }}
-      >
-        <div
-          className="absolute inset-4 rounded-lg overflow-hidden"
-          style={{
-            background: `
-              radial-gradient(ellipse at 50% 120%, #1a3a1a 0%, transparent 50%),
-              radial-gradient(ellipse at 30% 80%, #2a4a2a 0%, transparent 40%),
-              radial-gradient(ellipse at 70% 90%, #1a2a1a 0%, transparent 40%),
-              linear-gradient(180deg, #0a1510 0%, #0a1a15 30%, #05100a 60%, #0a150a 100%)
-            `,
-          }}
-        >
-          {/* Terrain grid */}
-          <div className="absolute inset-0 opacity-20">
-            {Array.from({ length: 20 }).map((_, i) => (
-              <div key={`h-${i}`} className="absolute w-full h-px bg-green-800/50" style={{ top: `${(i + 1) * 5}%` }} />
-            ))}
-            {Array.from({ length: 20 }).map((_, i) => (
-              <div key={`v-${i}`} className="absolute h-full w-px bg-green-800/50" style={{ left: `${(i + 1) * 5}%` }} />
-            ))}
-          </div>
+    <div ref={container} className="w-full h-full relative overflow-hidden bg-black">
+      {/* 3D Terrain */}
+      <div className="absolute inset-0 transition-all duration-300" style={styles}>
+        <div className="absolute inset-0" style={{
+          background: 'radial-gradient(ellipse 100% 60% at 50% 100%, #0a1f0a 0%, transparent 50%), linear-gradient(180deg, #030503 0%, #050a05 50%, #030703 100%)',
+        }} />
+        {/* Grid */}
+        <div className="absolute inset-0 opacity-20">
+          {[...Array(15)].map((_, i) => (
+            <div key={`h${i}`} className="absolute w-full h-px bg-green-900" style={{ top: `${(i+1)*6}%` }} />
+          ))}
+          {[...Array(15)].map((_, i) => (
+            <div key={`v${i}`} className="absolute h-full w-px bg-green-900" style={{ left: `${(i+1)*6}%` }} />
+          ))}
+        </div>
+      </div>
 
-          {/* Terrain shadow */}
-          <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-black/60 to-transparent" />
-          
-          {/* Parcel boundary - Red border */}
-          {parcelGeom && (
+      {/* Parcel */}
+      {parcel && (
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+          <div className="relative">
+            <div className="w-24 h-20 border-2 border-red-600 rounded-lg" style={{ transform: `scale(${zoom * 2})`, boxShadow: '0 0 20px rgba(239,68,68,0.5)' }} />
             <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <div className="relative">
-                <div className="w-32 h-24 relative">
-                  <div className="absolute inset-0 border-2 border-red-500 rounded-lg animate-pulse" />
-                  <div className="absolute inset-0 border border-red-400/50 rounded-lg scale-110 animate-ping" />
-                </div>
-                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                  <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
-                    <div className="w-2 h-2 bg-white rounded-full" />
-                  </div>
-                </div>
-                <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-xs text-red-400 whitespace-nowrap">
-                  📍 {parcelGeom.center[1].toFixed(4)}°, {parcelGeom.center[0].toFixed(4)}°
-                </div>
+              <div className="w-4 h-4 bg-red-600 rounded-full flex items-center justify-center">
+                <div className="w-2 h-2 bg-white rounded-full" />
               </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Atmospheric overlay */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-background/80 to-transparent" />
-        <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-background/60 to-transparent" />
-        <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.5)]" />
-      </div>
-
-      {/* Drone camera info */}
-      <div className="absolute top-4 left-4 glass px-3 py-2 rounded-lg">
-        <div className="flex items-center gap-2 text-xs">
-          <Navigation className="w-4 h-4 text-red-500" />
-          <span className="text-green-400">DRONE VIEW</span>
-        </div>
-        <p className="text-xs text-muted mt-1">
-          {parcelGeom ? `${parcelGeom.center[1].toFixed(4)}°N, ${parcelGeom.center[0].toFixed(4)}°E` : 'Bekleniyor...'}
-        </p>
-      </div>
-
-      {/* Map controls */}
-      <div className="absolute top-4 right-4 flex flex-col gap-2">
-        <button onClick={() => handleZoom(1)} className="w-8 h-8 rounded-lg glass flex items-center justify-center cursor-pointer" title="Yakınlaştır">
-          <ZoomIn className="w-4 h-4" />
-        </button>
-        <button onClick={() => handleZoom(-1)} className="w-8 h-8 rounded-lg glass flex items-center justify-center cursor-pointer" title="Uzaklaştır">
-          <ZoomOut className="w-4 h-4" />
-        </button>
-        <button onClick={resetView} className="w-8 h-8 rounded-lg glass flex items-center justify-center cursor-pointer" title="Sıfırla">
-          <RotateCcw className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Coordinates */}
-      {parcelGeom && (
-        <div className="absolute bottom-4 left-4 glass px-3 py-2 rounded-lg text-xs">
-          <div className="flex gap-4">
-            <div>
-              <span className="text-muted">ENLEM:</span>
-              <span className="ml-2 text-green-400">{parcelGeom.center[1].toFixed(6)}°</span>
-            </div>
-            <div>
-              <span className="text-muted">BOYLAM:</span>
-              <span className="ml-2 text-green-400">{parcelGeom.center[0].toFixed(6)}°</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Legend */}
-      <div className="absolute bottom-4 right-4 glass px-3 py-2 rounded-lg text-xs">
-        <p className="text-red-500 mb-1">● Parsel Sınırı</p>
-        <p className="text-green-500/70">● Konum</p>
+      {/* Overlays */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black to-transparent" />
+        <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.6)]" />
       </div>
+
+      {/* Top-Left Info */}
+      <div className="absolute top-4 left-4">
+        <div className="bg-black/70 px-3 py-2 rounded-lg">
+          <p className="text-xs text-red-500 uppercase">{stage} View</p>
+          <p className="text-xs text-gray-400 mt-1">
+            {parcel ? `${parcel.center[1].toFixed(5)}, ${parcel.center[0].toFixed(5)}` : 'Bekleniyor'}
+          </p>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="absolute top-4 right-4 flex flex-col gap-2">
+        <button onClick={handleZoomIn} className="w-9 h-9 bg-red-600 hover:bg-red-500 rounded-lg flex items-center justify-center transition-colors">
+          <span className="text-lg font-bold">+</span>
+        </button>
+        <button onClick={handleZoomOut} className="w-9 h-9 bg-red-600 hover:bg-red-500 rounded-lg flex items-center justify-center transition-colors">
+          <span className="text-lg font-bold">−</span>
+        </button>
+        <button onClick={handleRotateR} className="w-9 h-9 bg-red-600 hover:bg-red-500 rounded-lg flex items-center justify-center transition-colors">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+        </button>
+        <button onClick={handleRotateL} className="w-9 h-9 bg-red-600 hover:bg-red-500 rounded-lg flex items-center justify-center transition-colors">
+          <svg className="w-5 h-5 rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+        </button>
+        <button onClick={handleReset} className="w-9 h-9 bg-red-600 hover:bg-red-500 rounded-lg flex items-center justify-center transition-colors">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+        </button>
+      </div>
+
+      {/* Bottom-Left Coords */}
+      {parcel && (
+        <div className="absolute bottom-4 left-4 bg-black/70 px-3 py-2 rounded-lg text-xs font-mono">
+          <p><span className="text-gray-500">LAT:</span> <span className="text-green-500">{parcel.center[1].toFixed(6)}°</span></p>
+          <p><span className="text-gray-500">LNG:</span> <span className="text-green-500">{parcel.center[0].toFixed(6)}°</span></p>
+        </div>
+      )}
+
+      {!parcel && !loading && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="text-gray-500">Parsel verisi yükleyin</p>
+        </div>
+      )}
     </div>
   );
 }
