@@ -1,29 +1,27 @@
-'use client';
-
+import { HTMLAttributes, forwardRef } from 'react';
 import { clsx } from 'clsx';
 
-interface CardProps {
-  children: React.ReactNode;
-  className?: string;
-  glass?: boolean;
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
   hover?: boolean;
-  onClick?: () => void;
 }
 
-export function Card({ children, className, glass, hover, onClick }: CardProps) {
-  return (
-    <div
-      className={clsx(
-        'rounded-2xl p-6',
-        glass
-          ? 'glass'
-          : 'bg-card border border-border',
-        hover && 'hover:bg-card-hover hover:border-primary/20 transition-all duration-300 cursor-pointer',
-        className
-      )}
-      onClick={onClick}
-    >
-      {children}
-    </div>
-  );
-}
+export const Card = forwardRef<HTMLDivElement, CardProps>(
+  ({ className, hover = false, children, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        className={clsx(
+          'rounded-2xl border border-border bg-card p-6',
+          'transition-all duration-200',
+          hover && 'hover:border-muted hover:bg-card-hover',
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </div>
+    );
+  }
+);
+
+Card.displayName = 'Card';

@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/Button';
-import { LogOut, User, Video, Menu, X, Drone } from 'lucide-react';
+import { LogOut, User, Drone, Menu, X } from 'lucide-react';
 import { useState } from 'react';
-import { APP_NAME } from '@/lib/constants';
+
+const APP_NAME = 'SanalParsel';
 
 export function Navbar() {
   const { user, signOut, loading } = useAuth();

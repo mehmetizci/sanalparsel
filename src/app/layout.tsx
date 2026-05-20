@@ -15,9 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DroneView AI - Gayrimenkul Sanal Drone Video Platformu",
-  description:
-    "Gayrimenkul danışmanları için AI destekli sanal drone video oluşturma platformu. Parsel verisi yükleyin, profesyonel tanıtım videosu alın.",
+  title: "SanalParsel - Gayrimenkul Sinematik Video Platformu",
+  description: "Türkiye'nin ilk AI destekli gayrimenkul sinematik drone video platformu",
 };
 
 export default function RootLayout({

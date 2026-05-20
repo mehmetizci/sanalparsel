@@ -52,29 +52,6 @@ export default function HomePage() {
     },
   ];
 
-  const steps = [
-    {
-      step: '01',
-      title: 'Parsel Yükleyin',
-      desc: 'GeoJSON, KML dosyası veya koordinatları girin.',
-    },
-    {
-      step: '02',
-      title: 'Bilgileri Ayarlayın',
-      desc: 'Danışman bilgileri, drone ayarları ve seslendirme.',
-    },
-    {
-      step: '03',
-      title: 'Video Oluşturun',
-      desc: 'AI otomatik olarak profesyonel drone videosu oluşturur.',
-    },
-    {
-      step: '04',
-      title: 'İndirin & Paylaşın',
-      desc: 'MP4 videoyu indirin, QR kod veya sosyal medyada paylaşın.',
-    },
-  ];
-
   return (
     <div className="relative">
       {/* Hero Section */}
@@ -82,7 +59,7 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-gradient-to-b from-red-500/5 via-transparent to-transparent" />
         <div className="absolute top-20 left-1/4 w-96 h-96 bg-red-500/10 rounded-full blur-3xl" />
         <div className="absolute top-40 right-1/4 w-64 h-64 bg-red-500/5 rounded-full blur-3xl" />
-
+	
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-32">
           <div className="text-center max-w-4xl mx-auto">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass text-sm text-red-500 mb-8">
@@ -93,13 +70,13 @@ export default function HomePage() {
             <h1 className="text-4xl sm:text-5xl lg:text-7xl font-bold leading-tight mb-6">
               <span className="gradient-text">Gayrimenkul</span> İçin
               <br />
-              Sanal Drone Videoları
+              Sinematik Drone Videoları
             </h1>
 
             <p className="text-lg sm:text-xl text-muted max-w-2xl mx-auto mb-10">
               Parsel verisi yükleyin, dakikalar içinde profesyonel sinematik
-              drone tanıtım videosu alın. AI seslendirme, çevre analizi ve
-              danışman bilgileri dahil.
+              drone tanıtım videosu alın. Instagram, TikTok ve YouTube Shorts için
+              optimize edilmiş dikey format.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -120,16 +97,16 @@ export default function HomePage() {
 
           {/* Demo preview */}
           <div className="mt-20 relative">
-            <div className="absolute -inset-4 bg-gradient-to-r from-red-500/20 via-primary/10 to-primary/20 rounded-3xl blur-xl" />
-            <div className="relative aspect-video max-w-5xl mx-auto rounded-2xl overflow-hidden border border-border bg-card">
-              <div className="absolute inset-0 bg-gradient-to-br from-background via-card to-primary/5 flex items-center justify-center">
-                <div className="text-center">
+            <div className="absolute -inset-4 bg-gradient-to-r from-red-500/20 via-red-500/10 to-red-500/20 rounded-3xl blur-xl" />
+            <div className="relative aspect-[9/16] max-w-sm mx-auto rounded-2xl overflow-hidden border border-border bg-card">
+              <div className="absolute inset-0 bg-gradient-to-br from-background via-card to-red-500/5 flex items-center justify-center">
+                <div className="text-center p-8">
                   <div className="w-20 h-20 rounded-2xl bg-red-500/20 flex items-center justify-center mx-auto mb-4">
                     <Drone className="w-10 h-10 text-red-500" />
                   </div>
-                  <p className="text-lg font-semibold">Video Önizleme</p>
+                  <p className="text-lg font-semibold">Dikey Video Önizleme</p>
                   <p className="text-sm text-muted mt-1">
-                    Proje oluşturarak drone video önizlemesini görebilirsiniz
+                    1080x1920 px (9:16)
                   </p>
                 </div>
               </div>
@@ -145,10 +122,6 @@ export default function HomePage() {
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
               Güçlü <span className="gradient-text">Özellikler</span>
             </h2>
-            <p className="text-muted max-w-2xl mx-auto">
-              Profesyonel gayrimenkul tanıtım videoları oluşturmak için
-              ihtiyacınız olan her şey tek bir platformda.
-            </p>
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -160,35 +133,6 @@ export default function HomePage() {
                 <h3 className="text-lg font-semibold mb-2">{feature.title}</h3>
                 <p className="text-sm text-muted">{feature.desc}</p>
               </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section className="py-24 border-t border-border bg-card/30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Nasıl <span className="gradient-text">Çalışır</span>?
-            </h2>
-            <p className="text-muted max-w-2xl mx-auto">
-              4 basit adımda profesyonel drone videonuzu oluşturun.
-            </p>
-          </div>
-
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8">
-            {steps.map((item, i) => (
-              <div key={item.step} className="relative">
-                {i < steps.length - 1 && (
-                  <div className="hidden lg:block absolute top-8 left-full w-full h-px bg-gradient-to-r from-red-500/30 to-transparent" />
-                )}
-                <div className="text-5xl font-black text-red-500/10 mb-4">
-                  {item.step}
-                </div>
-                <h3 className="text-lg font-semibold mb-2">{item.title}</h3>
-                <p className="text-sm text-muted">{item.desc}</p>
-              </div>
             ))}
           </div>
         </div>
@@ -254,10 +198,10 @@ export default function HomePage() {
               <div className="w-6 h-6 rounded bg-red-500 flex items-center justify-center">
                 <Drone className="w-3 h-3 text-white" />
               </div>
-              <span className="text-sm font-semibold">DroneView AI</span>
+              <span className="text-sm font-semibold">SanalParsel</span>
             </div>
             <p className="text-xs text-muted">
-              &copy; {new Date().getFullYear()} DroneView AI. Tüm hakları saklıdır.
+              &copy; {new Date().getFullYear()} SanalParsel. Tüm hakları saklıdır.
             </p>
           </div>
         </div>
