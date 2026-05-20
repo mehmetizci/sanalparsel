@@ -6,10 +6,10 @@ import {
   Building2, 
   GraduationCap, 
   ShoppingCart, 
-  Highway, 
-  Waves, 
+  MapPin,
+  Palmtree,
   Store, 
-  Building 
+  CircleDot 
 } from 'lucide-react';
 import type { NearbyPlace } from '@/types';
 
@@ -22,10 +22,10 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
   hospital: Building2,
   school: GraduationCap,
   market: ShoppingCart,
-  highway: Highway,
-  beach: Waves,
+  highway: MapPin,
+  beach: Palmtree,
   'shopping mall': Store,
-  'city center': Building,
+  'city center': CircleDot,
 };
 
 const TYPE_LABELS: Record<string, string> = {
