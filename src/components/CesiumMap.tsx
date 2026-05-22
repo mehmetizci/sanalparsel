@@ -50,12 +50,17 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         sceneModePicker: false,
         baseLayerPicker: false,
         navigationHelpButton: false,
-        // Use OpenStreetMap tiles directly
-        imageryProvider: new Cesium.UrlTemplateImageryProvider({
-          url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          credit: '© OpenStreetMap contributors'
-        }),
+        // Remove default Ion imagery and use OpenStreetMap via baseLayerPicker
       })
+      
+      // Replace default imagery with OpenStreetMap
+      viewer.imageryLayers.removeAll()
+      const openStreetMapLayer = viewer.imageryLayers.addImageryProvider(
+        new Cesium.OpenStreetMapImageryProvider({
+          url: 'https://tile.openstreetmap.org',
+          credit: '© OpenStreetMap contributors'
+        })
+      )
       
       viewer.scene.globe.enableLighting = true
       viewer.scene.highDynamicRange = true
