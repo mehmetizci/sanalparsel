@@ -8,27 +8,26 @@ declare const Cesium: any
 
 export default function CesiumMap({ geojson }: { geojson?: any }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [hasError, setHasError] = useState(false)
+  const [state, setState] = useState<'loading' | 'error' | 'ready'>('loading')
   const viewerRef = useRef<any>(null)
   const hasInitialized = useRef(false)
+
+  console.log('CesiumMap render, state:', state, 'geojson:', !!geojson)
 
   useEffect(() => {
     if (typeof window === "undefined" || !containerRef.current || hasInitialized.current) return
     hasInitialized.current = true
 
-    // Check WebGL support first
+    // Check WebGL support
     const testCanvas = document.createElement('canvas')
-    const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl')
-    
+    const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl')
     if (!gl) {
       console.log('WebGL not supported')
-      setIsLoading(false)
-      setHasError(true)
+      setState('error')
       return
     }
 
-    // Set CESIUM_BASE_URL
+    // Load Cesium
     ;(window as any).CESIUM_BASE_URL = "/cesium"
 
     const link = document.createElement('link')
@@ -39,22 +38,17 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     const script = document.createElement('script')
     script.src = '/cesium/Cesium.js'
     script.async = true
-    script.onload = () => {
-      console.log('Cesium script loaded, calling initViewer')
-      initViewer()
-    }
+    script.onload = initViewer
     script.onerror = () => {
-      setIsLoading(false)
-      setHasError(true)
+      console.log('Cesium script failed to load')
+      setState('error')
     }
     document.head.appendChild(script)
 
     function initViewer() {
       console.log('initViewer called')
-      if (!containerRef.current) {
-        console.log('No container ref, returning')
-        return
-      }
+      if (!containerRef.current) return
+      
       const Cesium = (window as any).Cesium
       console.log('Cesium loaded:', !!Cesium)
 
@@ -68,7 +62,7 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
           requestRenderMode: true,
           maximumRenderTimeChange: Infinity,
         })
-        console.log('Viewer created:', viewer)
+        console.log('Viewer created successfully')
 
         viewer.imageryLayers.removeAll()
         viewer.imageryLayers.addImageryProvider(
@@ -88,9 +82,8 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         })
 
         viewerRef.current = viewer
-        console.log('Setting isLoading to false')
-        setIsLoading(false)
-        console.log('Viewer setup complete')
+        console.log('Setting state to ready')
+        setState('ready')
 
         if (geojson) {
           const entity = drawParcel(viewer, geojson)
@@ -98,19 +91,15 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         }
       } catch (error) {
         console.error('Viewer init FAILED:', error)
-        setIsLoading(false)
-        setHasError(true)
+        setState('error')
       }
     }
 
-    // Backup timeout to handle stuck loading
-    console.log('Setting up 15s timeout for viewer creation')
+    // Fallback timeout
     const timeoutId = setTimeout(() => {
-      console.log('TIMEOUT FIRED - forcing error state')
-      setIsLoading(false)
-      setHasError(true)
+      console.log('TIMEOUT - forcing error state')
+      setState('error')
     }, 15000)
-    console.log('Timeout ID:', timeoutId)
 
     return () => {
       clearTimeout(timeoutId)
@@ -123,7 +112,7 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     }
   }, [geojson])
 
-  if (hasError) {
+  if (state === 'error') {
     return (
       <div style={{
         width: "100%",
@@ -145,7 +134,7 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     )
   }
 
-  if (isLoading) {
+  if (state === 'loading') {
     return (
       <div style={{
         width: "100%",
