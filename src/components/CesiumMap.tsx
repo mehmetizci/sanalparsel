@@ -65,42 +65,25 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     }
 
     try {
-      console.log('Creating Cesium viewer...')
+      console.log('Creating Cesium scene...')
       
-      // Create viewer with minimal configuration and request render mode
-      const viewer = new Cesium.Viewer(containerRef.current, {
-        animation: false,
-        timeline: false,
-        baseLayerPicker: false,
+      // Create CesiumWidget instead of full Viewer - more lightweight
+      const widget = new Cesium.CesiumWidget(containerRef.current, {
+        imageryProvider: new Cesium.OpenStreetMapImageryProvider({
+          url: "https://tile.openstreetmap.org/",
+          credit: "© OpenStreetMap contributors"
+        }),
+        terrainProvider: new Cesium.EllipsoidTerrainProvider(),
         skyBox: false,
         skyAtmosphere: false,
-        sceneModePicker: false,
-        navigationHelpButton: false,
-        homeButton: false,
-        geocoder: false,
-        infoBox: false,
-        selectionIndicator: false,
-        // Use default ellipsoid terrain
-        terrainProvider: new Cesium.EllipsoidTerrainProvider(),
-        // Reduce GPU load with request render mode
         requestRenderMode: true,
         maximumRenderTimeChange: Infinity,
       })
 
-      console.log('Viewer created:', viewer)
+      console.log('Widget created:', widget)
 
-      // Remove default imagery layers
-      viewer.imageryLayers.removeAll()
-
-      // Add OpenStreetMap as the base imagery
-      const imageryProvider = new Cesium.OpenStreetMapImageryProvider({
-        url: "https://tile.openstreetmap.org/",
-        credit: "© OpenStreetMap contributors"
-      })
-      viewer.imageryLayers.addImageryProvider(imageryProvider)
-
-      // Set default camera view (Turkey/Izmir area)
-      viewer.camera.flyTo({
+      // Set camera position
+      widget.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(27.06, 38.48, 50000),
         orientation: {
           heading: Cesium.Math.toRadians(0),
@@ -110,6 +93,8 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         duration: 0
       })
 
+      // Store widget as viewer for compatibility
+      const viewer = widget
       viewerRef.current = viewer
       console.log('Viewer setup complete')
 
