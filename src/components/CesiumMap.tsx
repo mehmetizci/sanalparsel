@@ -96,10 +96,18 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     }
 
     // Fallback timeout
-    const timeoutId = setTimeout(() => {
-      console.log('TIMEOUT - forcing error state')
+    let timeoutId: NodeJS.Timeout
+    console.log('Setting up 15s timeout for viewer creation')
+    timeoutId = setTimeout(() => {
+      console.log('TIMEOUT FIRED - forcing error state via window.confirm')
       setState('error')
+      // Also try direct DOM update as backup
+      const el = containerRef.current?.parentElement
+      if (el) {
+        el.innerHTML = '<div style="width:100%;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f0f23,#1a1a2e);color:#fff;font-family:system-ui,sans-serif;"><p style="font-size:1.2rem;margin-bottom:0.5rem;">🗺️ 3D Harita</p><p style="font-size:0.9rem;color:#888;">Harita yüklenemiyor</p><p style="font-size:0.8rem;color:#666;margin-top:0.5rem;">WebGL etkin tarayıcı kullanın</p></div>'
+      }
     }, 15000)
+    console.log('Timeout ID:', timeoutId)
 
     return () => {
       clearTimeout(timeoutId)
