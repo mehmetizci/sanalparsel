@@ -9,6 +9,7 @@ const nextConfig = {
       os: false,
       module: false,
     };
+
     return config;
   },
   images: {
