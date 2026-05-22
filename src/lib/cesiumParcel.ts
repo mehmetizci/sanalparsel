@@ -1,9 +1,16 @@
-import * as Cesium from "cesium"
+// cesiumParcel.ts - Helper functions for drawing parcels on Cesium map
+// Cesium is loaded dynamically via script tag in CesiumMap component
 
-export function drawParcel(viewer: Cesium.Viewer, geojson: any): Cesium.Entity | undefined {
+export function drawParcel(viewer: any, geojson: any): any {
   try {
     if (!geojson?.features?.[0]?.geometry?.coordinates?.[0]) {
       console.error("Invalid GeoJSON structure")
+      return undefined
+    }
+
+    const Cesium = (window as any).Cesium
+    if (!Cesium) {
+      console.error("Cesium not loaded")
       return undefined
     }
 
@@ -13,8 +20,8 @@ export function drawParcel(viewer: Cesium.Viewer, geojson: any): Cesium.Entity |
       ? coordinates[0].flat(Infinity) 
       : coordinates.flat(Infinity)
 
-    // Convert to Cesium positions - manually compute Cartesian3
-    const positions: Cesium.Cartesian3[] = []
+    // Convert to Cesium positions
+    const positions: any[] = []
     for (let i = 0; i < flatCoords.length; i += 2) {
       const lon = flatCoords[i]
       const lat = flatCoords[i + 1]
@@ -44,17 +51,18 @@ export function drawParcel(viewer: Cesium.Viewer, geojson: any): Cesium.Entity |
   }
 }
 
-export function focusParcel(viewer: Cesium.Viewer, entity: Cesium.Entity | undefined): void {
+export function focusParcel(viewer: any, entity: any): void {
   if (!entity) return
   try {
     viewer.zoomTo(entity)
   } catch (error) {
     console.error("Error focusing on parcel:", error)
     // Fallback: fly to the polygon
-    const positions = entity.polygon?.hierarchy?.getValue(Cesium.JulianDate.now())?.positions
-    if (positions && positions.length > 0) {
+    try {
       viewer.flyTo(entity, { duration: 2 })
         .catch(() => console.error("FlyTo failed"))
+    } catch (flyError) {
+      console.error("FlyTo also failed:", flyError)
     }
   }
 }
