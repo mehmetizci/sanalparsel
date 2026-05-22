@@ -1,133 +1,103 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import { drawParcel, focusParcel } from "@/lib/cesiumParcel"
 
 // Cesium types
 declare const Cesium: any
 
-export default function CesiumMap({ geojson }: { geojson?: any }) {
+function CesiumMapInner({ geojson }: { geojson?: any }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [isReady, setIsReady] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState(false)
   const viewerRef = useRef<any>(null)
 
-  // Load Cesium from public/cesium folder
   useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined" || !containerRef.current) return
 
     // Check if already loaded
-    if ((window as any).Cesium) {
-      setIsReady(true)
-      return
+    if (!(window as any).Cesium) {
+      // Set CESIUM_BASE_URL BEFORE loading
+      ;(window as any).CESIUM_BASE_URL = "/cesium"
+
+      // Load CSS
+      const link = document.createElement('link')
+      link.rel = 'stylesheet'
+      link.href = '/cesium/Widgets/widgets.css'
+      document.head.appendChild(link)
+
+      // Load Cesium JS
+      const script = document.createElement('script')
+      script.src = '/cesium/Cesium.js'
+      script.async = true
+      script.onload = initViewer
+      script.onerror = () => setLoadError(true)
+      document.head.appendChild(script)
+
+      return () => {
+        document.head.removeChild(link)
+        document.head.removeChild(script)
+      }
+    } else {
+      initViewer()
     }
 
-    // Set CESIUM_BASE_URL BEFORE loading Cesium script
-    // This MUST be set before Cesium.js loads
-    ;(window as any).CESIUM_BASE_URL = "/cesium"
+    function initViewer() {
+      if (!containerRef.current) return
+      const Cesium = (window as any).Cesium
 
-    // Load CSS
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = '/cesium/Widgets/widgets.css'
-    document.head.appendChild(link)
+      // Destroy existing
+      if (viewerRef.current) {
+        viewerRef.current.destroy()
+        viewerRef.current = null
+      }
 
-    // Load Cesium JS
-    const script = document.createElement('script')
-    script.src = '/cesium/Cesium.js'
-    script.async = true
-    script.onload = () => {
-      console.log('Cesium loaded successfully')
-      console.log('CESIUM_BASE_URL:', (window as any).CESIUM_BASE_URL)
-      setIsReady(true)
-    }
-    script.onerror = (e) => {
-      console.error('Failed to load Cesium:', e)
-      setLoadError('Cesium yüklenemedi')
-    }
-    document.head.appendChild(script)
+      try {
+        const viewer = new Cesium.Viewer(containerRef.current, {
+          animation: false,
+          timeline: false,
+          baseLayerPicker: false,
+          terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+          requestRenderMode: true,
+          maximumRenderTimeChange: Infinity,
+        })
 
-    return () => {
-      document.head.removeChild(link)
-      document.head.removeChild(script)
+        viewer.imageryLayers.removeAll()
+        viewer.imageryLayers.addImageryProvider(
+          new Cesium.OpenStreetMapImageryProvider({
+            url: "https://tile.openstreetmap.org/"
+          })
+        )
+
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(27.06, 38.48, 50000),
+          orientation: {
+            heading: Cesium.Math.toRadians(0),
+            pitch: Cesium.Math.toRadians(-30),
+            roll: 0
+          },
+          duration: 0
+        })
+
+        viewerRef.current = viewer
+
+        if (geojson) {
+          const entity = drawParcel(viewer, geojson)
+          if (entity) focusParcel(viewer, entity)
+        }
+      } catch {
+        setLoadError(true)
+      }
     }
-  }, [])
+  }, [geojson])
 
   useEffect(() => {
-    if (!isReady || !containerRef.current || !(window as any).Cesium) return
-
-    const Cesium = (window as any).Cesium
-
-    // Destroy existing viewer
-    if (viewerRef.current) {
-      viewerRef.current.destroy()
-      viewerRef.current = null
-    }
-
-    try {
-      console.log('Creating Cesium viewer...')
-      
-      const viewer = new Cesium.Viewer(containerRef.current, {
-        animation: false,
-        timeline: false,
-        baseLayerPicker: false,
-        skyBox: false,
-        skyAtmosphere: false,
-        sceneModePicker: false,
-        navigationHelpButton: false,
-        homeButton: false,
-        geocoder: false,
-        infoBox: false,
-        selectionIndicator: false,
-        terrainProvider: new Cesium.EllipsoidTerrainProvider(),
-        requestRenderMode: true,
-        maximumRenderTimeChange: Infinity,
-      })
-
-      console.log('Viewer created:', viewer)
-
-      // Remove default and add OpenStreetMap
-      viewer.imageryLayers.removeAll()
-      viewer.imageryLayers.addImageryProvider(
-        new Cesium.OpenStreetMapImageryProvider({
-          url: "https://tile.openstreetmap.org/",
-          credit: "© OpenStreetMap contributors"
-        })
-      )
-
-      // Set camera
-      viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(27.06, 38.48, 50000),
-        orientation: {
-          heading: Cesium.Math.toRadians(0),
-          pitch: Cesium.Math.toRadians(-30),
-          roll: 0
-        },
-        duration: 0
-      })
-
-      viewerRef.current = viewer
-      console.log('Viewer setup complete')
-
-      if (geojson) {
-        const entity = drawParcel(viewer, geojson)
-        if (entity) {
-          focusParcel(viewer, entity)
-        }
-      }
-    } catch (error: any) {
-      console.error('Viewer creation failed:', error)
-      // Don't show error, just continue without map
-      console.log('Continuing without 3D map...')
-    }
-
     return () => {
       if (viewerRef.current) {
         viewerRef.current.destroy()
         viewerRef.current = null
       }
     }
-  }, [isReady, geojson])
+  }, [])
 
   if (loadError) {
     return (
@@ -143,22 +113,21 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         fontFamily: "system-ui, sans-serif",
       }}>
         <p style={{ fontSize: "1.2rem", marginBottom: "0.5rem" }}>🗺️ 3D Harita</p>
-        <p style={{ fontSize: "0.9rem", color: "#888" }}>Harita şu anda yüklenemiyor</p>
+        <p style={{ fontSize: "0.9rem", color: "#888" }}>Harita yüklenemiyor</p>
         <p style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.5rem" }}>
-          Lütfen WebGL etkin bir tarayıcı kullanın
+          WebGL etkin tarayıcı kullanın
         </p>
       </div>
     )
   }
 
+  return <div ref={containerRef} style={{ width: "100%", height: "100vh" }} />
+}
+
+export default function CesiumMap({ geojson }: { geojson?: any }) {
   return (
-    <div 
-      ref={containerRef} 
-      style={{ 
-        width: "100%", 
-        height: "100vh",
-        position: "relative",
-      }} 
-    />
+    <Suspense fallback={<div style={{ width: "100%", height: "100vh", background: "#1a1a2e" }} />}>
+      <CesiumMapInner geojson={geojson} />
+    </Suspense>
   )
 }
