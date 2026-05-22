@@ -52,10 +52,16 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
       }
 
       try {
-        // Patch Cesium.Viewer to disable error panel
-        const originalViewer = Cesium.Viewer
+        // Override Cesium's showErrorPanel before creating viewer
+        const CesiumWidget = Cesium.CesiumWidget
+        if (CesiumWidget && CesiumWidget.prototype) {
+          const originalShowErrorPanel = CesiumWidget.prototype.showErrorPanel
+          CesiumWidget.prototype.showErrorPanel = function() {
+            console.log('Cesium error suppressed')
+          }
+        }
         
-        const viewer = new originalViewer(containerRef.current, {
+        const viewer = new Cesium.Viewer(containerRef.current, {
           animation: false,
           timeline: false,
           baseLayerPicker: false,
@@ -63,14 +69,6 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
           requestRenderMode: true,
           maximumRenderTimeChange: Infinity,
         }) as any
-
-        // Try to disable error panel after creation
-        if (viewer.cesiumWidget?._showErrorPanel) {
-          viewer.cesiumWidget._showErrorPanel = () => {}
-        }
-        if (viewer.cesiumWidget?._onError) {
-          viewer.cesiumWidget._onError = () => {}
-        }
 
         viewer.imageryLayers.removeAll()
         viewer.imageryLayers.addImageryProvider(
