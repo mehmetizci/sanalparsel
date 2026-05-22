@@ -55,7 +55,6 @@ export function focusParcel(viewer: any, entity: any): void {
     viewer.zoomTo(entity)
   } catch (error) {
     console.error("Error focusing on parcel:", error)
-    // Fallback: fly to the polygon
     try {
       viewer.flyTo(entity, { duration: 2 })
         .catch(() => console.error("FlyTo failed"))

@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
+import { useState } from "react"
 
-const CesiumViewer = dynamic(() => import("@/components/CesiumMap"), {
+const CesiumMap = dynamic(() => import("@/components/CesiumMap"), {
   ssr: false,
   loading: () => (
     <div 
@@ -18,9 +18,7 @@ const CesiumViewer = dynamic(() => import("@/components/CesiumMap"), {
         color: "#fff"
       }}
     >
-      <div className="animate-spin rounded-full h-16 w-16 border-4 border-primary border-t-transparent mb-4" />
-      <p style={{ fontSize: "18px", marginTop: "16px" }}>Harita yükleniyor...</p>
-      <p style={{ fontSize: "12px", color: "#888", marginTop: "8px" }}>Cesium Globe initializing</p>
+      <p style={{ fontSize: "18px" }}>Harita yükleniyor...</p>
     </div>
   ),
 })
@@ -90,7 +88,7 @@ export default function UploadPage() {
         )}
       </aside>
       <section style={{ flex: 1 }}>
-        <CesiumViewer geojson={geojson} />
+        <CesiumMap geojson={geojson} />
       </section>
     </div>
   )
