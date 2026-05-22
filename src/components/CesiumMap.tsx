@@ -34,30 +34,41 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
   useEffect(() => {
     if (!isMounted || !cssLoaded || !containerRef.current) return
     
-    // Clean up any existing viewer
-    if ((window as any).sanalparselViewer) {
-      (window as any).sanalparselViewer.destroy()
+    let viewer: Cesium.Viewer | null = null
+
+    try {
+      // Clean up any existing viewer
+      if ((window as any).sanalparselViewer) {
+        (window as any).sanalparselViewer.destroy()
+      }
+      
+      viewer = new Cesium.Viewer(containerRef.current, {
+        animation: false,
+        timeline: false,
+        geocoder: false,
+        homeButton: false,
+        sceneModePicker: false,
+        baseLayerPicker: false,
+        navigationHelpButton: false,
+        // Use OpenStreetMap tiles directly
+        imageryProvider: new Cesium.UrlTemplateImageryProvider({
+          url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          credit: '© OpenStreetMap contributors'
+        }),
+      })
+      
+      viewer.scene.globe.enableLighting = true
+      viewer.scene.highDynamicRange = true
+      
+      if (geojson) {
+        const entity = drawParcel(viewer, geojson)
+        focusParcel(viewer, entity)
+      }
+      
+      ;(window as any).sanalparselViewer = viewer
+    } catch (error) {
+      console.error("Cesium initialization error:", error)
     }
-    
-    const viewer = new Cesium.Viewer(containerRef.current, {
-      animation: false,
-      timeline: false,
-      geocoder: false,
-      homeButton: false,
-      sceneModePicker: false,
-      baseLayerPicker: true,
-      navigationHelpButton: false,
-    })
-    
-    viewer.scene.globe.enableLighting = true
-    viewer.scene.highDynamicRange = true
-    
-    if (geojson) {
-      const entity = drawParcel(viewer, geojson)
-      focusParcel(viewer, entity)
-    }
-    
-    ;(window as any).sanalparselViewer = viewer
     
     return () => {
       if ((window as any).sanalparselViewer) {
