@@ -8,29 +8,41 @@ declare const Cesium: any
 
 function CesiumMapInner({ geojson }: { geojson?: any }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [loadError, setLoadError] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [hasError, setHasError] = useState(false)
   const viewerRef = useRef<any>(null)
 
   useEffect(() => {
     if (typeof window === "undefined" || !containerRef.current) return
 
+    // Check WebGL support first
+    const testCanvas = document.createElement('canvas')
+    const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl')
+    
+    if (!gl) {
+      console.log('WebGL not supported')
+      setIsLoading(false)
+      setHasError(true)
+      return
+    }
+
     // Check if already loaded
     if (!(window as any).Cesium) {
-      // Set CESIUM_BASE_URL BEFORE loading
       ;(window as any).CESIUM_BASE_URL = "/cesium"
 
-      // Load CSS
       const link = document.createElement('link')
       link.rel = 'stylesheet'
       link.href = '/cesium/Widgets/widgets.css'
       document.head.appendChild(link)
 
-      // Load Cesium JS
       const script = document.createElement('script')
       script.src = '/cesium/Cesium.js'
       script.async = true
       script.onload = initViewer
-      script.onerror = () => setLoadError(true)
+      script.onerror = () => {
+        setIsLoading(false)
+        setHasError(true)
+      }
       document.head.appendChild(script)
 
       return () => {
@@ -45,22 +57,12 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
       if (!containerRef.current) return
       const Cesium = (window as any).Cesium
 
-      // Destroy existing
       if (viewerRef.current) {
         viewerRef.current.destroy()
         viewerRef.current = null
       }
 
       try {
-        // Override Cesium's showErrorPanel before creating viewer
-        const CesiumWidget = Cesium.CesiumWidget
-        if (CesiumWidget && CesiumWidget.prototype) {
-          const originalShowErrorPanel = CesiumWidget.prototype.showErrorPanel
-          CesiumWidget.prototype.showErrorPanel = function() {
-            console.log('Cesium error suppressed')
-          }
-        }
-        
         const viewer = new Cesium.Viewer(containerRef.current, {
           animation: false,
           timeline: false,
@@ -68,7 +70,7 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
           terrainProvider: new Cesium.EllipsoidTerrainProvider(),
           requestRenderMode: true,
           maximumRenderTimeChange: Infinity,
-        }) as any
+        })
 
         viewer.imageryLayers.removeAll()
         viewer.imageryLayers.addImageryProvider(
@@ -88,13 +90,16 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
         })
 
         viewerRef.current = viewer
+        setIsLoading(false)
 
         if (geojson) {
           const entity = drawParcel(viewer, geojson)
           if (entity) focusParcel(viewer, entity)
         }
-      } catch {
-        setLoadError(true)
+      } catch (error) {
+        console.error('Viewer init failed:', error)
+        setIsLoading(false)
+        setHasError(true)
       }
     }
   }, [geojson])
@@ -108,7 +113,7 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
     }
   }, [])
 
-  if (loadError) {
+  if (hasError) {
     return (
       <div style={{
         width: "100%",
@@ -126,6 +131,23 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
         <p style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.5rem" }}>
           WebGL etkin tarayıcı kullanın
         </p>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div style={{
+        width: "100%",
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%)",
+        color: "#ffffff",
+        fontFamily: "system-ui, sans-serif",
+      }}>
+        <p style={{ fontSize: "1rem" }}>🗺️ 3D Harita yükleniyor...</p>
       </div>
     )
   }
