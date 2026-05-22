@@ -1,38 +1,50 @@
-import { forwardRef, InputHTMLAttributes } from 'react';
-import { clsx } from 'clsx';
+'use client'
+
+import { forwardRef, InputHTMLAttributes } from 'react'
+import { clsx } from 'clsx'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  label?: string;
-  error?: string;
+  label?: string
+  error?: string
+  icon?: React.ReactNode
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, ...props }, ref) => {
+const Input = forwardRef<HTMLInputElement, InputProps>(
+  ({ className, label, error, icon, ...props }, ref) => {
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-sm font-medium text-muted mb-1.5">
+          <label className="block text-sm font-medium text-gray-300 mb-2">
             {label}
           </label>
         )}
-        <input
-          ref={ref}
-          className={clsx(
-            'w-full px-4 py-2.5 rounded-xl bg-background border border-border',
-            'text-foreground placeholder:text-muted/50',
-            'focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50',
-            'transition-colors duration-200',
-            error && 'border-red-500',
-            className
+        <div className="relative">
+          {icon && (
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+              {icon}
+            </div>
           )}
-          {...props}
-        />
+          <input
+            ref={ref}
+            className={clsx(
+              'w-full px-4 py-2.5 bg-dark-700 border border-white/10 rounded-xl',
+              'text-white placeholder:text-gray-500',
+              'focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50',
+              'transition-all duration-200',
+              icon && 'pl-10',
+              error && 'border-red-500 focus:ring-red-500/50',
+              className
+            )}
+            {...props}
+          />
+        </div>
         {error && (
-          <p className="mt-1 text-sm text-red-500">{error}</p>
+          <p className="mt-1.5 text-sm text-red-400">{error}</p>
         )}
       </div>
-    );
+    )
   }
-);
+)
 
-Input.displayName = 'Input';
+Input.displayName = 'Input'
+export default Input
