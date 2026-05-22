@@ -1,19 +1,21 @@
 "use client"
 
-import { Suspense, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { drawParcel, focusParcel } from "@/lib/cesiumParcel"
 
 // Cesium types
 declare const Cesium: any
 
-function CesiumMapInner({ geojson }: { geojson?: any }) {
+export default function CesiumMap({ geojson }: { geojson?: any }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
   const viewerRef = useRef<any>(null)
+  const hasInitialized = useRef(false)
 
   useEffect(() => {
-    if (typeof window === "undefined" || !containerRef.current) return
+    if (typeof window === "undefined" || !containerRef.current || hasInitialized.current) return
+    hasInitialized.current = true
 
     // Check WebGL support first
     const testCanvas = document.createElement('canvas')
@@ -26,41 +28,27 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
       return
     }
 
-    // Check if already loaded
-    if (!(window as any).Cesium) {
-      ;(window as any).CESIUM_BASE_URL = "/cesium"
+    // Set CESIUM_BASE_URL
+    ;(window as any).CESIUM_BASE_URL = "/cesium"
 
-      const link = document.createElement('link')
-      link.rel = 'stylesheet'
-      link.href = '/cesium/Widgets/widgets.css'
-      document.head.appendChild(link)
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = '/cesium/Widgets/widgets.css'
+    document.head.appendChild(link)
 
-      const script = document.createElement('script')
-      script.src = '/cesium/Cesium.js'
-      script.async = true
-      script.onload = initViewer
-      script.onerror = () => {
-        setIsLoading(false)
-        setHasError(true)
-      }
-      document.head.appendChild(script)
-
-      return () => {
-        document.head.removeChild(link)
-        document.head.removeChild(script)
-      }
-    } else {
-      initViewer()
+    const script = document.createElement('script')
+    script.src = '/cesium/Cesium.js'
+    script.async = true
+    script.onload = initViewer
+    script.onerror = () => {
+      setIsLoading(false)
+      setHasError(true)
     }
+    document.head.appendChild(script)
 
     function initViewer() {
       if (!containerRef.current) return
       const Cesium = (window as any).Cesium
-
-      if (viewerRef.current) {
-        viewerRef.current.destroy()
-        viewerRef.current = null
-      }
 
       try {
         const viewer = new Cesium.Viewer(containerRef.current, {
@@ -102,16 +90,16 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
         setHasError(true)
       }
     }
-  }, [geojson])
 
-  useEffect(() => {
     return () => {
+      document.head.removeChild(link)
+      document.head.removeChild(script)
       if (viewerRef.current) {
         viewerRef.current.destroy()
         viewerRef.current = null
       }
     }
-  }, [])
+  }, [geojson])
 
   if (hasError) {
     return (
@@ -153,12 +141,4 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
   }
 
   return <div ref={containerRef} style={{ width: "100%", height: "100vh" }} />
-}
-
-export default function CesiumMap({ geojson }: { geojson?: any }) {
-  return (
-    <Suspense fallback={<div style={{ width: "100%", height: "100vh", background: "#1a1a2e" }} />}>
-      <CesiumMapInner geojson={geojson} />
-    </Suspense>
-  )
 }
