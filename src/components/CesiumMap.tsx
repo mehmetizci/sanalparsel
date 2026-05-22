@@ -50,15 +50,6 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
       if (!containerRef.current) return
       const Cesium = (window as any).Cesium
 
-      // Set a timeout to handle cases where viewer gets stuck
-      const timeoutId = setTimeout(() => {
-        console.log('Viewer creation timeout - checking status')
-        if (isLoading) {
-          setIsLoading(false)
-          setHasError(true)
-        }
-      }, 10000)
-
       try {
         const viewer = new Cesium.Viewer(containerRef.current, {
           animation: false,
@@ -68,8 +59,6 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
           requestRenderMode: true,
           maximumRenderTimeChange: Infinity,
         })
-
-        clearTimeout(timeoutId)
 
         viewer.imageryLayers.removeAll()
         viewer.imageryLayers.addImageryProvider(
@@ -96,14 +85,21 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
           if (entity) focusParcel(viewer, entity)
         }
       } catch (error) {
-        clearTimeout(timeoutId)
         console.error('Viewer init failed:', error)
         setIsLoading(false)
         setHasError(true)
       }
     }
 
+    // Backup timeout to handle stuck loading
+    const timeoutId = setTimeout(() => {
+      console.log('Viewer creation timeout - forcing state update')
+      setIsLoading(false)
+      setHasError(true)
+    }, 15000)
+
     return () => {
+      clearTimeout(timeoutId)
       document.head.removeChild(link)
       document.head.removeChild(script)
       if (viewerRef.current) {
