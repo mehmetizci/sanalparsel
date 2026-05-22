@@ -59,6 +59,8 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
           terrainProvider: new Cesium.EllipsoidTerrainProvider(),
           requestRenderMode: true,
           maximumRenderTimeChange: Infinity,
+          showErrorPanel: false,
+          onError: () => {},
         })
 
         viewer.imageryLayers.removeAll()
