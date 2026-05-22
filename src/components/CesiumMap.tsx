@@ -52,16 +52,25 @@ function CesiumMapInner({ geojson }: { geojson?: any }) {
       }
 
       try {
-        const viewer = new Cesium.Viewer(containerRef.current, {
+        // Patch Cesium.Viewer to disable error panel
+        const originalViewer = Cesium.Viewer
+        
+        const viewer = new originalViewer(containerRef.current, {
           animation: false,
           timeline: false,
           baseLayerPicker: false,
           terrainProvider: new Cesium.EllipsoidTerrainProvider(),
           requestRenderMode: true,
           maximumRenderTimeChange: Infinity,
-          showErrorPanel: false,
-          onError: () => {},
-        })
+        }) as any
+
+        // Try to disable error panel after creation
+        if (viewer.cesiumWidget?._showErrorPanel) {
+          viewer.cesiumWidget._showErrorPanel = () => {}
+        }
+        if (viewer.cesiumWidget?._onError) {
+          viewer.cesiumWidget._onError = () => {}
+        }
 
         viewer.imageryLayers.removeAll()
         viewer.imageryLayers.addImageryProvider(
