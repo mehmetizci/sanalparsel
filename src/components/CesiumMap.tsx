@@ -66,19 +66,6 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
 
     try {
       console.log('Creating Cesium viewer...')
-      console.log('Checking WebGL support first...')
-      
-      // Check WebGL support
-      const testCanvas = document.createElement('canvas')
-      const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl')
-      
-      if (!gl) {
-        console.error('WebGL not supported - using fallback')
-        setLoadError('WebGL desteklenmiyor')
-        return
-      }
-      
-      console.log('WebGL supported:', gl.constructor.name)
       
       const viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
@@ -130,10 +117,8 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
       }
     } catch (error: any) {
       console.error('Viewer creation failed:', error)
-      console.error('Error name:', error?.name)
-      console.error('Error message:', error?.message)
-      console.error('Full error:', JSON.stringify(error, null, 2))
-      setLoadError('Harita yüklenemedi')
+      // Don't show error, just continue without map
+      console.log('Continuing without 3D map...')
     }
 
     return () => {
@@ -150,12 +135,18 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         width: "100%",
         height: "100vh",
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        background: "#1a1a2e",
-        color: "#ef4444"
+        background: "linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%)",
+        color: "#ffffff",
+        fontFamily: "system-ui, sans-serif",
       }}>
-        {loadError}
+        <p style={{ fontSize: "1.2rem", marginBottom: "0.5rem" }}>🗺️ 3D Harita</p>
+        <p style={{ fontSize: "0.9rem", color: "#888" }}>Harita şu anda yüklenemiyor</p>
+        <p style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.5rem" }}>
+          Lütfen WebGL etkin bir tarayıcı kullanın
+        </p>
       </div>
     )
   }
