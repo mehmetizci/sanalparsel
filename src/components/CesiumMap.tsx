@@ -67,6 +67,7 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     try {
       console.log('Creating Cesium viewer...')
       console.log('CESIUM_BASE_URL:', (window as any).CESIUM_BASE_URL)
+      console.log('Container:', containerRef.current)
       
       const viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
@@ -78,12 +79,19 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         navigationHelpButton: false,
         infoBox: false,
         selectionIndicator: false,
-        imageryProvider: new Cesium.OpenStreetMapImageryProvider({
-          url: 'https://tile.openstreetmap.org/'
-        }),
+        // Don't specify imageryProvider, let it use default with our base URL
       })
 
       console.log('Viewer created:', viewer)
+      
+      // Remove default imagery layers and add OpenStreetMap
+      viewer.imageryLayers.removeAll()
+      viewer.imageryLayers.addImageryProvider(
+        new Cesium.OpenStreetMapImageryProvider({
+          url: 'https://tile.openstreetmap.org/'
+        })
+      )
+      
       viewer.scene.globe.enableLighting = true
       viewerRef.current = viewer
 
