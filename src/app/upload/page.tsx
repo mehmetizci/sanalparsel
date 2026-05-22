@@ -37,13 +37,13 @@ export default function UploadPage() {
     
     // Calculate center
     if (parsed?.features?.[0]?.geometry?.coordinates) {
-      const coords = parsed.features[0].geometry.coordinates[0].flat()
-      const lons = []
-      const lats = []
-      for (let i = 0; i < coords.length; i += 2) {
-        lons.push(coords[i])
-        lats.push(coords[i + 1])
+      let coords = parsed.features[0].geometry.coordinates
+      // Handle Polygon structure: coordinates is [[[lon, lat], ...]]
+      if (Array.isArray(coords[0][0])) {
+        coords = coords[0] // Get the outer ring
       }
+      const lons = coords.map((c: number[]) => c[0])
+      const lats = coords.map((c: number[]) => c[1])
       const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2
       const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2
       setCenter({ lat: centerLat, lon: centerLon })
@@ -67,6 +67,19 @@ export default function UploadPage() {
             width: "100%"
           }}
         />
+        <a 
+          href="/sample-parcel.geojson" 
+          download="sample-parcel.geojson"
+          style={{ 
+            display: "inline-block",
+            marginTop: "16px",
+            color: "#ef4444",
+            fontSize: "14px",
+            textDecoration: "none"
+          }}
+        >
+          📥 Örnek GeoJSON İndir
+        </a>
         {center && (
           <div style={{ marginTop: 20, color: "#fff" }}>
             <b>Merkez Koordinat:</b>

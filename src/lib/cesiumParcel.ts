@@ -14,21 +14,19 @@ export function drawParcel(viewer: any, geojson: any): any {
       return undefined
     }
 
-    const coordinates = geojson.features[0].geometry.coordinates[0]
-    // Flatten nested arrays if needed (handle Polygon vs MultiPolygon)
-    const flatCoords = Array.isArray(coordinates[0][0]) 
-      ? coordinates[0].flat(Infinity) 
-      : coordinates.flat(Infinity)
-
-    // Convert to Cesium positions
-    const positions: any[] = []
-    for (let i = 0; i < flatCoords.length; i += 2) {
-      const lon = flatCoords[i]
-      const lat = flatCoords[i + 1]
-      if (typeof lon === 'number' && typeof lat === 'number') {
-        positions.push(Cesium.Cartesian3.fromDegrees(lon, lat))
-      }
+    // Handle different coordinate structures
+    let coordinates = geojson.features[0].geometry.coordinates
+    
+    // If it's a Polygon with ring as array of [lon, lat] pairs
+    if (Array.isArray(coordinates[0][0])) {
+      // coordinates is [[lon, lat, ...], ...] for Polygon
+      coordinates = coordinates[0] // Get the outer ring
     }
+    
+    // Convert to Cesium Cartesian3 positions
+    const positions: any[] = coordinates.map((coord: number[]) => {
+      return Cesium.Cartesian3.fromDegrees(coord[0], coord[1])
+    })
 
     if (positions.length === 0) {
       console.error("No valid positions found in GeoJSON")
@@ -38,7 +36,7 @@ export function drawParcel(viewer: any, geojson: any): any {
     const entity = viewer.entities.add({
       polygon: {
         hierarchy: new Cesium.PolygonHierarchy(positions),
-        material: Cesium.Color.RED.withAlpha(0.35),
+        material: Cesium.Color.RED.withAlpha(0.4),
         outline: true,
         outlineColor: Cesium.Color.WHITE,
       },
