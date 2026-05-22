@@ -67,13 +67,24 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     try {
       console.log('Creating Cesium viewer...')
       
-      // Use ellipsoid terrain (simpler, no network calls for terrain data)
+      // Create viewer with minimal configuration and request render mode
       const viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
         timeline: false,
         baseLayerPicker: false,
+        skyBox: false,
+        skyAtmosphere: false,
+        sceneModePicker: false,
+        navigationHelpButton: false,
+        homeButton: false,
+        geocoder: false,
+        infoBox: false,
+        selectionIndicator: false,
         // Use default ellipsoid terrain
         terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+        // Reduce GPU load with request render mode
+        requestRenderMode: true,
+        maximumRenderTimeChange: Infinity,
       })
 
       console.log('Viewer created:', viewer)
@@ -82,27 +93,21 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
       viewer.imageryLayers.removeAll()
 
       // Add OpenStreetMap as the base imagery
-      viewer.imageryLayers.addImageryProvider(
-        new Cesium.OpenStreetMapImageryProvider({
-          url: "https://tile.openstreetmap.org/",
-          credit: "© OpenStreetMap contributors"
-        })
-      )
-
-      // Enable globe lighting
-      viewer.scene.globe.enableLighting = true
-
-      // Enable HDR for better visuals
-      viewer.scene.highDynamicRange = true
+      const imageryProvider = new Cesium.OpenStreetMapImageryProvider({
+        url: "https://tile.openstreetmap.org/",
+        credit: "© OpenStreetMap contributors"
+      })
+      viewer.imageryLayers.addImageryProvider(imageryProvider)
 
       // Set default camera view (Turkey/Izmir area)
       viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(27.06, 38.48, 15000),
+        destination: Cesium.Cartesian3.fromDegrees(27.06, 38.48, 50000),
         orientation: {
           heading: Cesium.Math.toRadians(0),
-          pitch: Cesium.Math.toRadians(-45),
+          pitch: Cesium.Math.toRadians(-30),
           roll: 0
-        }
+        },
+        duration: 0
       })
 
       viewerRef.current = viewer
