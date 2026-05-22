@@ -68,6 +68,8 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
       console.log('Creating Cesium viewer...')
       console.log('CESIUM_BASE_URL:', (window as any).CESIUM_BASE_URL)
       console.log('Container:', containerRef.current)
+      console.log('Cesium:', Cesium)
+      console.log('OpenStreetMapImageryProvider:', Cesium.OpenStreetMapImageryProvider)
       
       const viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
@@ -79,21 +81,19 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         navigationHelpButton: false,
         infoBox: false,
         selectionIndicator: false,
-        // Don't specify imageryProvider, let it use default with our base URL
       })
-
       console.log('Viewer created:', viewer)
       
-      // Remove default imagery layers and add OpenStreetMap
+      // Remove default imagery and use OpenStreetMap
       viewer.imageryLayers.removeAll()
-      viewer.imageryLayers.addImageryProvider(
-        new Cesium.OpenStreetMapImageryProvider({
-          url: 'https://tile.openstreetmap.org/'
-        })
-      )
+      const osm = new Cesium.OpenStreetMapImageryProvider({
+        url: 'https://tile.openstreetmap.org/'
+      })
+      viewer.imageryLayers.addImageryProvider(osm)
       
       viewer.scene.globe.enableLighting = true
       viewerRef.current = viewer
+      console.log('Viewer setup complete')
 
       if (geojson) {
         const entity = drawParcel(viewer, geojson)
@@ -101,9 +101,11 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
           focusParcel(viewer, entity)
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Viewer creation failed:', error)
-      setLoadError('Harita görünümü oluşturulamadı')
+      console.error('Error message:', error?.message)
+      console.error('Error stack:', error?.stack)
+      setLoadError('Harita görünümü oluşturulamadı: ' + (error?.message || 'Bilinmeyen hata'))
     }
 
     return () => {
