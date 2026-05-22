@@ -16,14 +16,15 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
   useEffect(() => {
     if (typeof window === "undefined") return
 
-    // Set CESIUM_BASE_URL before loading
-    ;(window as any).CESIUM_BASE_URL = "/cesium"
-
     // Check if already loaded
     if ((window as any).Cesium) {
       setIsReady(true)
       return
     }
+
+    // Set CESIUM_BASE_URL BEFORE loading Cesium script
+    // This MUST be set before Cesium.js loads
+    ;(window as any).CESIUM_BASE_URL = "/cesium"
 
     // Load CSS
     const link = document.createElement('link')
@@ -37,6 +38,7 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     script.async = true
     script.onload = () => {
       console.log('Cesium loaded successfully')
+      console.log('CESIUM_BASE_URL:', (window as any).CESIUM_BASE_URL)
       setIsReady(true)
     }
     script.onerror = (e) => {
@@ -63,6 +65,9 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     }
 
     try {
+      console.log('Creating Cesium viewer...')
+      console.log('CESIUM_BASE_URL:', (window as any).CESIUM_BASE_URL)
+      
       const viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
         timeline: false,
@@ -73,8 +78,12 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         navigationHelpButton: false,
         infoBox: false,
         selectionIndicator: false,
+        imageryProvider: new Cesium.OpenStreetMapImageryProvider({
+          url: 'https://tile.openstreetmap.org/'
+        }),
       })
 
+      console.log('Viewer created:', viewer)
       viewer.scene.globe.enableLighting = true
       viewerRef.current = viewer
 
