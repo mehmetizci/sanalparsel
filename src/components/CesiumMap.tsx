@@ -65,33 +65,33 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     }
 
     try {
-      console.log('Creating Cesium viewer...')
-      console.log('CESIUM_BASE_URL:', (window as any).CESIUM_BASE_URL)
-      console.log('Container:', containerRef.current)
-      console.log('Cesium:', Cesium)
-      console.log('OpenStreetMapImageryProvider:', Cesium.OpenStreetMapImageryProvider)
+      console.log('Creating Cesium viewer with terrain...')
       
       const viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
         timeline: false,
-        geocoder: false,
-        homeButton: false,
-        sceneModePicker: false,
         baseLayerPicker: false,
-        navigationHelpButton: false,
-        infoBox: false,
-        selectionIndicator: false,
+        terrain: Cesium.Terrain.fromWorldTerrain(),
       })
+
       console.log('Viewer created:', viewer)
-      
-      // Remove default imagery and use OpenStreetMap
+
+      // Remove default imagery layers
       viewer.imageryLayers.removeAll()
-      const osm = new Cesium.OpenStreetMapImageryProvider({
-        url: 'https://tile.openstreetmap.org/'
-      })
-      viewer.imageryLayers.addImageryProvider(osm)
-      
+
+      // Add OpenStreetMap as the base imagery
+      viewer.imageryLayers.addImageryProvider(
+        new Cesium.OpenStreetMapImageryProvider({
+          url: "https://tile.openstreetmap.org/"
+        })
+      )
+
+      // Enable globe lighting
       viewer.scene.globe.enableLighting = true
+
+      // Enable HDR for better visuals
+      viewer.scene.highDynamicRange = true
+
       viewerRef.current = viewer
       console.log('Viewer setup complete')
 
@@ -104,7 +104,6 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     } catch (error: any) {
       console.error('Viewer creation failed:', error)
       console.error('Error message:', error?.message)
-      console.error('Error stack:', error?.stack)
       setLoadError('Harita görünümü oluşturulamadı: ' + (error?.message || 'Bilinmeyen hata'))
     }
 
