@@ -65,13 +65,15 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     }
 
     try {
-      console.log('Creating Cesium viewer with terrain...')
+      console.log('Creating Cesium viewer...')
       
+      // Use ellipsoid terrain (simpler, no network calls for terrain data)
       const viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
         timeline: false,
         baseLayerPicker: false,
-        terrain: Cesium.Terrain.fromWorldTerrain(),
+        // Use default ellipsoid terrain
+        terrainProvider: new Cesium.EllipsoidTerrainProvider(),
       })
 
       console.log('Viewer created:', viewer)
@@ -82,7 +84,8 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
       // Add OpenStreetMap as the base imagery
       viewer.imageryLayers.addImageryProvider(
         new Cesium.OpenStreetMapImageryProvider({
-          url: "https://tile.openstreetmap.org/"
+          url: "https://tile.openstreetmap.org/",
+          credit: "© OpenStreetMap contributors"
         })
       )
 
@@ -91,6 +94,16 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
 
       // Enable HDR for better visuals
       viewer.scene.highDynamicRange = true
+
+      // Set default camera view (Turkey/Izmir area)
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(27.06, 38.48, 15000),
+        orientation: {
+          heading: Cesium.Math.toRadians(0),
+          pitch: Cesium.Math.toRadians(-45),
+          roll: 0
+        }
+      })
 
       viewerRef.current = viewer
       console.log('Viewer setup complete')
