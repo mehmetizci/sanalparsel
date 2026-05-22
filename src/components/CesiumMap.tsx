@@ -39,7 +39,10 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     const script = document.createElement('script')
     script.src = '/cesium/Cesium.js'
     script.async = true
-    script.onload = initViewer
+    script.onload = () => {
+      console.log('Cesium script loaded, calling initViewer')
+      initViewer()
+    }
     script.onerror = () => {
       setIsLoading(false)
       setHasError(true)
@@ -47,10 +50,16 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     document.head.appendChild(script)
 
     function initViewer() {
-      if (!containerRef.current) return
+      console.log('initViewer called')
+      if (!containerRef.current) {
+        console.log('No container ref, returning')
+        return
+      }
       const Cesium = (window as any).Cesium
+      console.log('Cesium loaded:', !!Cesium)
 
       try {
+        console.log('Creating Cesium.Viewer...')
         const viewer = new Cesium.Viewer(containerRef.current, {
           animation: false,
           timeline: false,
@@ -59,6 +68,7 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
           requestRenderMode: true,
           maximumRenderTimeChange: Infinity,
         })
+        console.log('Viewer created:', viewer)
 
         viewer.imageryLayers.removeAll()
         viewer.imageryLayers.addImageryProvider(
@@ -78,25 +88,29 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         })
 
         viewerRef.current = viewer
+        console.log('Setting isLoading to false')
         setIsLoading(false)
+        console.log('Viewer setup complete')
 
         if (geojson) {
           const entity = drawParcel(viewer, geojson)
           if (entity) focusParcel(viewer, entity)
         }
       } catch (error) {
-        console.error('Viewer init failed:', error)
+        console.error('Viewer init FAILED:', error)
         setIsLoading(false)
         setHasError(true)
       }
     }
 
     // Backup timeout to handle stuck loading
+    console.log('Setting up 15s timeout for viewer creation')
     const timeoutId = setTimeout(() => {
-      console.log('Viewer creation timeout - forcing state update')
+      console.log('TIMEOUT FIRED - forcing error state')
       setIsLoading(false)
       setHasError(true)
     }, 15000)
+    console.log('Timeout ID:', timeoutId)
 
     return () => {
       clearTimeout(timeoutId)
