@@ -1,0 +1,1 @@
+export async function mergeVideoWithAudio(videoBlob:Blob,audioBlob:Blob){const formData=new FormData();formData.append("video",videoBlob,"video.webm");formData.append("audio",audioBlob,"audio.mp3");const res=await fetch("/api/merge-video",{method:"POST",body:formData});if(!res.ok)throw new Error("Video ve ses birleştirilemedi");return await res.blob()}

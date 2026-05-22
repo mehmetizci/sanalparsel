@@ -1,0 +1,2 @@
+export function getGeoJsonCenter(geojson:any){const coords=geojson.features[0].geometry.coordinates[0];let lat=0,lon=0;coords.forEach(([x,y]:number[])=>{lon+=x;lat+=y});return {lat:lat/coords.length,lon:lon/coords.length}}
+export function getBounds(coords:number[][]){return coords.reduce((acc,[lon,lat])=>({minLat:Math.min(acc.minLat,lat),maxLat:Math.max(acc.maxLat,lat),minLon:Math.min(acc.minLon,lon),maxLon:Math.max(acc.maxLon,lon)}),{minLat:Infinity,maxLat:-Infinity,minLon:Infinity,maxLon:-Infinity})}

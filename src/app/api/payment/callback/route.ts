@@ -1,0 +1,1 @@
+export async function POST(req:Request){const form=await req.formData();const token=form.get("token");return Response.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/dashboard?payment=success&token=${token}`)}

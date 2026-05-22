@@ -1,36 +1,99 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SanalParsel - AI Drone Gayrimenkul Video Platformu
 
-## Getting Started
+AI destekli gayrimenkul drone video ve Auto Reels platformu.
 
-First, run the development server:
+## Özellikler
+
+- **GeoJSON Upload** - Parsel verisini harita üzerinde görselleştirme
+- **Cesium 3D Görselleştirme** - 3D arazi ve parsel görüntüleme
+- **Sinematik Drone Animasyonları** - 4 farklı kamera hareketi
+- **AI Çevre Analizi** - OpenRouter ile çevre analizi
+- **ElevenLabs Seslendirme** - Türkçe AI sesli anlatım
+- **iyzico Ödeme** - Güvenli ödeme entegrasyonu
+- **FFmpeg Video Merge** - Video + ses birleştirme
+- **Reels Timeline Engine** - Sosyal medya için kısa video formatı
+
+## Teknolojiler
+
+- **Next.js 14** - React framework
+- **TypeScript** - Tip güvenli kod
+- **CesiumJS** - 3D harita ve görselleştirme
+- **Supabase** - Auth ve veritabanı
+- **ElevenLabs** - AI seslendirme
+- **OpenRouter** - AI analiz
+- **FFmpeg** - Video işleme
+- **iyzico** - Ödeme sistemi
+
+## Kurulum
 
 ```bash
+# Bağımlılıkları yükle
+npm install
+
+# Environment değişkenlerini ayarla
+cp .env.example .env.local
+
+# Geliştirme sunucusunu başlat
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Environment Değişkenleri
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# Supabase (Auth + Database)
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# AI Services
+OPENROUTER_API_KEY=your-openrouter-key
+ELEVENLABS_API_KEY=your-elevenlabs-key
 
-## Learn More
+# Payment
+IYZIPAY_API_KEY=your-iyzipay-key
+IYZIPAY_SECRET_KEY=your-iyzipay-secret
 
-To learn more about Next.js, take a look at the following resources:
+# Site
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Sayfalar
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Route | Açıklama |
+|-------|----------|
+| `/` | Ana sayfa - platform tanıtımı |
+| `/upload` | GeoJSON dosya yükleme |
+| `/reels` | Auto Reels oluşturucu |
+| `/dashboard` | Proje dashboard |
+| `/profile` | Kullanıcı profil ayarları |
+| `/api/ai/analyze` | AI çevre analizi endpoint |
+| `/api/voice` | ElevenLabs seslendirme |
+| `/api/payment/create` | iyzico ödeme başlatma |
+| `/api/merge-video` | FFmpeg video + ses merge |
 
-## Deploy on Vercel
+## Supabase Kurulumu
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. [supabase.com](https://supabase.com) hesabı oluşturun
+2. Yeni proje oluşturun
+3. `supabase/schema.sql` içeriğini SQL Editor'da çalıştırın
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deploy
+
+### Vercel
+
+```bash
+# Vercel CLI ile deploy
+vercel --prod
+```
+
+### GitHub Actions
+
+1. GitHub repo'da Settings → Secrets ekleyin:
+   - `VERCEL_TOKEN`
+   - `VERCEL_ORG_ID`
+   - `VERCEL_PROJECT_ID`
+
+2. `production-ready` branch'ine push edin
+
+## Lisans
+
+MIT

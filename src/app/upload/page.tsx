@@ -1,0 +1,95 @@
+"use client"
+
+import dynamic from "next/dynamic"
+import { useState } from "react"
+
+const CesiumMap = dynamic(() => import("@/components/CesiumMap"), {
+  ssr: false,
+  loading: () => (
+    <div 
+      style={{ 
+        width: "100%", 
+        height: "100vh", 
+        background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
+        display: "flex", 
+        flexDirection: "column",
+        alignItems: "center", 
+        justifyContent: "center", 
+        color: "#fff"
+      }}
+    >
+      <p style={{ fontSize: "18px" }}>Harita yükleniyor...</p>
+    </div>
+  ),
+})
+
+export default function UploadPage() {
+  const [geojson, setGeojson] = useState<any>(null)
+  const [center, setCenter] = useState<any>(null)
+
+  const handleUpload = async (e: any) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const parsed = JSON.parse(await file.text())
+    setGeojson(parsed)
+    
+    // Calculate center
+    if (parsed?.features?.[0]?.geometry?.coordinates) {
+      let coords = parsed.features[0].geometry.coordinates
+      // Handle Polygon structure: coordinates is [[[lon, lat], ...]]
+      if (Array.isArray(coords[0][0])) {
+        coords = coords[0] // Get the outer ring
+      }
+      const lons = coords.map((c: number[]) => c[0])
+      const lats = coords.map((c: number[]) => c[1])
+      const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2
+      const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2
+      setCenter({ lat: centerLat, lon: centerLon })
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh" }}>
+      <aside style={{ width: 340, padding: 24, borderRight: "1px solid #333", background: "#0f0f23" }}>
+        <h2 style={{ color: "#fff", fontSize: "24px", marginBottom: "24px" }}>GeoJSON Yükle</h2>
+        <input 
+          type="file" 
+          accept=".json,.geojson" 
+          onChange={handleUpload}
+          style={{ 
+            background: "#1a1a2e",
+            color: "#fff",
+            padding: "12px",
+            borderRadius: "8px",
+            border: "1px solid #333",
+            width: "100%"
+          }}
+        />
+        <a 
+          href="/sample-parcel.geojson" 
+          download="sample-parcel.geojson"
+          style={{ 
+            display: "inline-block",
+            marginTop: "16px",
+            color: "#ef4444",
+            fontSize: "14px",
+            textDecoration: "none"
+          }}
+        >
+          📥 Örnek GeoJSON İndir
+        </a>
+        {center && (
+          <div style={{ marginTop: 20, color: "#fff" }}>
+            <b>Merkez Koordinat:</b>
+            <p style={{ fontFamily: "monospace", fontSize: "14px" }}>
+              {center.lat.toFixed(6)}, {center.lon.toFixed(6)}
+            </p>
+          </div>
+        )}
+      </aside>
+      <section style={{ flex: 1 }}>
+        <CesiumMap geojson={geojson} />
+      </section>
+    </div>
+  )
+}
