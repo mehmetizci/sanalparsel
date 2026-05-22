@@ -65,25 +65,51 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
     }
 
     try {
-      console.log('Creating Cesium scene...')
+      console.log('Creating Cesium viewer...')
+      console.log('Checking WebGL support first...')
       
-      // Create CesiumWidget instead of full Viewer - more lightweight
-      const widget = new Cesium.CesiumWidget(containerRef.current, {
-        imageryProvider: new Cesium.OpenStreetMapImageryProvider({
-          url: "https://tile.openstreetmap.org/",
-          credit: "© OpenStreetMap contributors"
-        }),
-        terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+      // Check WebGL support
+      const testCanvas = document.createElement('canvas')
+      const gl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl')
+      
+      if (!gl) {
+        console.error('WebGL not supported - using fallback')
+        setLoadError('WebGL desteklenmiyor')
+        return
+      }
+      
+      console.log('WebGL supported:', gl.constructor.name)
+      
+      const viewer = new Cesium.Viewer(containerRef.current, {
+        animation: false,
+        timeline: false,
+        baseLayerPicker: false,
         skyBox: false,
         skyAtmosphere: false,
+        sceneModePicker: false,
+        navigationHelpButton: false,
+        homeButton: false,
+        geocoder: false,
+        infoBox: false,
+        selectionIndicator: false,
+        terrainProvider: new Cesium.EllipsoidTerrainProvider(),
         requestRenderMode: true,
         maximumRenderTimeChange: Infinity,
       })
 
-      console.log('Widget created:', widget)
+      console.log('Viewer created:', viewer)
 
-      // Set camera position
-      widget.camera.flyTo({
+      // Remove default and add OpenStreetMap
+      viewer.imageryLayers.removeAll()
+      viewer.imageryLayers.addImageryProvider(
+        new Cesium.OpenStreetMapImageryProvider({
+          url: "https://tile.openstreetmap.org/",
+          credit: "© OpenStreetMap contributors"
+        })
+      )
+
+      // Set camera
+      viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(27.06, 38.48, 50000),
         orientation: {
           heading: Cesium.Math.toRadians(0),
@@ -93,8 +119,6 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         duration: 0
       })
 
-      // Store widget as viewer for compatibility
-      const viewer = widget
       viewerRef.current = viewer
       console.log('Viewer setup complete')
 
@@ -106,8 +130,10 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
       }
     } catch (error: any) {
       console.error('Viewer creation failed:', error)
+      console.error('Error name:', error?.name)
       console.error('Error message:', error?.message)
-      setLoadError('Harita görünümü oluşturulamadı: ' + (error?.message || 'Bilinmeyen hata'))
+      console.error('Full error:', JSON.stringify(error, null, 2))
+      setLoadError('Harita yüklenemedi')
     }
 
     return () => {
