@@ -1,20 +1,38 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import * as Cesium from "cesium"
-import "cesium/Build/Cesium/Widgets/widgets.css"
 import { drawParcel, focusParcel } from "@/lib/cesiumParcel"
 
 // Set CESIUM_BASE_URL for production - must be before CesiumViewer is used
 if (typeof window !== "undefined") {
-  (window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = "/static/cesium"
+  (window as any).CESIUM_BASE_URL = "/static/cesium"
 }
 
 export default function CesiumMap({ geojson }: { geojson?: any }) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const [isMounted, setIsMounted] = useState(false)
+  const [cssLoaded, setCssLoaded] = useState(false)
+  
+  // Load Cesium CSS dynamically
+  useEffect(() => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = '/static/cesium/Widgets/widgets.css'
+    link.onload = () => setCssLoaded(true)
+    document.head.appendChild(link)
+    
+    return () => {
+      document.head.removeChild(link)
+    }
+  }, [])
   
   useEffect(() => {
-    if (!containerRef.current) return
+    setIsMounted(true)
+  }, [])
+  
+  useEffect(() => {
+    if (!isMounted || !cssLoaded || !containerRef.current) return
     
     // Clean up any existing viewer
     if ((window as any).sanalparselViewer) {
@@ -47,7 +65,20 @@ export default function CesiumMap({ geojson }: { geojson?: any }) {
         delete (window as any).sanalparselViewer
       }
     }
-  }, [geojson])
+  }, [geojson, isMounted, cssLoaded])
+  
+  if (!isMounted) {
+    return (
+      <div 
+        style={{ 
+          width: "100%", 
+          height: "100vh",
+          position: "relative",
+          background: "#1a1a2e",
+        }} 
+      />
+    )
+  }
   
   return (
     <div 
