@@ -1,36 +1,3 @@
-import './globals.css'
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import { Toaster } from 'sonner'
-
-const inter = Inter({ subsets: ['latin'] })
-
-export const metadata: Metadata = {
-  title: 'SanalParsel | AI Drone Gayrimenkul Video Platformu',
-  description: 'AI destekli drone video platformu ile gayrimenkulünüzü profesyonelce tanıtın',
-}
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <html lang="tr" className="dark">
-      <body className={inter.className}>
-        {children}
-        <Toaster 
-          position="top-right"
-          toastOptions={{
-            style: {
-              background: 'rgba(10, 10, 10, 0.95)',
-              backdropFilter: 'blur(20px)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: 'white',
-            },
-          }}
-        />
-      </body>
-    </html>
-  )
-}
+import type { ReactNode } from "react"
+export const metadata={title:"SanalParsel",description:"AI destekli drone emlak video platformu"}
+export default function RootLayout({children}:{children:ReactNode}){return <html lang="tr"><body style={{margin:0,fontFamily:"Arial, sans-serif"}}>{children}</body></html>}

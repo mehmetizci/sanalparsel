@@ -1,17 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**",
-      },
-      {
-        protocol: "http",
-        hostname: "**",
-      },
-    ],
-  },
   transpilePackages: ['cesium'],
   webpack: (config) => {
     config.resolve.fallback = {
@@ -19,11 +7,20 @@ const nextConfig = {
       fs: false,
       path: false,
       os: false,
+      module: false,
     };
     return config;
   },
-  env: {
-    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "**" },
+      { protocol: "http", hostname: "**" },
+    ],
+  },
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
   },
 };
 

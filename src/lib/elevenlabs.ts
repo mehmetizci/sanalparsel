@@ -1,0 +1,1 @@
+export async function generateVoice(text:string){const res=await fetch("/api/voice",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});if(!res.ok)throw new Error("Ses oluşturulamadı");return await res.blob()}

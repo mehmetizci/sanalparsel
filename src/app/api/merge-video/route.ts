@@ -1,0 +1,6 @@
+import {writeFile,readFile,unlink} from "fs/promises"
+import {randomUUID} from "crypto"
+import ffmpeg from "fluent-ffmpeg"
+import ffmpegPath from "ffmpeg-static"
+ffmpeg.setFfmpegPath(ffmpegPath as string)
+export async function POST(req:Request){const form=await req.formData();const video=form.get("video") as File;const audio=form.get("audio") as File;if(!video||!audio)return Response.json({error:"Video veya ses eksik"},{status:400});const id=randomUUID();const videoPath=`/tmp/${id}.webm`;const audioPath=`/tmp/${id}.mp3`;const outputPath=`/tmp/${id}.mp4`;await writeFile(videoPath,Buffer.from(await video.arrayBuffer()));await writeFile(audioPath,Buffer.from(await audio.arrayBuffer()));await new Promise((resolve,reject)=>{ffmpeg().input(videoPath).input(audioPath).outputOptions(["-c:v libx264","-c:a aac","-shortest","-pix_fmt yuv420p","-movflags +faststart"]).save(outputPath).on("end",resolve).on("error",reject)});const mp4=await readFile(outputPath);await unlink(videoPath).catch(()=>{});await unlink(audioPath).catch(()=>{});await unlink(outputPath).catch(()=>{});return new Response(mp4,{headers:{"Content-Type":"video/mp4","Content-Disposition":"attachment; filename=sanalparsel-reels.mp4"}})}
