@@ -1,0 +1,13 @@
+{
+  "name": "sanalparsel-ui-design",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SanalParsel - Premium Cinematic Real Estate Video Platform UI Design",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
