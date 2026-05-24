@@ -129,7 +129,6 @@ export default function PreviewPage() {
 
         <div className="glass rounded-2xl overflow-hidden" style={{ minHeight: "500px" }}>
             <MapLibreMap
-              key={`map-${polygonCoordinates.length}`}
               centerLat={centerLat}
               centerLon={centerLon}
               polygonCoordinates={displayPolygon}
