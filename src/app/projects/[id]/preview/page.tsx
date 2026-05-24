@@ -94,7 +94,9 @@ export default function PreviewPage() {
   
   // Use real GeoJSON polygon or demo polygon
   const displayPolygon = polygonCoordinates.length > 0 ? polygonCoordinates : DEMO_POLYGON;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isDemo = searchParams.get("demo") === "true";
+  console.log("[Preview] isDemo:", isDemo, "polygonCoords:", displayPolygon.length);
 
   if (loading) {
     return (
