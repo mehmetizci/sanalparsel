@@ -65,12 +65,21 @@ export default function MapLibreMap({
 
     const initMap = async () => {
       try {
+        console.log("MapLibreMap: Loading maplibre-gl...");
+        
         // Load maplibre
         const maplibreglModule = await import("maplibre-gl");
+        console.log("MapLibreMap: Module loaded:", maplibreglModule);
         const MapLibre = maplibreglModule.default;
+        console.log("MapLibreMap: MapLibre constructor:", MapLibre);
 
-        if (!mounted || !mapContainerRef.current) return;
+        if (!mounted || !mapContainerRef.current) {
+          console.log("MapLibreMap: Skipping - not mounted or no container");
+          return;
+        }
 
+        console.log("MapLibreMap: Creating map at center:", centerLon, centerLat);
+        
         const map = new MapLibre.Map({
           container: mapContainerRef.current,
           style: {
