@@ -22,6 +22,39 @@
 - **Payment**: iyzico kredi sistemi
 - **Deploy**: Vercel
 
+## 🎥 Sinematik Harita Teknolojisi
+
+### Rendering Kalitesi
+MapLibre GL JS ile yüksek kaliteli uydu görüntüsü:
+- **Esri World Imagery** - Yüksek çözünürlüklü uydu haritası
+- **512px Tile Boyutu** - 256px yerine daha net görüntü
+- **Antialiasing** - Keskin kenar yumuşatma
+- **maxZoom 22** - Maksimum detay seviyesi
+- **Pitch 55-65°** - Sinematik açı (drone hissi)
+- **Atmospheric Fog** - Derinlik için sis efekti
+- **Contrast 1.15 / Saturation 1.2** - Görüntü iyileştirme
+
+### Video Render Pipeline
+```
+┌─────────────┐    ┌──────────────┐    ┌────────────┐    ┌─────────┐
+│ Cinematic   │───▶│ Frame Capture │───▶│ Image Sequence │───▶│ FFmpeg  │
+│ Animation   │    │ (30 FPS)      │    │ (PNG/JPEG)    │    │ H264    │
+└─────────────┘    └──────────────┘    └────────────┘    └─────────┘
+```
+
+**Video Spesifikasyonları:**
+- Format: H264 MP4
+- FPS: 30
+- Bitrate: 20 Mbps minimum
+- Resolution: 1080x1920 (9:16 Reels) veya 1920x1080 (Landscape)
+- Rendering: Frame-by-frame (realtime canvas recording yok)
+
+### Tile Preloading
+Video kaydı öncesi tüm tiles preload edilir:
+- Zoom seviyeleri: 14, 16, 18, 20
+- Parcel çevresi + buffer bölge
+- 30 saniye timeout ile yükleme bekleme
+
 ## 📦 Kurulum
 
 ### Gereksinimler
