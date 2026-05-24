@@ -8,7 +8,7 @@ import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PrimaryButton from "@/components/PrimaryButton";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import ParcelMap from "@/components/CesiumMap";
+import MapLibreMap from "@/components/MapLibreMap";
 
 const DEMO_POLYGON = [
   [27.1418, 38.4228],
@@ -88,7 +88,8 @@ export default function PreviewPage() {
   }, [router, searchParams]);
 
   const polygonCoordinates = project?.geojson?.geometry?.coordinates?.[0] || [];
-  const properties = project?.properties as ParcelProperties || {};
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _properties = project?.properties as ParcelProperties || {};
   const centerLat = project?.center_lat || 38.4237;
   const centerLon = project?.center_lon || 27.1428;
   
@@ -138,11 +139,10 @@ export default function PreviewPage() {
               </div>
             }
           >
-            <ParcelMap
+            <MapLibreMap
               centerLat={centerLat}
               centerLon={centerLon}
               polygonCoordinates={displayPolygon}
-              properties={properties}
             />
           </ErrorBoundary>
         </div>
