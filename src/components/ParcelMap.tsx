@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, {
   type Map as MapLibreMap,
-  type StyleSpecification,
   type GeoJSONSource,
   type LngLatBoundsLike,
 } from "maplibre-gl";
@@ -259,7 +258,9 @@ export default function ParcelMap({
     let cancelled = false;
 
     try {
-      const style: StyleSpecification = {
+      // High-quality cinematic map style with Esri World Imagery
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const style: any = {
         version: 8,
         sources: {
           esriSatellite: {
@@ -267,15 +268,37 @@ export default function ParcelMap({
             tiles: [
               "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
             ],
-            tileSize: 256,
-            maxzoom: 19,
+            // 512px tiles for higher quality (upscaled from 256 source)
+            tileSize: 512,
+            // Allow zoom up to 22 for maximum detail
+            maxzoom: 22,
             attribution: ESRI_ATTRIBUTION,
           },
         },
         layers: [
-          { id: "esri-satellite", type: "raster", source: "esriSatellite" },
+          {
+            id: "esri-satellite",
+            type: "raster",
+            source: "esriSatellite",
+            paint: {
+              // Contrast boost for sharper imagery
+              "raster-contrast": 1.15,
+              // Slight saturation boost for cinematic warmth
+              "raster-saturation": 1.2,
+              // Smooth fade to prevent harsh transitions
+              "raster-fade-duration": 300,
+            },
+          },
         ],
         glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+        // Atmospheric fog for depth and cinematic quality
+        fog: {
+          color: "#c8d3e6",
+          "high-color": "#d8e3f0",
+          "horizon-blend": 0.08,
+          "space-color": "#0a1628",
+          "star-intensity": 0.0,
+        },
       };
 
       const map = new maplibregl.Map({
@@ -283,11 +306,16 @@ export default function ParcelMap({
         style,
         center: [fallbackCenter.lon, fallbackCenter.lat],
         zoom: 16,
-        pitch: 0,
-        bearing: 0,
+        // Cinematic pitch (55-65 degrees) for dramatic aerial view
+        pitch: 60,
+        bearing: -15,
+        maxZoom: 22,
+        // Enable antialiasing for crisp edges
+        antialias: true,
         attributionControl: { compact: true },
         maxPitch: 75,
-        fadeDuration: 200,
+        // Smooth fade duration for cinematic feel
+        fadeDuration: 300,
       });
 
       mapRef.current = map;
