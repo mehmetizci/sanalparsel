@@ -78,6 +78,19 @@ export default function PreviewPage({ params }: { params: Promise<{ id: string }
   const polygonCoordinates = project?.geojson?.geometry?.coordinates?.[0] || [];
   const properties = project?.properties as ParcelProperties || {};
 
+  // Define center coordinates
+  const centerLat = project?.center_lat || 38.4237;
+  const centerLon = project?.center_lon || 27.1428;
+
+  // Demo mode: use a sample polygon around the center point
+  const displayPolygon = isDemo && polygonCoordinates.length === 0 ? [
+    [centerLon - 0.001, centerLat - 0.001],
+    [centerLon + 0.001, centerLat - 0.001],
+    [centerLon + 0.001, centerLat + 0.001],
+    [centerLon - 0.001, centerLat + 0.001],
+    [centerLon - 0.001, centerLat - 0.001],
+  ] : polygonCoordinates;
+
   if (loading) {
     return (
       <AppShell>
@@ -105,9 +118,9 @@ export default function PreviewPage({ params }: { params: Promise<{ id: string }
         <div className="glass rounded-2xl overflow-hidden" style={{ minHeight: "500px" }}>
           {project ? (
             <ParcelMap
-              centerLat={project.center_lat || 38.4237}
-              centerLon={project.center_lon || 27.1428}
-              polygonCoordinates={polygonCoordinates}
+              centerLat={centerLat}
+              centerLon={centerLon}
+              polygonCoordinates={displayPolygon}
               properties={properties}
               height={300}
             />
