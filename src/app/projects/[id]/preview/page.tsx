@@ -94,6 +94,7 @@ export default function PreviewPage() {
   
   // Use real GeoJSON polygon or demo polygon
   const displayPolygon = polygonCoordinates.length > 0 ? polygonCoordinates : DEMO_POLYGON;
+  const isDemo = searchParams.get("demo") === "true";
 
   if (loading) {
     return (
