@@ -48,6 +48,9 @@ export default function PreviewPage({ params }: { params: Promise<{ id: string }
     }
 
     const fetchProject = async () => {
+      // Skip Supabase call in demo mode
+      if (isDemo) return;
+
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
 
