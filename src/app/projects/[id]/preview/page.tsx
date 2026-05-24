@@ -127,7 +127,7 @@ export default function PreviewPage() {
           description="Haritada parselinizi görüntüleyin"
         />
 
-        <div className="glass rounded-2xl overflow-hidden" style={{ minHeight: "500px" }}>
+        <div className="glass rounded-2xl overflow-hidden h-[500px] w-full relative">
             <MapLibreMap
               centerLat={centerLat}
               centerLon={centerLon}
