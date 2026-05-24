@@ -91,6 +91,8 @@ export default function PreviewPage() {
   const properties = project?.properties as ParcelProperties || {};
   const centerLat = project?.center_lat || 38.4237;
   const centerLon = project?.center_lon || 27.1428;
+  
+  // Use real GeoJSON polygon or demo polygon
   const displayPolygon = polygonCoordinates.length > 0 ? polygonCoordinates : DEMO_POLYGON;
 
   if (loading) {
