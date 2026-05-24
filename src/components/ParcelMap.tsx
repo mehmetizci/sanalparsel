@@ -1,15 +1,20 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { type LngLatBoundsLike } from "maplibre-gl";
+import maplibregl, {
+  type Map as MapLibreMap,
+  type StyleSpecification,
+  type GeoJSONSource,
+  type LngLatBoundsLike,
+} from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { Feature, FeatureCollection, Polygon, MultiPolygon, Position } from "geojson";
-import {
-  CINEMATIC_PITCH,
-  CINEMATIC_EASING,
-  buildCinematicStyle,
-} from "@/lib/cinematic-renderer";
+import type {
+  Feature,
+  FeatureCollection,
+  Polygon,
+  MultiPolygon,
+  Position,
+} from "geojson";
 
 export interface ParcelMapProperties {
   Il?: string;
@@ -52,20 +57,13 @@ export interface ParcelMapProps {
   cinematic?: boolean;
   /** Show floating overlay UI (project header, parcel card, controls). */
   showOverlays?: boolean;
-  /** Called once after the map is ready. */
-  onReady?: () => void;
+  /** Called once after the map style + parcel layers are ready. */
+  onReady?: (map: MapLibreMap) => void;
   className?: string;
-  /** Video render mode: enables frame capture without UI overlays */
-  videoRenderMode?: boolean;
-  /** Target video resolution width for frame capture */
-  videoWidth?: number;
-  /** Target video resolution height for frame capture */
-  videoHeight?: number;
-  /** Callback when map is ready for frame capture in video mode */
-  onMapReadyForCapture?: (captureFrame: () => ImageData | null) => void;
 }
 
-// Attribution is handled in buildCinematicStyle()
+const ESRI_ATTRIBUTION =
+  'Tiles &copy; <a href="https://www.esri.com/" target="_blank" rel="noreferrer">Esri</a> &mdash; Source: Esri, Maxar, Earthstar Geographics';
 
 const POI_PALETTE: Record<string, { color: string; emoji: string; label: string }> = {
   hospital: { color: "#ef4444", emoji: "🏥", label: "Hastane" },
@@ -173,21 +171,14 @@ export default function ParcelMap({
   showOverlays = true,
   onReady,
   className,
-  videoRenderMode = false,
-
-
-  onMapReadyForCapture,
 }: ParcelMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
   const rotationRafRef = useRef<number | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
-
-  // Hide overlays in video render mode
-  const effectiveShowOverlays = videoRenderMode ? false : showOverlays;
 
   // Run the WebGL probe once on mount, before any map state is initialised.
   useEffect(() => {
@@ -257,8 +248,8 @@ export default function ParcelMap({
   // ---- Map lifecycle (mount/unmount only) -----------------------------------
   useEffect(() => {
     if (typeof window === "undefined" || !containerRef.current) return;
-    if (webglOk === false) return;
-    if (webglOk !== true) return;
+    if (webglOk === false) return; // graceful static fallback below
+    if (webglOk !== true) return; // still probing
 
     if (!fallbackCenter) {
       setMapError("Geçerli koordinat bulunamadı.");
@@ -268,33 +259,35 @@ export default function ParcelMap({
     let cancelled = false;
 
     try {
-      // Build high-quality cinematic style
-      const style = buildCinematicStyle({
-        contrast: 1.15,      // Sharper imagery
-        saturation: 1.2,      // Cinematic warmth
-        fogColor: [0.78, 0.85, 0.94, 0.3],
-        fogAttenuation: 0.15,
-        antialias: true,
-      });
+      const style: StyleSpecification = {
+        version: 8,
+        sources: {
+          esriSatellite: {
+            type: "raster",
+            tiles: [
+              "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            ],
+            tileSize: 256,
+            maxzoom: 19,
+            attribution: ESRI_ATTRIBUTION,
+          },
+        },
+        layers: [
+          { id: "esri-satellite", type: "raster", source: "esriSatellite" },
+        ],
+        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+      };
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const map = new maplibregl.Map({
         container: containerRef.current,
-        style: style as any,
+        style,
         center: [fallbackCenter.lon, fallbackCenter.lat],
         zoom: 16,
-        // Cinematic camera angles (55-65°)
-        pitch: 60,
-        bearing: -20,
+        pitch: 0,
+        bearing: 0,
         attributionControl: { compact: true },
-        // High quality rendering settings
-        antialias: true,
-        // 512px tiles for better quality
-        maxZoom: 22,
-        // Crisp tile rendering
-        renderWorldCopies: false,
-        // Preserve buffer for frame capture
-        preserveDrawingBuffer: true,
+        maxPitch: 75,
+        fadeDuration: 200,
       });
 
       mapRef.current = map;
@@ -410,17 +403,12 @@ export default function ParcelMap({
           },
         });
 
-        // --- Cinematic fly-in with smooth interpolation -----
+        // --- Cinematic fly-in --------------------------------------------
         const bounds = computeBounds(outerRing);
-        
-        // Use cinematic pitch range (55-65°)
-        const cinematicPitch = Math.random() * (CINEMATIC_PITCH.max - CINEMATIC_PITCH.min) + CINEMATIC_PITCH.min;
-        
         const baseCamera = {
-          pitch: cinematicPitch,
-          bearing: -20,
-          duration: 3000,
-          easing: CINEMATIC_EASING.flyTo,
+          pitch: 55,
+          bearing: -25,
+          duration: 2400,
           essential: true,
         } as const;
 
@@ -436,10 +424,9 @@ export default function ParcelMap({
             if (offset !== 0) {
               map.easeTo({
                 zoom: map.getZoom() + offset,
-                pitch: Math.min(cinematicPitch + 5, CINEMATIC_PITCH.max),
+                pitch: 60,
                 bearing: -10,
-                duration: 1800,
-                easing: CINEMATIC_EASING.flyTo,
+                duration: 1600,
               });
             }
           });
@@ -483,19 +470,7 @@ export default function ParcelMap({
         }
 
         setIsReady(true);
-        onReady?.();
-
-        // Register frame capture function for video rendering
-        if (onMapReadyForCapture) {
-          const captureFrame = (): ImageData | null => {
-            const canvas = map.getCanvas();
-            if (!canvas) return null;
-            const ctx = canvas.getContext("2d", { willReadFrequently: true });
-            if (!ctx) return null;
-            return ctx.getImageData(0, 0, canvas.width, canvas.height);
-          };
-          onMapReadyForCapture(captureFrame);
-        }
+        onReady?.(map);
       });
     } catch (err) {
       console.error("[ParcelMap] initialization failed:", err);
@@ -524,7 +499,7 @@ export default function ParcelMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isReady) return;
-    const source = map.getSource("pois") as any;
+    const source = map.getSource("pois") as GeoJSONSource | undefined;
     if (source) source.setData(poiCollection);
   }, [poiCollection, isReady]);
 
@@ -611,17 +586,11 @@ export default function ParcelMap({
 
   return (
     <div
-      className={`relative w-full h-full min-h-[500px] bg-[#0a1f3d] rounded-[28px] overflow-hidden ${
+      className={`relative w-full h-full min-h-[420px] bg-card rounded-2xl overflow-hidden ${
         isFullscreen ? "fixed inset-0 z-50 rounded-none" : ""
       } ${className || ""}`}
-      style={{ position: "relative" }}
     >
-      {/* Map container must fill parent */}
-      <div
-        ref={containerRef}
-        className="absolute inset-0"
-        style={{ width: "100%", height: "100%" }}
-      />
+      <div ref={containerRef} className="absolute inset-0" />
 
       {/* Cinematic glow overlay */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_transparent_55%,_rgba(7,24,47,0.55)_100%)]" />
@@ -650,8 +619,8 @@ export default function ParcelMap({
         </div>
       )}
 
-      {effectiveShowOverlays && properties && (
-        <div className="absolute top-3 left-3 right-16 z-20">
+      {showOverlays && properties && (
+        <div className="absolute top-3 left-3 right-16 z-10">
           <div className="bg-black/55 backdrop-blur-md rounded-xl px-3 py-2 border border-white/10">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -682,8 +651,8 @@ export default function ParcelMap({
         </div>
       )}
 
-      {effectiveShowOverlays && (
-        <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
+      {showOverlays && (
+        <div className="absolute top-3 right-3 z-10 flex flex-col gap-2">
           <button
             type="button"
             onClick={() => setIsFullscreen((v) => !v)}
@@ -706,8 +675,8 @@ export default function ParcelMap({
         </div>
       )}
 
-      {effectiveShowOverlays && (
-        <div className="absolute bottom-3 left-3 right-3 z-20">
+      {showOverlays && (
+        <div className="absolute bottom-3 left-3 right-3 z-10">
           <div className="bg-black/55 backdrop-blur-md rounded-xl px-3 py-2 border border-white/10 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
