@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, EnvironmentItem } from "@/types";
 import AppShell from "@/components/AppShell";
@@ -21,8 +21,11 @@ const POI_TYPES = [
 ];
 
 export default function EnvironmentPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+  const urlParams = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const id = (urlParams?.id as string) || params.id;
+  const isDemo = searchParams.get("demo") === "true";
   const [project, setProject] = useState<Project | null>(null);
   const [items, setItems] = useState<EnvironmentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +34,42 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
 
   useEffect(() => {
     const fetchProject = async () => {
+      // Demo mode: skip auth and Supabase
+      if (isDemo) {
+        const demoProject = {
+          id: "demo",
+          user_id: "demo",
+          title: "Yeni Proje",
+          short_title: "Yeni Proje",
+          status: "draft" as const,
+          geojson: null,
+          properties: null,
+          city: "İzmir",
+          district: "Çiğli",
+          neighborhood: "Harmandalı",
+          block_no: "2406",
+          parcel_no: "9",
+          area: "1234",
+          property_type: "Arsa",
+          center_lat: 38.42360,
+          center_lon: 27.14260,
+          custom_note: null,
+          created_at: new Date().toISOString(),
+        };
+        setProject(demoProject);
+        // Set default demo items
+        const demoItems: EnvironmentItem[] = [
+          { id: "1", project_id: "demo", name: "Çigli Devlet Hastanesi", type: "hospital", distance: "1.2 km", lat: 38.4210, lon: 27.1410, selected: true, sort_order: 0, source: "osm" },
+          { id: "2", project_id: "demo", name: "Harmandalı İlkokulu", type: "school", distance: "0.5 km", lat: 38.4250, lon: 27.1440, selected: true, sort_order: 1, source: "osm" },
+          { id: "3", project_id: "demo", name: "Bim Market", type: "market", distance: "0.3 km", lat: 38.4245, lon: 27.1425, selected: true, sort_order: 2, source: "osm" },
+          { id: "4", project_id: "demo", name: "Eczane", type: "pharmacy", distance: "0.8 km", lat: 38.4225, lon: 27.1435, selected: false, sort_order: 3, source: "osm" },
+          { id: "5", project_id: "demo", name: "İZBAN İstasyonu", type: "transport", distance: "1.5 km", lat: 38.4190, lon: 27.1380, selected: false, sort_order: 4, source: "osm" },
+        ];
+        setItems(demoItems);
+        setLoading(false);
+        return;
+      }
+
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
 
