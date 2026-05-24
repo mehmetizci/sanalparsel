@@ -69,6 +69,10 @@ export interface ProjectSettings {
   show_environment: boolean;
   show_subtitles: boolean;
   show_final_card: boolean;
+  /** Video rendering quality settings */
+  video_quality?: "standard" | "high" | "ultra";
+  video_fps?: 24 | 30 | 60;
+  video_bitrate?: number; // Mbps
 }
 
 export interface EnvironmentItem {

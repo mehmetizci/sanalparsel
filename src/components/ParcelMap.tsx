@@ -2,9 +2,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { type LngLatBoundsLike } from "maplibre-gl";
+import maplibregl, { type LngLatBoundsLike, type LngLatLike } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Feature, FeatureCollection, Polygon, MultiPolygon, Position } from "geojson";
+import {
+  CINEMATIC_PITCH,
+  CINEMATIC_EASING,
+  buildCinematicStyle,
+  generateOrbitKeyframes,
+  preloadTilesForPath,
+  runCinematicAnimation,
+  type CameraKeyframe,
+} from "@/lib/cinematic-renderer";
 
 export interface ParcelMapProperties {
   Il?: string;
@@ -50,6 +59,14 @@ export interface ParcelMapProps {
   /** Called once after the map is ready. */
   onReady?: () => void;
   className?: string;
+  /** Video render mode: enables frame capture without UI overlays */
+  videoRenderMode?: boolean;
+  /** Target video resolution width for frame capture */
+  videoWidth?: number;
+  /** Target video resolution height for frame capture */
+  videoHeight?: number;
+  /** Callback when map is ready for frame capture in video mode */
+  onMapReadyForCapture?: (captureFrame: () => ImageData | null) => void;
 }
 
 const ESRI_ATTRIBUTION =
@@ -161,6 +178,10 @@ export default function ParcelMap({
   showOverlays = true,
   onReady,
   className,
+  videoRenderMode = false,
+  videoWidth = 1920,
+  videoHeight = 1080,
+  onMapReadyForCapture,
 }: ParcelMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
@@ -169,6 +190,9 @@ export default function ParcelMap({
   const [isReady, setIsReady] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
+
+  // Hide overlays in video render mode
+  const effectiveShowOverlays = videoRenderMode ? false : showOverlays;
 
   // Run the WebGL probe once on mount, before any map state is initialised.
   useEffect(() => {
@@ -249,22 +273,14 @@ export default function ParcelMap({
     let cancelled = false;
 
     try {
-      const style = {
-        version: 8,
-        sources: {
-          esri: {
-            type: "raster" as const,
-            tiles: [
-              "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            ],
-            tileSize: 256,
-            attribution: ESRI_ATTRIBUTION,
-          },
-        },
-        layers: [
-          { id: "esri-layer", type: "raster" as const, source: "esri" },
-        ],
-      };
+      // Build high-quality cinematic style
+      const style = buildCinematicStyle({
+        contrast: 1.15,      // Sharper imagery
+        saturation: 1.2,      // Cinematic warmth
+        fogColor: [0.78, 0.85, 0.94, 0.3],
+        fogAttenuation: 0.15,
+        antialias: true,
+      });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const map = new maplibregl.Map({
@@ -272,10 +288,18 @@ export default function ParcelMap({
         style: style as any,
         center: [fallbackCenter.lon, fallbackCenter.lat],
         zoom: 16,
-        pitch: 45,
+        // Cinematic camera angles (55-65°)
+        pitch: 60,
         bearing: -20,
         attributionControl: { compact: true },
+        // High quality rendering settings
         antialias: true,
+        // 512px tiles for better quality
+        maxZoom: 22,
+        // Crisp tile rendering
+        renderWorldCopies: false,
+        // Preserve buffer for frame capture
+        preserveDrawingBuffer: true,
       });
 
       mapRef.current = map;
@@ -391,12 +415,17 @@ export default function ParcelMap({
           },
         });
 
-        // --- Cinematic fly-in --------------------------------------------
+        // --- Cinematic fly-in with smooth interpolation -----
         const bounds = computeBounds(outerRing);
+        
+        // Use cinematic pitch range (55-65°)
+        const cinematicPitch = Math.random() * (CINEMATIC_PITCH.max - CINEMATIC_PITCH.min) + CINEMATIC_PITCH.min;
+        
         const baseCamera = {
-          pitch: 55,
-          bearing: -25,
-          duration: 2400,
+          pitch: cinematicPitch,
+          bearing: -20,
+          duration: 3000,
+          easing: CINEMATIC_EASING.flyTo,
           essential: true,
         } as const;
 
@@ -412,9 +441,10 @@ export default function ParcelMap({
             if (offset !== 0) {
               map.easeTo({
                 zoom: map.getZoom() + offset,
-                pitch: 60,
+                pitch: Math.min(cinematicPitch + 5, CINEMATIC_PITCH.max),
                 bearing: -10,
-                duration: 1600,
+                duration: 1800,
+                easing: CINEMATIC_EASING.flyTo,
               });
             }
           });
@@ -459,6 +489,18 @@ export default function ParcelMap({
 
         setIsReady(true);
         onReady?.();
+
+        // Register frame capture function for video rendering
+        if (onMapReadyForCapture) {
+          const captureFrame = (): ImageData | null => {
+            const canvas = map.getCanvas();
+            if (!canvas) return null;
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+            if (!ctx) return null;
+            return ctx.getImageData(0, 0, canvas.width, canvas.height);
+          };
+          onMapReadyForCapture(captureFrame);
+        }
       });
     } catch (err) {
       console.error("[ParcelMap] initialization failed:", err);
@@ -613,7 +655,7 @@ export default function ParcelMap({
         </div>
       )}
 
-      {showOverlays && properties && (
+      {effectiveShowOverlays && properties && (
         <div className="absolute top-3 left-3 right-16 z-20">
           <div className="bg-black/55 backdrop-blur-md rounded-xl px-3 py-2 border border-white/10">
             <div className="flex items-center justify-between gap-3">
@@ -645,7 +687,7 @@ export default function ParcelMap({
         </div>
       )}
 
-      {showOverlays && (
+      {effectiveShowOverlays && (
         <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
           <button
             type="button"
@@ -669,7 +711,7 @@ export default function ParcelMap({
         </div>
       )}
 
-      {showOverlays && (
+      {effectiveShowOverlays && (
         <div className="absolute bottom-3 left-3 right-3 z-20">
           <div className="bg-black/55 backdrop-blur-md rounded-xl px-3 py-2 border border-white/10 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
