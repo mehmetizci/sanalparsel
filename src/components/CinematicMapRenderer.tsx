@@ -104,7 +104,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
   duration = 30,
   fps = 30,
   zoom = 16,
-  droneHeight,
+// droneHeight,
   onFrameCapture,
   onRenderComplete,
   onProgress,

@@ -13,7 +13,7 @@
 import maplibregl, {
   type LngLatLike,
   type CameraOptions,
-  type FlyToOptions,
+
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -56,7 +56,7 @@ export function buildCinematicStyle(config: MapStyleConfig = {}): object {
     saturation = 1.2,
     fogColor = [0.78, 0.85, 0.94, 0.3],
     fogAttenuation = 0.15,
-    antialias = true,
+
   } = config;
 
   return {
@@ -438,6 +438,8 @@ export class CinematicFrameRenderer {
    * Returns a base64-encoded tar string.
    */
   exportFramesAsTar(frameDir: string = "./frames"): string {
+    // frameDir parameter reserved for future file-based export
+    void frameDir;
     // This is a placeholder - in production, you'd write actual files
     // or stream to a video encoder
     return JSON.stringify({

@@ -2,17 +2,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { type LngLatBoundsLike, type LngLatLike } from "maplibre-gl";
+import maplibregl, { type LngLatBoundsLike } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Feature, FeatureCollection, Polygon, MultiPolygon, Position } from "geojson";
 import {
   CINEMATIC_PITCH,
   CINEMATIC_EASING,
   buildCinematicStyle,
-  generateOrbitKeyframes,
-  preloadTilesForPath,
-  runCinematicAnimation,
-  type CameraKeyframe,
 } from "@/lib/cinematic-renderer";
 
 export interface ParcelMapProperties {
@@ -69,8 +65,7 @@ export interface ParcelMapProps {
   onMapReadyForCapture?: (captureFrame: () => ImageData | null) => void;
 }
 
-const ESRI_ATTRIBUTION =
-  'Tiles &copy; <a href="https://www.esri.com/" target="_blank" rel="noreferrer">Esri</a> &mdash; Source: Esri, Maxar, Earthstar Geographics';
+// Attribution is handled in buildCinematicStyle()
 
 const POI_PALETTE: Record<string, { color: string; emoji: string; label: string }> = {
   hospital: { color: "#ef4444", emoji: "🏥", label: "Hastane" },
@@ -179,8 +174,8 @@ export default function ParcelMap({
   onReady,
   className,
   videoRenderMode = false,
-  videoWidth = 1920,
-  videoHeight = 1080,
+
+
   onMapReadyForCapture,
 }: ParcelMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
