@@ -2,13 +2,26 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase";
 import { Project, ParcelProperties } from "@/types";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PrimaryButton from "@/components/PrimaryButton";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import MapLibreMap from "@/components/MapLibreMap";
+
+// Dynamic import for MapLibre to avoid SSR issues
+const MapLibreMap = dynamic(() => import("@/components/MapLibreMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full min-h-[500px] bg-card rounded-2xl flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-white text-sm">Harita yükleniyor...</p>
+      </div>
+    </div>
+  ),
+});
 
 const DEMO_POLYGON = [
   [27.1418, 38.4228],
