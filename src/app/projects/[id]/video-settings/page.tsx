@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, ProjectSettings } from "@/types";
@@ -10,8 +10,8 @@ import GlassCard from "@/components/GlassCard";
 import VideoSettingToggle from "@/components/VideoSettingToggle";
 import PrimaryButton from "@/components/PrimaryButton";
 
-export default function VideoSettingsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function VideoSettingsPage({ params }: { params: { id: string } }) {
+  const { id } = params;
   const router = useRouter();
   const [, setProject] = useState<Project | null>(null);
   const [settings, setSettings] = useState<ProjectSettings>({

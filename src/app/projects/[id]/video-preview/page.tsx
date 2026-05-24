@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, Narration, Video, VoiceType } from "@/types";
@@ -11,8 +11,8 @@ import VoiceSelector from "@/components/VoiceSelector";
 import LoadingRenderState from "@/components/LoadingRenderState";
 import PrimaryButton from "@/components/PrimaryButton";
 
-export default function VideoPreviewPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function VideoPreviewPage({ params }: { params: { id: string } }) {
+  const { id } = params;
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, ProjectSettings, CameraMode } from "@/types";
@@ -26,8 +26,8 @@ const CAMERA_STYLES = [
   { value: "dynamic", label: "Dinamik", description: "Hızlı geçişler" },
 ] as const;
 
-export default function DroneSettingsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function DroneSettingsPage({ params }: { params: { id: string } }) {
+  const { id } = params;
   const router = useRouter();
   const [, setProject] = useState<Project | null>(null);
   const [settings, setSettings] = useState<ProjectSettings>({
