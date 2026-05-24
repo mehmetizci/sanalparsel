@@ -374,7 +374,8 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: style as Parameters<typeof maplibregl.Map>[0]["style"],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      style: style as any,
       center: mapCenter,
       zoom,
       pitch: 60,
@@ -454,7 +455,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
   }, [parcel, zoom]);
 
   // Determine display phase for loading overlay
-  const displayPhase = renderState.phase === "cancelled" ? "idle" : renderState.phase;
+  const displayPhase = renderState.phase === "cancelled" ? "idle" : renderState.phase as string;
 
   return (
     <div className="relative w-full h-full bg-[#0a1f3d] rounded-2xl overflow-hidden">
@@ -466,7 +467,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
       />
 
       {/* Loading overlay */}
-      {showLoading && displayPhase !== "idle" && displayPhase !== "complete" && displayPhase !== "cancelled" && (
+      {showLoading && displayPhase !== "idle" && displayPhase !== "complete" && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="text-center">
             {displayPhase === "preloading" && (

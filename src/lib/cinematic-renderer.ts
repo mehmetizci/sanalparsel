@@ -160,7 +160,8 @@ export async function preloadTilesForPath(
 
   // Trigger tile loads by panning to each region
   const results: Promise<void>[] = [];
-  for (const key of preloadSet) {
+  const preloadArray = Array.from(preloadSet);
+  for (const key of preloadArray) {
     const [z, x, y] = key.split("/").map(Number);
     const tileCenter = tileToLngLat(x, y, z);
     results.push(
@@ -335,7 +336,8 @@ export function createCinematicMap(options: CinematicMapOptions): maplibregl.Map
 
   const map = new maplibregl.Map({
     container,
-    style: style as Parameters<typeof maplibregl.Map>[0]["style"],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    style: style as any,
     center,
     zoom,
     pitch,
