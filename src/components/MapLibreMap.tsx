@@ -18,35 +18,49 @@ export default function MapLibreMap({
 }: MapLibreMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [renderError, setRenderError] = useState(false);
+  const hasRendered = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    // Prevent re-render if already rendered with same params
+    if (hasRendered.current && isLoading === false) return;
+
     const drawMap = () => {
-      if (!containerRef.current) return;
-      
-      const container = containerRef.current;
-      const width = container.clientWidth || 800;
-      const height = container.clientHeight || 500;
+      try {
+        if (!containerRef.current) {
+          setIsLoading(false);
+          return;
+        }
+        
+        const container = containerRef.current;
+        const width = container.clientWidth || 800;
+        const height = container.clientHeight || 500;
 
-      // Clear container
-      container.innerHTML = "";
+        // Clear container
+        container.innerHTML = "";
 
-      // Create canvas
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      canvas.style.cssText = "width:100%;height:100%;display:block;";
-      container.appendChild(canvas);
+        // Create canvas
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.style.cssText = "width:100%;height:100%;display:block;";
+        container.appendChild(canvas);
 
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        setIsLoading(false);
-        return;
-      }
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          setIsLoading(false);
+          setRenderError(true);
+          return;
+        }
 
-      // Calculate bounds from polygon
-      if (polygonCoordinates.length > 0) {
+        // Calculate bounds from polygon
+        if (polygonCoordinates.length === 0) {
+          setIsLoading(false);
+          return;
+        }
+
         let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
         polygonCoordinates.forEach(([lon, lat]) => {
           minLon = Math.min(minLon, lon);
@@ -100,7 +114,7 @@ export default function MapLibreMap({
         });
         ctx.closePath();
         
-        // Fill polygon with semi-transparent red
+        // Fill polygon
         ctx.fillStyle = "rgba(220, 38, 38, 0.4)";
         ctx.fill();
         
@@ -120,7 +134,7 @@ export default function MapLibreMap({
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Draw coordinates text
+        // Draw text
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 14px system-ui, sans-serif";
         ctx.textAlign = "center";
@@ -129,16 +143,24 @@ export default function MapLibreMap({
         ctx.font = "12px system-ui, sans-serif";
         ctx.fillStyle = "#a0aec0";
         ctx.fillText("Parsel Haritasi", width / 2, height - 20);
-      }
 
-      setIsLoading(false);
-      onLoad?.();
+        hasRendered.current = true;
+        setIsLoading(false);
+        
+        if (onLoad) {
+          setTimeout(onLoad, 0);
+        }
+      } catch (err) {
+        console.error("MapLibreMap render error:", err);
+        setIsLoading(false);
+        setRenderError(true);
+      }
     };
 
-    // Delay to ensure container has rendered
-    const timer = setTimeout(drawMap, 200);
+    // Small delay to ensure container has dimensions
+    const timer = setTimeout(drawMap, 300);
     return () => clearTimeout(timer);
-  }, [centerLat, centerLon, polygonCoordinates, onLoad]);
+  }, [centerLat, centerLon, polygonCoordinates]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full" style={{ minHeight: "500px" }}>
@@ -148,6 +170,11 @@ export default function MapLibreMap({
             <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-3" />
             <p className="text-white/70 text-sm">Harita yukleniyor...</p>
           </div>
+        </div>
+      )}
+      {renderError && !isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-card/80 z-10">
+          <p className="text-white/70 text-sm">Harita yuklenemedi</p>
         </div>
       )}
     </div>
