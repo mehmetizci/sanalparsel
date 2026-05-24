@@ -40,6 +40,8 @@ export default function MapLibreMap({
     const initMap = async () => {
       try {
         console.log("MapLibreMap: Starting initialization...");
+        console.log("MapLibreMap: centerLat:", centerLat, "centerLon:", centerLon);
+        console.log("MapLibreMap: polygonCoordinates:", polygonCoordinates);
         
         // Dynamic import MapLibre
         const maplibregl = (await import("maplibre-gl")).default;
