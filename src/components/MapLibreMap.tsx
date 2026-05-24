@@ -2,13 +2,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
 
 interface MapLibreMapProps {
   centerLat: number;
   centerLon: number;
   polygonCoordinates: number[][];
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   pois?: Array<{
     id: string;
     name: string;
@@ -17,6 +16,7 @@ interface MapLibreMapProps {
     lon: number;
     distance?: string;
   }>;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   height?: number;
   onLoad?: () => void;
   onError?: (error: string) => void;
@@ -26,32 +26,41 @@ export default function MapLibreMap({
   centerLat,
   centerLon,
   polygonCoordinates,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  pois = [],
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  height = 300,
   onLoad,
   onError
 }: MapLibreMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+  const mapInstanceRef = useRef<any>(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || !mapContainerRef.current) {
       return;
     }
 
-    // Destroy existing map if any
-    if (mapRef.current) {
-      mapRef.current.remove();
-      mapRef.current = null;
-    }
-
     const initMap = async () => {
       try {
         console.log("MapLibreMap: Starting initialization...");
         
+        // Check WebGL support first
+        const testCanvas = document.createElement('canvas');
+        const gl = testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
+        
+        if (!gl) {
+          console.warn("MapLibreMap: WebGL not supported, using fallback");
+          setUseFallback(true);
+          setIsLoaded(true);
+          onLoad?.();
+          return;
+        }
+
+        // Dynamic import MapLibre
+        const maplibregl = (await import("maplibre-gl")).default;
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        await import("maplibre-gl/dist/maplibre-gl.css");
+
         const map = new maplibregl.Map({
           container: mapContainerRef.current!,
           style: {
@@ -84,12 +93,11 @@ export default function MapLibreMap({
           minZoom: 3
         });
 
-        mapRef.current = map;
+        mapInstanceRef.current = map;
 
         map.on('load', () => {
           console.log("MapLibreMap: Map loaded, adding polygon layer...");
 
-          // Add GeoJSON source
           const geojsonCoords = polygonCoordinates.length > 0 
             ? polygonCoordinates 
             : [[centerLon, centerLat]];
@@ -116,7 +124,6 @@ export default function MapLibreMap({
             }
           });
 
-          // Add fill layer
           map.addLayer({
             id: 'parcel-fill',
             type: 'fill',
@@ -127,7 +134,6 @@ export default function MapLibreMap({
             }
           });
 
-          // Add outline layer
           map.addLayer({
             id: 'parcel-outline',
             type: 'line',
@@ -140,22 +146,12 @@ export default function MapLibreMap({
 
           // Add center marker
           const markerEl = document.createElement('div');
-          markerEl.innerHTML = `
-            <div style="
-              width: 20px;
-              height: 20px;
-              background: #06b6d4;
-              border: 3px solid white;
-              border-radius: 50%;
-              box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-            "></div>
-          `;
+          markerEl.innerHTML = `<div style="width:20px;height:20px;background:#06b6d4;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.3);"></div>`;
           
           new maplibregl.Marker({ element: markerEl })
             .setLngLat([centerLon, centerLat])
             .addTo(map);
 
-          // Fit bounds to polygon
           if (polygonCoordinates.length > 0) {
             const bounds = new maplibregl.LngLatBounds();
             polygonCoordinates.forEach(coord => {
@@ -169,77 +165,152 @@ export default function MapLibreMap({
           onLoad?.();
         });
 
-        map.on('error', (e) => {
+        map.on('error', (e: any) => {
           console.error("MapLibreMap: Map error:", e);
-          onError?.("Harita yüklenemedi: " + e.error?.message);
+          if (e.error?.message?.includes('WebGL')) {
+            setUseFallback(true);
+          } else {
+            onError?.("Harita yüklenemedi: " + e.error?.message);
+          }
         });
 
       } catch (error) {
         console.error("MapLibreMap: Initialization error:", error);
-        onError?.("Harita başlatılamadı: " + String(error));
+        setUseFallback(true);
+        setIsLoaded(true);
+        onLoad?.();
       }
     };
 
     initMap();
 
     return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.remove();
+        } catch (e) {
+          console.warn("Map cleanup error:", e);
+        }
+        mapInstanceRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [centerLat, centerLon]);
 
-  // Update polygon when coordinates change
-  useEffect(() => {
-    if (!mapRef.current || !isLoaded) return;
+  // Canvas fallback renderer
+  const renderFallback = () => {
+    if (!mapContainerRef.current || isLoaded) return;
+    
+    const container = mapContainerRef.current;
+    container.innerHTML = '';
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = container.clientWidth || 800;
+    canvas.height = container.clientHeight || 500;
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.display = 'block';
+    container.appendChild(canvas);
 
-    const updatePolygon = () => {
-      const map = mapRef.current!;
-      if (!map.getSource('parcel')) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-      const geojsonCoords = polygonCoordinates.length > 0 
-        ? polygonCoordinates 
-        : [[centerLon, centerLat]];
+    // Draw gradient background
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#1a365d');
+    gradient.addColorStop(1, '#2d3748');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw grid
+    ctx.strokeStyle = '#4a5568';
+    ctx.lineWidth = 1;
+    const gridSize = 40;
+    for (let x = 0; x < canvas.width; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+    for (let y = 0; y < canvas.height; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
+
+    // Draw polygon
+    if (polygonCoordinates.length > 0) {
+      const coords = polygonCoordinates;
       
-      const closedCoords = [...geojsonCoords];
-      if (geojsonCoords.length > 0) {
-        const first = geojsonCoords[0];
-        const last = geojsonCoords[geojsonCoords.length - 1];
-        if (first[0] !== last[0] || first[1] !== last[1]) {
-          closedCoords.push([...first]);
-        }
-      }
-
-      (map.getSource('parcel') as any).setData({
-        type: 'Feature',
-        geometry: {
-          type: 'Polygon',
-          coordinates: [closedCoords]
-        },
-        properties: {}
+      // Calculate bounds
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      coords.forEach(coord => {
+        minX = Math.min(minX, coord[0]);
+        maxX = Math.max(maxX, coord[0]);
+        minY = Math.min(minY, coord[1]);
+        maxY = Math.max(maxY, coord[1]);
       });
 
-      // Fit bounds
-      if (polygonCoordinates.length > 0) {
-        const bounds = new maplibregl.LngLatBounds();
-        polygonCoordinates.forEach(coord => {
-          bounds.extend([coord[0], coord[1]]);
-        });
-        map.fitBounds(bounds, { padding: 50 });
-      }
-    };
+      const scaleX = (canvas.width - 100) / (maxX - minX || 0.01);
+      const scaleY = (canvas.height - 100) / (maxY - minY || 0.01);
+      const scale = Math.min(scaleX, scaleY);
+      
+      const offsetX = (canvas.width - (maxX - minX) * scale) / 2 - minX * scale;
+      const offsetY = (canvas.height - (maxY - minY) * scale) / 2 - minY * scale;
 
-    updatePolygon();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [polygonCoordinates, isLoaded]);
+      // Transform coordinates to screen space
+      const toScreen = (lon: number, lat: number) => ({
+        x: lon * scale + offsetX,
+        y: canvas.height - (lat * scale + offsetY)
+      });
+
+      // Draw filled polygon
+      ctx.beginPath();
+      coords.forEach((coord, i) => {
+        const { x, y } = toScreen(coord[0], coord[1]);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(220, 38, 38, 0.4)';
+      ctx.fill();
+      ctx.strokeStyle = '#dc2626';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Draw center point
+      const center = toScreen(centerLon, centerLat);
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, 10, 0, Math.PI * 2);
+      ctx.fillStyle = '#06b6d4';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Draw coordinates info
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText(`📍 ${centerLat.toFixed(5)}, ${centerLon.toFixed(5)}`, canvas.width / 2, 30);
+    ctx.font = '14px system-ui';
+    ctx.fillStyle = '#a0aec0';
+    ctx.fillText('Parsel Haritası (Statik Görüntü)', canvas.width / 2, canvas.height - 20);
+  };
+
+  useEffect(() => {
+    if (useFallback && mapContainerRef.current) {
+      renderFallback();
+    }
+  }, [useFallback, polygonCoordinates]);
 
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainerRef} className="w-full h-full" style={{ minHeight: '500px' }} />
 
-      {!isLoaded && (
+      {!isLoaded && !useFallback && (
         <div className="absolute inset-0 flex items-center justify-center bg-card/80 backdrop-blur-sm z-10">
           <div className="text-center">
             <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
