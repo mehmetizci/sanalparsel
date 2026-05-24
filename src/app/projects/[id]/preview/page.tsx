@@ -8,6 +8,7 @@ import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PrimaryButton from "@/components/PrimaryButton";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import ParcelMap from "@/components/CesiumMap";
 
 const DEMO_POLYGON = [
   [27.1418, 38.4228],
@@ -132,7 +133,7 @@ export default function PreviewPage() {
               </div>
             }
           >
-            <ParcelMapPreview
+            <ParcelMap
               centerLat={centerLat}
               centerLon={centerLon}
               polygonCoordinates={displayPolygon}
@@ -157,38 +158,5 @@ export default function PreviewPage() {
         </div>
       </div>
     </AppShell>
-  );
-}
-
-function ParcelMapPreview({
-  centerLat,
-  centerLon,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  polygonCoordinates,
-  properties,
-}: {
-  centerLat: number;
-  centerLon: number;
-  polygonCoordinates: number[][];
-  properties: ParcelProperties;
-}) {
-  return (
-    <div className="w-full h-full min-h-[500px] bg-card flex items-center justify-center relative">
-      <div className="text-center">
-        <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
-          <svg className="w-10 h-10 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-          </svg>
-        </div>
-        <h3 className="text-white font-bold mb-2">Parsel Haritası</h3>
-        <p className="text-muted text-sm mb-4">
-          Koordinatlar: {centerLat.toFixed(4)}, {centerLon.toFixed(4)}
-        </p>
-        <div className="text-xs text-muted">
-          {properties.Il && <span>{properties.Il} / </span>}
-          {properties.Ilce && <span>{properties.Ilce}</span>}
-        </div>
-      </div>
-    </div>
   );
 }
