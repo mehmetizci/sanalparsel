@@ -145,7 +145,7 @@ function PreviewPageInner() {
           description="Haritada parselinizi görüntüleyin"
         />
 
-        <div className="glass rounded-2xl overflow-hidden h-[60vh] min-h-[480px] w-full relative">
+        <div className="glass rounded-[28px] overflow-hidden h-[60vh] min-h-[480px] w-full relative">
           <ParcelMap
             parcel={parcelFeature}
             centerLat={project.center_lat ?? undefined}
@@ -154,6 +154,7 @@ function PreviewPageInner() {
             pois={pois}
             droneHeight={300}
             cinematic
+            className="!absolute !inset-0"
           />
         </div>
 

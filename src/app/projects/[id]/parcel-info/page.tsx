@@ -171,7 +171,7 @@ function ParcelInfoPageInner() {
           </div>
         )}
 
-        <div className="glass rounded-2xl overflow-hidden h-[260px] mb-4">
+        <div className="glass rounded-[28px] overflow-hidden h-[260px] mb-4 relative">
           <ParcelMap
             parcel={parcelFeature}
             centerLat={project.center_lat ?? undefined}
@@ -180,6 +180,7 @@ function ParcelInfoPageInner() {
             droneHeight={300}
             cinematic={false}
             showOverlays
+            className="!absolute !inset-0"
           />
         </div>
 

@@ -1,20 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, {
-  type Map as MapLibreMap,
-  type StyleSpecification,
-  type GeoJSONSource,
-  type LngLatBoundsLike,
-} from "maplibre-gl";
+import maplibregl, { type LngLatBoundsLike } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type {
-  Feature,
-  FeatureCollection,
-  Polygon,
-  MultiPolygon,
-  Position,
-} from "geojson";
+import type { Feature, FeatureCollection, Polygon, MultiPolygon, Position } from "geojson";
 
 export interface ParcelMapProperties {
   Il?: string;
@@ -57,8 +47,8 @@ export interface ParcelMapProps {
   cinematic?: boolean;
   /** Show floating overlay UI (project header, parcel card, controls). */
   showOverlays?: boolean;
-  /** Called once after the map style + parcel layers are ready. */
-  onReady?: (map: MapLibreMap) => void;
+  /** Called once after the map is ready. */
+  onReady?: () => void;
   className?: string;
 }
 
@@ -173,7 +163,7 @@ export default function ParcelMap({
   className,
 }: ParcelMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<MapLibreMap | null>(null);
+  const mapRef = useRef<any>(null);
   const rotationRafRef = useRef<number | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -248,8 +238,8 @@ export default function ParcelMap({
   // ---- Map lifecycle (mount/unmount only) -----------------------------------
   useEffect(() => {
     if (typeof window === "undefined" || !containerRef.current) return;
-    if (webglOk === false) return; // graceful static fallback below
-    if (webglOk !== true) return; // still probing
+    if (webglOk === false) return;
+    if (webglOk !== true) return;
 
     if (!fallbackCenter) {
       setMapError("Geçerli koordinat bulunamadı.");
@@ -259,35 +249,33 @@ export default function ParcelMap({
     let cancelled = false;
 
     try {
-      const style: StyleSpecification = {
+      const style = {
         version: 8,
         sources: {
-          esriSatellite: {
-            type: "raster",
+          esri: {
+            type: "raster" as const,
             tiles: [
               "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
             ],
             tileSize: 256,
-            maxzoom: 19,
             attribution: ESRI_ATTRIBUTION,
           },
         },
         layers: [
-          { id: "esri-satellite", type: "raster", source: "esriSatellite" },
+          { id: "esri-layer", type: "raster" as const, source: "esri" },
         ],
-        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
       };
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const map = new maplibregl.Map({
         container: containerRef.current,
-        style,
+        style: style as any,
         center: [fallbackCenter.lon, fallbackCenter.lat],
         zoom: 16,
-        pitch: 0,
-        bearing: 0,
+        pitch: 45,
+        bearing: -20,
         attributionControl: { compact: true },
-        maxPitch: 75,
-        fadeDuration: 200,
+        antialias: true,
       });
 
       mapRef.current = map;
@@ -470,7 +458,7 @@ export default function ParcelMap({
         }
 
         setIsReady(true);
-        onReady?.(map);
+        onReady?.();
       });
     } catch (err) {
       console.error("[ParcelMap] initialization failed:", err);
@@ -499,7 +487,7 @@ export default function ParcelMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isReady) return;
-    const source = map.getSource("pois") as GeoJSONSource | undefined;
+    const source = map.getSource("pois") as any;
     if (source) source.setData(poiCollection);
   }, [poiCollection, isReady]);
 
@@ -586,11 +574,17 @@ export default function ParcelMap({
 
   return (
     <div
-      className={`relative w-full h-full min-h-[420px] bg-card rounded-2xl overflow-hidden ${
+      className={`relative w-full h-full min-h-[500px] bg-[#0a1f3d] rounded-[28px] overflow-hidden ${
         isFullscreen ? "fixed inset-0 z-50 rounded-none" : ""
       } ${className || ""}`}
+      style={{ position: "relative" }}
     >
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* Map container must fill parent */}
+      <div
+        ref={containerRef}
+        className="absolute inset-0"
+        style={{ width: "100%", height: "100%" }}
+      />
 
       {/* Cinematic glow overlay */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_transparent_55%,_rgba(7,24,47,0.55)_100%)]" />
@@ -620,7 +614,7 @@ export default function ParcelMap({
       )}
 
       {showOverlays && properties && (
-        <div className="absolute top-3 left-3 right-16 z-10">
+        <div className="absolute top-3 left-3 right-16 z-20">
           <div className="bg-black/55 backdrop-blur-md rounded-xl px-3 py-2 border border-white/10">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -652,7 +646,7 @@ export default function ParcelMap({
       )}
 
       {showOverlays && (
-        <div className="absolute top-3 right-3 z-10 flex flex-col gap-2">
+        <div className="absolute top-3 right-3 z-20 flex flex-col gap-2">
           <button
             type="button"
             onClick={() => setIsFullscreen((v) => !v)}
@@ -676,7 +670,7 @@ export default function ParcelMap({
       )}
 
       {showOverlays && (
-        <div className="absolute bottom-3 left-3 right-3 z-10">
+        <div className="absolute bottom-3 left-3 right-3 z-20">
           <div className="bg-black/55 backdrop-blur-md rounded-xl px-3 py-2 border border-white/10 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
