@@ -163,7 +163,8 @@ export default function PreviewPage() {
 function ParcelMapPreview({
   centerLat,
   centerLon,
-  polygonCoordinates: _polygonCoordinates,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  polygonCoordinates,
   properties,
 }: {
   centerLat: number;
