@@ -8,7 +8,6 @@ import { Project, ParcelProperties } from "@/types";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PrimaryButton from "@/components/PrimaryButton";
-import ErrorBoundary from "@/components/ErrorBoundary";
 
 // Dynamic import for MapLibre to avoid SSR issues
 const MapLibreMap = dynamic(() => import("@/components/MapLibreMap"), {
@@ -129,28 +128,12 @@ export default function PreviewPage() {
         />
 
         <div className="glass rounded-2xl overflow-hidden" style={{ minHeight: "500px" }}>
-          <ErrorBoundary
-            fallback={
-              <div className="w-full h-full min-h-[500px] bg-card rounded-2xl flex items-center justify-center">
-                <div className="text-center">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/10 flex items-center justify-center">
-                    <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-white font-bold mb-2">Harita Yüklenemedi</h3>
-                  <p className="text-muted text-sm">Harita bileşeni yüklenirken bir hata oluştu.</p>
-                </div>
-              </div>
-            }
-          >
             <MapLibreMap
               key={`map-${polygonCoordinates.length}`}
               centerLat={centerLat}
               centerLon={centerLon}
               polygonCoordinates={displayPolygon}
             />
-          </ErrorBoundary>
         </div>
 
         <div className="mt-6 flex gap-3">
