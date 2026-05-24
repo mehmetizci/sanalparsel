@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 interface MapLibreMapProps {
   centerLat: number;
@@ -26,8 +26,7 @@ export default function MapLibreMap({
   centerLat,
   centerLon,
   polygonCoordinates,
-  onLoad,
-  onError
+  onLoad
 }: MapLibreMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -35,34 +34,23 @@ export default function MapLibreMap({
   const mapInstanceRef = useRef<any>(null);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !mapContainerRef.current) {
-      return;
-    }
+    // Only run on client
+    if (typeof window === "undefined") return;
 
     const initMap = async () => {
       try {
         console.log("MapLibreMap: Starting initialization...");
         
-        // Check WebGL support first
-        const testCanvas = document.createElement('canvas');
-        const gl = testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
-        
-        if (!gl) {
-          console.warn("MapLibreMap: WebGL not supported, using fallback");
-          setUseFallback(true);
-          setIsLoaded(true);
-          onLoad?.();
-          return;
-        }
-
         // Dynamic import MapLibre
         const maplibregl = (await import("maplibre-gl")).default;
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         await import("maplibre-gl/dist/maplibre-gl.css");
 
+        if (!mapContainerRef.current) return;
+
         const map = new maplibregl.Map({
-          container: mapContainerRef.current!,
+          container: mapContainerRef.current,
           style: {
             version: 8,
             sources: {
@@ -162,16 +150,13 @@ export default function MapLibreMap({
 
           console.log("MapLibreMap: Polygon added successfully");
           setIsLoaded(true);
+          setUseFallback(false);
           onLoad?.();
         });
 
         map.on('error', (e: any) => {
           console.error("MapLibreMap: Map error:", e);
-          if (e.error?.message?.includes('WebGL')) {
-            setUseFallback(true);
-          } else {
-            onError?.("Harita yüklenemedi: " + e.error?.message);
-          }
+          setUseFallback(true);
         });
 
       } catch (error) {
@@ -182,9 +167,11 @@ export default function MapLibreMap({
       }
     };
 
-    initMap();
+    // Small delay to ensure client-side rendering
+    const timer = setTimeout(initMap, 200);
 
     return () => {
+      clearTimeout(timer);
       if (mapInstanceRef.current) {
         try {
           mapInstanceRef.current.remove();
@@ -198,8 +185,8 @@ export default function MapLibreMap({
   }, [centerLat, centerLon]);
 
   // Canvas fallback renderer
-  const renderFallback = () => {
-    if (!mapContainerRef.current || isLoaded) return;
+  const renderFallback = useCallback(() => {
+    if (!mapContainerRef.current) return;
     
     const container = mapContainerRef.current;
     container.innerHTML = '';
@@ -298,12 +285,13 @@ export default function MapLibreMap({
     ctx.font = '14px system-ui';
     ctx.fillStyle = '#a0aec0';
     ctx.fillText('Parsel Haritası (Statik Görüntü)', canvas.width / 2, canvas.height - 20);
-  };
+  }, [centerLat, centerLon, polygonCoordinates]);
 
   useEffect(() => {
     if (useFallback && mapContainerRef.current) {
       renderFallback();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useFallback, polygonCoordinates]);
 
   return (
