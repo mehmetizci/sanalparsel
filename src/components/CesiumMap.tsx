@@ -113,7 +113,6 @@ export default function ParcelMap({
         centerLat={centerLat}
         centerLon={centerLon}
         polygonCoordinates={polygonCoordinates}
-        properties={properties}
         pois={pois}
         height={height}
         onLoad={onLoad}
