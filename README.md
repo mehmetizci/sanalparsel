@@ -24,15 +24,28 @@
 
 ## 🎥 Sinematik Harita Teknolojisi
 
-### Rendering Kalitesi
-MapLibre GL JS ile yüksek kaliteli uydu görüntüsü:
-- **Esri World Imagery** - Yüksek çözünürlüklü uydu haritası
-- **512px Tile Boyutu** - 256px yerine daha net görüntü
-- **Antialiasing** - Keskin kenar yumuşatma
-- **maxZoom 22** - Maksimum detay seviyesi
-- **Pitch 55-65°** - Sinematik açı (drone hissi)
-- **Atmospheric Fog** - Derinlik için sis efekti
-- **Contrast 1.15 / Saturation 1.2** - Görüntü iyileştirme
+### Mapbox GL JS
+High-quality satellite rendering with Mapbox GL JS:
+- **Mapbox Satellite Streets** - Premium satellite imagery with labels
+- **Style**: `mapbox://styles/mapbox/satellite-streets-v12`
+- **Antialiasing** - Crisp edge rendering
+- **preserveDrawingBuffer** - Frame capture for video export
+- **pitch: 60°** - Cinematic drone-like viewing angle
+- **Bearing animation** - Continuous rotation for dynamic feel
+
+### GeoJSON Parcel Support
+- Upload GeoJSON files directly
+- Automatic parcel polygon rendering
+- Red outline with transparent fill
+- Fit bounds to uploaded parcel
+
+### Token Configuration
+```bash
+# .env.local
+NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1...
+```
+
+If token is missing, a clear warning screen appears (no crash).
 
 ### Video Render Pipeline
 ```
@@ -48,12 +61,6 @@ MapLibre GL JS ile yüksek kaliteli uydu görüntüsü:
 - Bitrate: 20 Mbps minimum
 - Resolution: 1080x1920 (9:16 Reels) veya 1920x1080 (Landscape)
 - Rendering: Frame-by-frame (realtime canvas recording yok)
-
-### Tile Preloading
-Video kaydı öncesi tüm tiles preload edilir:
-- Zoom seviyeleri: 14, 16, 18, 20
-- Parcel çevresi + buffer bölge
-- 30 saniye timeout ile yükleme bekleme
 
 ## 📦 Kurulum
 
