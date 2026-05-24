@@ -3,6 +3,19 @@
 
 import { useEffect, useRef, useState } from "react";
 
+// Load MapLibre CSS from CDN
+function loadMapLibreCSS() {
+  if (typeof document !== "undefined") {
+    const existingLink = document.querySelector('link[href*="maplibre-gl"]');
+    if (!existingLink) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css";
+      document.head.appendChild(link);
+    }
+  }
+}
+
 interface MapLibreMapProps {
   centerLat: number;
   centerLon: number;
@@ -40,6 +53,9 @@ export default function MapLibreMap({
   })();
 
   useEffect(() => {
+    // Load CSS
+    loadMapLibreCSS();
+
     if (typeof window === "undefined" || !mapContainerRef.current || mapRef.current) {
       return;
     }
@@ -49,6 +65,7 @@ export default function MapLibreMap({
 
     const initMap = async () => {
       try {
+        // Load maplibre
         const maplibreglModule = await import("maplibre-gl");
         const MapLibre = maplibreglModule.default;
 
@@ -89,7 +106,6 @@ export default function MapLibreMap({
           // Add parcel
           if (polygonCoordinates && polygonCoordinates.length > 0) {
             const coords = [...polygonCoordinates];
-            // Close polygon
             if (coords.length > 2) {
               const first = coords[0];
               const last = coords[coords.length - 1];
@@ -98,13 +114,12 @@ export default function MapLibreMap({
               }
             }
 
-            // Add sources and layers with checks
             if (!map.getSource("parcel-fill")) {
               map.addSource("parcel-fill", {
                 type: "geojson",
                 data: {
-                  type: "Feature" as const,
-                  geometry: { type: "Polygon" as const, coordinates: [coords] },
+                  type: "Feature",
+                  geometry: { type: "Polygon", coordinates: [coords] },
                   properties: {}
                 }
               });
@@ -120,8 +135,8 @@ export default function MapLibreMap({
               map.addSource("parcel-outline", {
                 type: "geojson",
                 data: {
-                  type: "Feature" as const,
-                  geometry: { type: "Polygon" as const, coordinates: [coords] },
+                  type: "Feature",
+                  geometry: { type: "Polygon", coordinates: [coords] },
                   properties: {}
                 }
               });
@@ -158,11 +173,11 @@ export default function MapLibreMap({
             const poiFeatures = pois
               .filter(p => typeof p.lat === 'number' && typeof p.lon === 'number')
               .map(p => ({
-                type: "Feature" as const,
+                type: "Feature",
                 geometry: { type: "Point", coordinates: [p.lon, p.lat] },
                 properties: { name: p.name, type: p.type, id: p.id }
               }));
-            
+
             if (!map.getSource("pois")) {
               map.addSource("pois", {
                 type: "geojson",
@@ -185,7 +200,7 @@ export default function MapLibreMap({
             mapRef.current.setBearing(bearing);
             animationFrameId = requestAnimationFrame(animateBearing);
           };
-          
+
           setTimeout(() => {
             animateBearing();
             setTimeout(() => {
@@ -207,12 +222,12 @@ export default function MapLibreMap({
 
       } catch (error) {
         console.error("Map initialization error:", error);
-        onError?.("Harita başlatılamadı");
+        onError?.("Harita başlatılamadı: " + String(error));
       }
     };
 
     const timer = setTimeout(initMap, 100);
-    
+
     return () => {
       mounted = false;
       clearTimeout(timer);
@@ -227,7 +242,7 @@ export default function MapLibreMap({
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainerRef} className="w-full h-full" />
-      
+
       {!isLoaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-card/80 backdrop-blur-sm">
           <div className="text-center">

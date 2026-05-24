@@ -2,9 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* MapLibre GL CSS - required for map rendering */
-@import "maplibre-gl/dist/maplibre-gl.css";
-
 :root {
   --background: #07182F;
   --card: #102544;
