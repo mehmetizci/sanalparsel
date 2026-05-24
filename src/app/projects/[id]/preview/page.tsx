@@ -1,11 +1,12 @@
 "use client";
 
-import { use } from "react";
+import { useParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
-export default function PreviewPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function PreviewPage() {
+  const params = useParams();
+  const id = params.id as string;
 
   return (
     <AppShell>
