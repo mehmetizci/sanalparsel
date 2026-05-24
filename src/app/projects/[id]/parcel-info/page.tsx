@@ -12,7 +12,7 @@ import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
 
 // Lazy-load the map so this route stays light, mobile-fast and SSR-safe.
-const ParcelMap = dynamic(() => import("@/components/ParcelMap"), {
+const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
   ssr: false,
   loading: () => (
     <div className="w-full h-full flex items-center justify-center">
@@ -172,11 +172,10 @@ function ParcelInfoPageInner() {
         )}
 
         <div className="glass rounded-[28px] overflow-hidden h-[260px] mb-4 relative">
-          <ParcelMap
+          <MapboxMap
             parcel={parcelFeature}
             centerLat={project.center_lat ?? undefined}
             centerLon={project.center_lon ?? undefined}
-            properties={properties}
             droneHeight={300}
             cinematic={false}
             showOverlays

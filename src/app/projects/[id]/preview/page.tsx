@@ -4,14 +4,13 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams, useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase";
-import { Project, ParcelProperties, ParcelGeoJson } from "@/types";
+import { Project, ParcelGeoJson } from "@/types";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PrimaryButton from "@/components/PrimaryButton";
-import type { ParcelMapPoi } from "@/components/ParcelMap";
 
-// Lazy-load ParcelMap so this route stays light, mobile-fast and SSR-safe.
-const ParcelMap = dynamic(() => import("@/components/ParcelMap"), {
+// Lazy-load MapboxMap so this route stays light, mobile-fast and SSR-safe.
+const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
   ssr: false,
   loading: () => (
     <div className="w-full h-full flex items-center justify-center">
@@ -56,7 +55,6 @@ function PreviewPageInner() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pois] = useState<ParcelMapPoi[]>([]);
 
   useEffect(() => {
     if (isDemo) {
@@ -133,7 +131,6 @@ function PreviewPageInner() {
   }
 
   const parcelFeature = (project.geojson as ParcelGeoJson | null) || DEMO_PARCEL;
-  const properties = (project.properties as ParcelProperties) || parcelFeature.properties || {};
 
   return (
     <AppShell>
@@ -146,12 +143,10 @@ function PreviewPageInner() {
         />
 
         <div className="glass rounded-[28px] overflow-hidden h-[60vh] min-h-[480px] w-full relative">
-          <ParcelMap
+          <MapboxMap
             parcel={parcelFeature}
             centerLat={project.center_lat ?? undefined}
             centerLon={project.center_lon ?? undefined}
-            properties={properties}
-            pois={pois}
             droneHeight={300}
             cinematic
             className="!absolute !inset-0"
