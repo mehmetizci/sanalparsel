@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase";
+import { translateAuthError } from "@/lib/auth-errors";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
 
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const configured = isSupabaseConfigured();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,12 +29,14 @@ export default function LoginPage() {
       });
 
       if (error) {
-        setError("E-posta veya şifre hatalı. Lütfen tekrar deneyin.");
+        console.error("Supabase signIn error:", error);
+        setError(translateAuthError(error));
       } else {
         router.push("/dashboard");
       }
-    } catch {
-      setError("Giriş yapılırken bir hata oluştu.");
+    } catch (err) {
+      console.error("Login exception:", err);
+      setError(translateAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -59,6 +63,17 @@ export default function LoginPage() {
         </div>
 
         <GlassCard className="p-6">
+          {!configured && (
+            <div className="mb-4 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-200">
+              <p className="font-semibold mb-1">⚠️ Supabase yapılandırılmamış</p>
+              <p className="opacity-90">
+                Bu deploy&apos;da <code className="font-mono text-xs">NEXT_PUBLIC_SUPABASE_URL</code> ve{" "}
+                <code className="font-mono text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> tanımlı değil.
+                Giriş çalışmayacaktır. Vercel → Project Settings → Environment Variables
+                üzerinden eklenip yeniden deploy edilmesi gerekiyor.
+              </p>
+            </div>
+          )}
           <form onSubmit={handleLogin} className="space-y-4">
             {error && (
               <div className="bg-warning/10 border border-warning/20 rounded-xl p-3 text-warning text-sm">
