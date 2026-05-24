@@ -49,8 +49,8 @@ export default function ParcelMap({
   polygonCoordinates, 
   properties,
   pois = [],
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   height = 300,
-  onLoad 
 }: ParcelMapProps) {
   const [mapError, setMapError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -113,10 +113,6 @@ export default function ParcelMap({
         centerLat={centerLat}
         centerLon={centerLon}
         polygonCoordinates={polygonCoordinates}
-        pois={pois}
-        height={height}
-        onLoad={onLoad}
-        onError={setMapError}
       />
       
       {/* Error overlay */}
