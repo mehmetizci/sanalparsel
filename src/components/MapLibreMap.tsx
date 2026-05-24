@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface MapLibreMapProps {
   centerLat: number;
@@ -17,13 +17,17 @@ export default function MapLibreMap({
   onLoad
 }: MapLibreMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (typeof window === "undefined" || !containerRef.current) return;
 
     const initMap = async () => {
       try {
-        if (polygonCoordinates.length === 0) return;
+        if (polygonCoordinates.length === 0) {
+          setIsLoading(false);
+          return;
+        }
         
         let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
         polygonCoordinates.forEach(([lon, lat]) => {
@@ -115,6 +119,7 @@ export default function MapLibreMap({
         ctx.fillStyle = "#a0aec0";
         ctx.fillText("Parsel Haritasi", width / 2, height - 15);
 
+        setIsLoading(false);
         onLoad?.();
       } catch (error) {
         console.error("MapLibreMap error:", error);
@@ -126,6 +131,15 @@ export default function MapLibreMap({
   }, [centerLat, centerLon, polygonCoordinates]);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full" style={{ minHeight: "500px" }} />
+    <div ref={containerRef} className="relative w-full h-full" style={{ minHeight: "500px" }}>
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-card">
+          <div className="text-center">
+            <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+            <p className="text-white text-sm">Harita yükleniyor...</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
