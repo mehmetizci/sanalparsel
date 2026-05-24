@@ -5,7 +5,7 @@
 ## 🚀 Özellikler
 
 - 📁 **GeoJSON Upload** - Parsel sınır dosyası yükleme
-- 🗺️ **Cesium Parsel Önizleme** - Harita üzerinde parsel görüntüleme
+- 🗺️ **MapLibre + Esri Uydu Önizleme** - Esri World Imagery üzerinde sinematik parsel görüntüleme (pitch / bearing / drone hissi)
 - 🤖 **AI Çevre Analizi** - Yakın çevre bilgilerini otomatik alma (OpenStreetMap)
 - 🔊 **ElevenLabs Seslendirme** - Profesyonel AI seslendirme
 - 🎬 **Remotion Video** - Sinematik drone videosu kompozisyonu
@@ -76,7 +76,7 @@ src/
 1. Landing Page → Kayıt/Giriş
 2. Dashboard → Yeni Proje Oluştur
 3. GeoJSON Yükle → Parsel bilgilerini oku
-4. Parsel Önizleme → Haritada görüntüle
+4. Parsel Önizleme → MapLibre + Esri uydu haritasında sinematik drone görünümü
 5. Drone Ayarları → Video süresi, yükseklik, kamera modu
 6. Video Ayarları → Format ve bilgi göstergeleri
 7. Çevre Bilgileri → PoI seçimi

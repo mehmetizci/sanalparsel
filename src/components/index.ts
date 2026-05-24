@@ -6,7 +6,7 @@ export { default as PrimaryButton } from "./PrimaryButton";
 export { default as GlassCard } from "./GlassCard";
 export { default as UploadCard } from "./UploadCard";
 export { default as ParcelInfoCard } from "./ParcelInfoCard";
-export { default as ParcelMap } from "./CesiumMap";
+export { default as ParcelMap } from "./ParcelMap";
 export { default as DroneModeCard } from "./DroneModeCard";
 export { default as VideoSettingToggle } from "./VideoSettingToggle";
 export { default as PoiSelectionCard } from "./PoiSelectionCard";

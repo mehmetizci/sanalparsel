@@ -1,44 +1,81 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { Project, ParcelProperties } from "@/types";
+import { Project, ParcelProperties, ParcelGeoJson } from "@/types";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import ParcelInfoCard from "@/components/ParcelInfoCard";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
 
-export default function ParcelInfoPage() {
+// Lazy-load the map so this route stays light, mobile-fast and SSR-safe.
+const ParcelMap = dynamic(() => import("@/components/ParcelMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center">
+      <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+    </div>
+  ),
+});
+
+// Default demo parcel (İzmir Çiğli Harmandalı 2406 Ada 9 Parsel).
+const DEMO_PARCEL: ParcelGeoJson = {
+  type: "Feature",
+  properties: {
+    Il: "İzmir",
+    Ilce: "Çiğli",
+    Mahalle: "Harmandalı",
+    Ada: "2406",
+    ParselNo: "9",
+    Alan: "1234",
+    Nitelik: "Arsa",
+  },
+  geometry: {
+    type: "Polygon",
+    coordinates: [
+      [
+        [27.1418, 38.4228],
+        [27.1438, 38.4228],
+        [27.1438, 38.4248],
+        [27.1418, 38.4248],
+        [27.1418, 38.4228],
+      ],
+    ],
+  },
+};
+
+function ParcelInfoPageInner() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const id = (params?.id as string) || "test";
   const isDemo = searchParams.get("demo") === "true";
   const demoTitle = searchParams.get("title") || "Yeni Proje";
-  
+
   const [project, setProject] = useState<Project | null>(null);
   const [, setCustomNote] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isDemo) {
-      // Demo mode - create a fake project object
       const demoProject: Project = {
-        id: params.id as string,
+        id,
         user_id: "demo",
         title: decodeURIComponent(demoTitle),
         short_title: decodeURIComponent(demoTitle).split(" ").slice(-2).join(" "),
-        geojson: null,
-        properties: {},
-        city: null,
-        district: null,
-        neighborhood: null,
-        block_no: null,
-        parcel_no: null,
-        area: null,
-        property_type: null,
-        center_lat: 38.4237,
+        geojson: DEMO_PARCEL,
+        properties: DEMO_PARCEL.properties,
+        city: DEMO_PARCEL.properties.Il || null,
+        district: DEMO_PARCEL.properties.Ilce || null,
+        neighborhood: DEMO_PARCEL.properties.Mahalle || null,
+        block_no: DEMO_PARCEL.properties.Ada || null,
+        parcel_no: DEMO_PARCEL.properties.ParselNo || null,
+        area: DEMO_PARCEL.properties.Alan || null,
+        property_type: DEMO_PARCEL.properties.Nitelik || null,
+        center_lat: 38.4238,
         center_lon: 27.1428,
         custom_note: null,
         status: "draft",
@@ -51,23 +88,25 @@ export default function ParcelInfoPage() {
 
     const fetchProject = async () => {
       const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
       if (!user) {
-        // Redirect to demo mode if not authenticated
-        router.replace(`/projects/${params.id}/parcel-info?demo=true&title=${demoTitle}`);
+        router.replace(
+          `/projects/${id}/parcel-info?demo=true&title=${encodeURIComponent(demoTitle)}`
+        );
         return;
       }
 
       const { data } = await supabase
         .from("projects")
         .select("*")
-        .eq("id", params.id)
+        .eq("id", id)
         .eq("user_id", user.id)
         .single();
 
       if (!data) {
-        // Project not found, go to new project
         router.push("/projects/new");
         return;
       }
@@ -77,14 +116,20 @@ export default function ParcelInfoPage() {
       setLoading(false);
     };
 
-    fetchProject();
-  }, [params.id, router, isDemo, demoTitle]);
+    fetchProject().catch((err) => {
+      console.error("[ParcelInfo] fetchProject error", err);
+      router.replace(
+        `/projects/${id}/parcel-info?demo=true&title=${encodeURIComponent(demoTitle)}`
+      );
+    });
+  }, [id, router, isDemo, demoTitle]);
 
   const handleSaveAndContinue = () => {
-    if (project) {
-      // In demo mode, just navigate to preview
-      router.push(`/projects/${project.id}/preview?demo=true&title=${encodeURIComponent(project.title)}`);
-    }
+    if (!project) return;
+    const target = `/projects/${project.id}/preview${
+      isDemo ? `?demo=true&title=${encodeURIComponent(project.title)}` : ""
+    }`;
+    router.push(target);
   };
 
   if (loading) {
@@ -101,8 +146,10 @@ export default function ParcelInfoPage() {
     return null;
   }
 
-  const shortTitle = project.short_title || project.title?.split(" ").slice(-2).join(" ");
-  const properties = project.properties as ParcelProperties || {};
+  const shortTitle =
+    project.short_title || project.title?.split(" ").slice(-2).join(" ");
+  const properties = (project.properties as ParcelProperties) || {};
+  const parcelFeature = (project.geojson as ParcelGeoJson | null) || DEMO_PARCEL;
 
   return (
     <AppShell>
@@ -117,10 +164,24 @@ export default function ParcelInfoPage() {
         {isDemo && (
           <div className="bg-accent/10 border border-accent/20 rounded-xl p-3 mb-4 text-sm">
             <p className="text-accent">
-              <span className="font-semibold">Demo Modu:</span> Bu proje demo olarak oluşturuldu. Supabase bağlantısı yapılandırıldığında gerçek projeler oluşturabilirsiniz.
+              <span className="font-semibold">Demo Modu:</span> Bu proje demo
+              olarak oluşturuldu. Supabase bağlantısı yapılandırıldığında
+              gerçek projeler oluşturabilirsiniz.
             </p>
           </div>
         )}
+
+        <div className="glass rounded-2xl overflow-hidden h-[260px] mb-4">
+          <ParcelMap
+            parcel={parcelFeature}
+            centerLat={project.center_lat ?? undefined}
+            centerLon={project.center_lon ?? undefined}
+            properties={properties}
+            droneHeight={300}
+            cinematic={false}
+            showOverlays
+          />
+        </div>
 
         <ParcelInfoCard
           properties={properties}
@@ -134,11 +195,15 @@ export default function ParcelInfoPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="text-muted">Enlem</span>
-                <p className="text-white font-mono">{project.center_lat?.toFixed(6) || "-"}</p>
+                <p className="text-white font-mono">
+                  {project.center_lat?.toFixed(6) || "-"}
+                </p>
               </div>
               <div>
                 <span className="text-muted">Boylam</span>
-                <p className="text-white font-mono">{project.center_lon?.toFixed(6) || "-"}</p>
+                <p className="text-white font-mono">
+                  {project.center_lon?.toFixed(6) || "-"}
+                </p>
               </div>
             </div>
           </GlassCard>
@@ -159,5 +224,21 @@ export default function ParcelInfoPage() {
         </PrimaryButton>
       </div>
     </AppShell>
+  );
+}
+
+export default function ParcelInfoPage() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell>
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+          </div>
+        </AppShell>
+      }
+    >
+      <ParcelInfoPageInner />
+    </Suspense>
   );
 }
