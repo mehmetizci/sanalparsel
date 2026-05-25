@@ -332,20 +332,30 @@ export default function MapboxMap({
 
       map.on("error", (e) => {
         console.error("[MapboxMap] Error:", e);
-        setMapError(e.error?.message || "Harita yüklenemedi");
+        setMapError(e.error?.message || "Harita başlatılamadı");
       });
 
       map.on("load", () => {
         if (!mapRef.current) return;
 
-        // Add parcel source
+        // Determine which feature to use - check uploaded, then parcel prop, then fallback
+        const currentParcel = uploadedParcel || parcel || legacyFeature();
+        
+        // Default fallback polygon if no parcel data
+        const defaultPolygon = {
+          type: "Feature" as const,
+          properties: {},
+          geometry: { 
+            type: "Polygon" as const, 
+            coordinates: [[[fallbackCenter.lon, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat]]] 
+          },
+        };
+
+        // Add parcel source with whatever data we have
+        const featureData = currentParcel || defaultPolygon;
         mapRef.current.addSource("parcel", {
           type: "geojson",
-          data: parcelFeature || legacyFeature() || {
-            type: "Feature",
-            properties: {},
-            geometry: { type: "Polygon", coordinates: [[[fallbackCenter.lon, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat]]] },
-          },
+          data: featureData,
         });
 
         // Fill layer with transparent red
@@ -391,10 +401,9 @@ export default function MapboxMap({
           },
         }, "parcel-outline");
 
-        // Fit bounds to parcel if we have one
-        const featureToUse = parcelFeature || legacyFeature();
-        if (featureToUse) {
-          const positions = flattenRings(featureToUse.geometry);
+        // Fit bounds to parcel if we have valid geometry
+        if (currentParcel && currentParcel.geometry) {
+          const positions = flattenRings(currentParcel.geometry);
           const bounds = computeBounds(positions);
           if (bounds) {
             mapRef.current.fitBounds(bounds, {
@@ -421,6 +430,7 @@ export default function MapboxMap({
         }
 
         setIsReady(true);
+        setMapError(null);
         onReady?.(mapRef.current);
       });
 
@@ -438,7 +448,7 @@ export default function MapboxMap({
       console.error("[MapboxMap] Initialization error:", err);
       setMapError("Harita başlatılamadı");
     }
-  }, [fallbackCenter, zoom, cinematic, parcelFeature, onReady, legacyFeature]);
+  }, [fallbackCenter?.lon, fallbackCenter?.lat, zoom, cinematic, onReady]);
 
   // Update parcel source when uploaded
   useEffect(() => {
