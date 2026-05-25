@@ -67,19 +67,17 @@ function getBestName(tags: Record<string, string>, fallbackName: string): string
   return fallbackName;
 }
 
-// Build single combined query
+// Build single combined query - optimized for speed
 function buildCombinedQuery(lat: number, lng: number, radius: number): string {
-  const parts: string[] = [];
-  
-  for (const cat of POI_CATEGORIES) {
-    const key = cat.amenity || cat.shop || "";
-    const value = cat.amenity || cat.shop || "";
-    
-    parts.push(`node(around:${radius},${lat},${lng})["${key}"="${value}"]`);
-    parts.push(`way(around:${radius},${lat},${lng})["${key}"="${value}"]`);
-  }
-  
-  return `[out:json][timeout:15];(${parts.join(";")});out center tags 30;`;
+  // Simplified query - fewer elements, faster execution
+  return `[out:json][timeout:25];
+(
+  node(around:${radius},${lat},${lng})["amenity"="hospital"];
+  node(around:${radius},${lat},${lng})["amenity"="school"];
+  node(around:${radius},${lat},${lng})["amenity"="pharmacy"];
+  node(around:${radius},${lat},${lng})["shop"="supermarket"];
+);
+out body 20;`;
 }
 
 // Haversine distance
