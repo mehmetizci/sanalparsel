@@ -41,29 +41,45 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
     throw { error: "Metin çok uzun", details: "Text exceeds maximum length of 5000 characters" };
   }
 
-  console.log("[TTS Client] Generating speech...");
-  console.log("[TTS Client] Text length:", text.length);
-  console.log("[TTS Client] Voice:", voice || "default (tr-TR-AhmetNeural)");
-  console.log("[TTS Client] Rate:", rate || "+0%");
-  console.log("[TTS Client] Pitch:", pitch || "+0Hz");
+  // Use default voice if not specified
+  const selectedVoice = voice || "tr-TR-AhmetNeural";
+  const selectedRate = rate || "0%";
+  const selectedPitch = pitch || "0Hz";
+
+  console.log("=== TTS POST REQUEST ===");
+  console.log("Text length:", text.length, "chars");
+  console.log("Text preview:", text.substring(0, 100) + (text.length > 100 ? "..." : ""));
+  console.log("Voice:", selectedVoice);
+  console.log("Rate:", selectedRate);
+  console.log("Pitch:", selectedPitch);
+  console.log("========================");
+
+  // Build request payload
+  const payload = {
+    text,
+    voice: selectedVoice,
+    rate: selectedRate,
+    pitch: selectedPitch,
+  };
+
+  console.log("POST body:", JSON.stringify(payload, null, 2).substring(0, 500));
 
   try {
+    console.log("Calling /api/generate-tts...");
+    
     const response = await fetch("/api/generate-tts", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        text,
-        voice: voice || "tr-TR-AhmetNeural",
-        rate: rate || "+0%",
-        pitch: pitch || "+0Hz",
-      }),
+      body: JSON.stringify(payload),
     });
 
-    console.log("[TTS Client] Response status:", response.status);
-    console.log("[TTS Client] Response statusText:", response.statusText);
-    console.log("[TTS Client] Content-Type:", response.headers.get("Content-Type"));
+    console.log("=== TTS RESPONSE ===");
+    console.log("Status:", response.status);
+    console.log("StatusText:", response.statusText);
+    console.log("Content-Type:", response.headers.get("Content-Type"));
+    console.log("===================");
 
     // Check for non-ok responses
     if (!response.ok) {
@@ -81,7 +97,7 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
         }
       }
 
-      console.error("[TTS Client] Error response:", errorDetails);
+      console.error("TTS Error Response:", errorDetails);
 
       throw {
         error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
@@ -89,83 +105,71 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
       };
     }
 
-    // Check content type
+    // Get content type
     const contentType = response.headers.get("Content-Type") || "";
     
-    // Get response as array buffer first (works for both direct binary and base64)
-    const arrayBuffer = await response.arrayBuffer();
+    console.log("Processing response as blob...");
     
-    if (contentType.includes("audio") || contentType.includes("mpeg")) {
-      // Direct binary audio
-      const audioBlob = new Blob([arrayBuffer], { type: "audio/mpeg" });
-      console.log("[TTS Client] Audio blob size:", audioBlob.size, "bytes");
+    // Always try to read as blob first (for audio responses)
+    const audioBlob = await response.blob();
+    console.log("Blob size:", audioBlob.size, "bytes");
+    console.log("Blob type:", audioBlob.type);
+
+    // Check if response is actually audio or JSON error
+    if (contentType.includes("audio") || contentType.includes("mpeg") || audioBlob.type.includes("audio")) {
+      console.log("Response is audio - creating preview");
       
       // Calculate duration
       const duration = await getAudioDuration(audioBlob);
-      console.log("[TTS Client] Audio duration:", duration, "seconds");
+      console.log("Audio duration:", duration, "seconds");
 
       return {
         audioBlob,
         duration,
       };
-    }
-    
-    // Try to parse as JSON error or base64 audio
-    try {
-      const decoder = new TextDecoder();
-      const textResponse = decoder.decode(arrayBuffer);
+    } else {
+      // Might be JSON error in blob body - try to read as text
+      console.log("Response might be JSON, checking content...");
       
-      // Check if it's JSON error
-      const jsonStart = textResponse.trim().startsWith("{");
-      if (jsonStart) {
-        const errorBody = JSON.parse(textResponse);
-        throw {
-          error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
-          details: errorBody.error || errorBody.details || "Invalid response",
-        };
-      }
+      const textResponse = await audioBlob.text();
+      console.log("Raw response (first 500 chars):", textResponse.substring(0, 500));
       
-      // Might be base64 encoded audio (Netlify)
+      // Try to parse as JSON
       try {
-        const binaryString = atob(textResponse.trim());
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        const audioBlob = new Blob([bytes], { type: "audio/mpeg" });
-        console.log("[TTS Client] Base64 audio decoded, size:", audioBlob.size, "bytes");
-        
-        const duration = await getAudioDuration(audioBlob);
-        console.log("[TTS Client] Audio duration:", duration, "seconds");
-
-        return {
-          audioBlob,
-          duration,
+        const jsonResponse = JSON.parse(textResponse);
+        console.error("JSON Error Response:", jsonResponse);
+        throw {
+          error: jsonResponse.error || "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
+          details: jsonResponse.details || "Unknown error",
         };
-      } catch {
-        // Not base64 either
-        console.error("[TTS Client] Unknown response format");
+      } catch (parseErr) {
+        if (parseErr && typeof parseErr === "object" && "error" in parseErr) {
+          throw parseErr;
+        }
+        
+        // Not JSON - might be test response or other format
+        if (textResponse.includes("ok") || textResponse.includes("success")) {
+          console.log("Test response received:", textResponse);
+          // This is a test/success response, not actual audio
+          throw {
+            error: "Test modunda ses oluşturulamadı",
+            details: textResponse,
+          };
+        }
+        
+        console.error("Could not parse response as audio or JSON");
         throw {
           error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
           details: "Invalid response format from server",
         };
       }
-    } catch (parseErr) {
-      if (parseErr && typeof parseErr === "object" && "error" in parseErr) {
-        throw parseErr;
-      }
-      
-      console.error("[TTS Client] Response parse error:", parseErr);
-      throw {
-        error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
-        details: "Failed to parse response",
-      };
     }
   } catch (err) {
     // Log the error
+    console.error("=== TTS EXCEPTION ===");
     if (err instanceof Error) {
-      console.error("[TTS Client] Exception:", err.message);
-      console.error("[TTS Client] Stack:", err.stack);
+      console.error("Exception message:", err.message);
+      console.error("Exception stack:", err.stack);
       throw {
         error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
         details: err.message,
@@ -174,11 +178,12 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
 
     // Re-throw known errors
     if (typeof err === "object" && err !== null && "error" in err) {
+      console.error("TTS Error object:", err);
       throw err;
     }
 
     // Unknown error
-    console.error("[TTS Client] Unknown error:", err);
+    console.error("Unknown TTS error:", err);
     throw {
       error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
       details: String(err),
