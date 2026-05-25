@@ -32,28 +32,34 @@ export interface ParcelCoordinates {
   coordinates: number[][][] | number[][][][];
 }
 
-// POI types
-export type POIType = 
-  | "hospital" 
-  | "school" 
-  | "university" 
-  | "market" 
-  | "pharmacy" 
-  | "transport" 
-  | "highway" 
-  | "park"
-  | "bank"
-  | "mosque";
-
+// Enhanced POI types with OSM metadata
 export interface POI {
   id: string;
-  type: POIType;
+  osmId?: number;
+  osmType?: string;
+  category: string;
+  label: string;
   name: string;
-  distance: number;
+  distanceMeters: number;
   distanceText: string;
   lat: number;
   lng: number;
   selected: boolean;
+}
+
+// Legacy support - convert old format to new
+export function convertToNewPOI(old: { id: string; type: string; name: string; distance: number; distanceText: string; lat: number; lng: number; selected: boolean }): POI {
+  return {
+    id: old.id,
+    category: old.type,
+    label: old.type,
+    name: old.name,
+    distanceMeters: old.distance,
+    distanceText: old.distanceText,
+    lat: old.lat,
+    lng: old.lng,
+    selected: old.selected,
+  };
 }
 
 // Helper to convert string coordinates to numbers
@@ -155,8 +161,13 @@ export interface ParcelState {
   // Track if data came from upload or demo
   source: "upload" | "demo" | "database" | null;
 
-  // POI data (environment items)
+  // POI data (environment items) - enhanced with OSM metadata
   pois: POI[];
+  
+  // Nearby places persistence
+  nearbyParcelKey: string | null;
+  nearbyLastFetchedAt: number | null;
+  selectedNearbyPlaceIds: string[];
   
   // Actions
   setParcelData: (data: {
@@ -187,6 +198,12 @@ export interface ParcelState {
   setPois: (pois: POI[]) => void;
   togglePoi: (poiId: string) => void;
   clearPois: () => void;
+  
+  // Update POIs from API with full metadata
+  updatePoisFromApi: (pois: POI[], parcelKey: string) => void;
+  
+  // Persist selected POIs
+  setSelectedPoiIds: (ids: string[]) => void;
 }
 
 export const useParcelStore = create<ParcelState>()(
@@ -199,6 +216,10 @@ export const useParcelStore = create<ParcelState>()(
       parcelCoordinates: null,
       pois: [],
       source: null,
+      // New POI persistence fields
+      nearbyParcelKey: null,
+      nearbyLastFetchedAt: null,
+      selectedNearbyPlaceIds: [],
 
       setParcelData: (data) => set((state) => {
         const updates: Partial<ParcelState> = {
@@ -293,6 +314,24 @@ export const useParcelStore = create<ParcelState>()(
       })),
       
       clearPois: () => set({ pois: [] }),
+      
+      // Update POIs from API with parcel key
+      updatePoisFromApi: (pois, parcelKey) => set((state) => {
+        // Restore selected state from previous selections
+        const updatedPois = pois.map(poi => ({
+          ...poi,
+          selected: state.selectedNearbyPlaceIds.includes(poi.id),
+        }));
+        
+        return {
+          pois: updatedPois,
+          nearbyParcelKey: parcelKey,
+          nearbyLastFetchedAt: Date.now(),
+        };
+      }),
+      
+      // Set selected POI IDs
+      setSelectedPoiIds: (ids) => set({ selectedNearbyPlaceIds: ids }),
     }),
     {
       name: "sanalparsel-parcel", // localStorage key
@@ -304,6 +343,10 @@ export const useParcelStore = create<ParcelState>()(
         parcelCoordinates: state.parcelCoordinates,
         pois: state.pois,
         source: state.source,
+        // Persist POI data across pages
+        nearbyParcelKey: state.nearbyParcelKey,
+        nearbyLastFetchedAt: state.nearbyLastFetchedAt,
+        selectedNearbyPlaceIds: state.selectedNearbyPlaceIds,
       }),
     }
   )

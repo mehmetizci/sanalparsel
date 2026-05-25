@@ -5,9 +5,12 @@
 
 export interface POI {
   id: string;
-  type: POIType;
+  osmId?: number;
+  osmType?: string;
+  category: string;
+  label: string;
   name: string;
-  distance: number; // in meters
+  distanceMeters: number;
   distanceText: string;
   lat: number;
   lng: number;

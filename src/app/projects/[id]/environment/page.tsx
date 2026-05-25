@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, EnvironmentItem } from "@/types";
-import { useParcelStore } from "@/lib/parcel-store";
+import { useParcelStore, POI } from "@/lib/parcel-store";
 import { fetchNearbyPOIs, POIServiceError } from "@/lib/poi-service";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
@@ -18,6 +18,22 @@ interface ErrorInfo {
   message: string;
 }
 
+// Convert API POI to EnvironmentItem
+function poiToEnvironmentItem(poi: POI, projectId: string, index: number): EnvironmentItem {
+  return {
+    id: poi.id,
+    project_id: projectId,
+    name: poi.name,
+    type: poi.category as EnvironmentItem["type"],
+    distance: poi.distanceText,
+    lat: poi.lat,
+    lon: poi.lng,
+    selected: poi.selected,
+    sort_order: index,
+    source: "osm",
+  };
+}
+
 export default function EnvironmentPage({ params }: { params: { id: string } }) {
   const urlParams = useParams();
   const router = useRouter();
@@ -25,11 +41,15 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
   const id = (urlParams?.id as string) || params.id;
   const isDemo = searchParams.get("demo") === "true";
   
-  // Global store for POI
+  // Global store for POI - with persistence
   const parcelCenter = useParcelStore((state) => state.parcelCenter);
   const pois = useParcelStore((state) => state.pois);
-  const setPois = useParcelStore((state) => state.setPois);
+  const nearbyParcelKey = useParcelStore((state) => state.nearbyParcelKey);
+  const selectedNearbyPlaceIds = useParcelStore((state) => state.selectedNearbyPlaceIds);
+  
   const togglePoi = useParcelStore((state) => state.togglePoi);
+  const updatePoisFromApi = useParcelStore((state) => state.updatePoisFromApi);
+  const setSelectedPoiIds = useParcelStore((state) => state.setSelectedPoiIds);
   
   const [project, setProject] = useState<Project | null>(null);
   const [items, setItems] = useState<EnvironmentItem[]>([]);
@@ -63,22 +83,6 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
           created_at: new Date().toISOString(),
         };
         setProject(demoProject);
-        
-        // Use global store POIs if available, otherwise use demo items
-        if (pois.length > 0) {
-          setItems(pois.map((p, i) => ({
-            id: p.id,
-            project_id: "demo",
-            name: p.name,
-            type: p.type as EnvironmentItem["type"],
-            distance: p.distanceText,
-            lat: p.lat,
-            lon: p.lng,
-            selected: p.selected,
-            sort_order: i,
-            source: "osm",
-          })));
-        }
         setLoading(false);
         return;
       }
@@ -120,10 +124,19 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
     };
 
     fetchProject();
-  }, [id, router, isDemo, pois]);
+  }, [id, router, isDemo]);
+
+  // Update local items when global POIs change (persistence)
+  useEffect(() => {
+    if (pois.length > 0 && items.length === 0) {
+      // Only update from global store if local is empty (navigation back)
+      setItems(pois.map((p, i) => poiToEnvironmentItem(p, id, i)));
+    }
+  }, [pois, id, items.length]);
+
+  // Get current parcel key for caching
 
   const handleFetchFromOsm = async () => {
-    // Use parcel center from global store, fallback to project center
     const lat = parcelCenter?.lat || project?.center_lat;
     const lng = parcelCenter?.lon || project?.center_lon;
     
@@ -135,17 +148,27 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
       return;
     }
 
+    const parcelKey = `poi_${Math.round(lat * 1000) / 1000}_${Math.round(lng * 1000) / 1000}`;
+    
+    // Skip if same parcel - use cached data
+    if (nearbyParcelKey === parcelKey && pois.length > 0) {
+      console.log("[Environment] Same parcel, using cached POIs");
+      setItems(pois.map((p, i) => poiToEnvironmentItem(p, id, i)));
+      return;
+    }
+
     setFetchingPoI(true);
     setError(null);
     
     try {
       console.log(`[Environment] Fetching POIs for ${lat}, ${lng}`);
       
-      const pois = await fetchNearbyPOIs(lat, lng);
+      const apiPois = await fetchNearbyPOIs(lat, lng);
+      const parcelKeyFromApi = `poi_${Math.round(lat * 1000) / 1000}_${Math.round(lng * 1000) / 1000}`;
       
-      console.log(`[Environment] Got ${pois.length} POIs`);
+      console.log(`[Environment] Got ${apiPois.length} POIs`);
       
-      if (pois.length === 0) {
+      if (apiPois.length === 0) {
         setError({
           type: "OVERPASS_ERROR",
           message: "Bu bölgede çevre verisi bulunamadı. Farklı bir konum deneyin.",
@@ -153,22 +176,14 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
         return;
       }
       
-      // Update global store
-      setPois(pois);
+      // Update global store with parcel key for persistence
+      updatePoisFromApi(apiPois, parcelKeyFromApi);
+      
+      // Update selected POI IDs
+      setSelectedPoiIds(apiPois.filter(p => p.selected).map(p => p.id));
       
       // Update items for UI
-      setItems(pois.map((p, i) => ({
-        id: p.id,
-        project_id: id,
-        name: p.name,
-        type: p.type as EnvironmentItem["type"],
-        distance: p.distanceText,
-        lat: p.lat,
-        lon: p.lng,
-        selected: p.selected,
-        sort_order: i,
-        source: "osm" as const,
-      })));
+      setItems(apiPois.map((p, i) => poiToEnvironmentItem(p, id, i)));
       
     } catch (err) {
       console.error("[Environment] POI fetch error:", err);
@@ -205,8 +220,15 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
         item.id === itemId ? { ...item, selected: !item.selected } : item
       )
     );
+    
     // Update global store
     togglePoi(itemId);
+    
+    // Persist selected IDs
+    const newSelectedIds = selectedNearbyPlaceIds.includes(itemId)
+      ? selectedNearbyPlaceIds.filter(id => id !== itemId)
+      : [...selectedNearbyPlaceIds, itemId];
+    setSelectedPoiIds(newSelectedIds);
   };
 
   const handleSaveAndContinue = async () => {
