@@ -10,6 +10,7 @@ import StepHeader from "@/components/StepHeader";
 import ParcelInfoCard from "@/components/ParcelInfoCard";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
+import { useParcelStore } from "@/lib/parcel-store";
 
 // Lazy-load the map so this route stays light, mobile-fast and SSR-safe.
 const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
@@ -55,6 +56,9 @@ function ParcelInfoPageInner() {
   const isDemo = searchParams.get("demo") === "true";
   const demoTitle = searchParams.get("title") || "Yeni Proje";
 
+  // Zustand store
+  const setParcelData = useParcelStore((state) => state.setParcelData);
+
   const [project, setProject] = useState<Project | null>(null);
   const [, setCustomNote] = useState("");
   const [loading, setLoading] = useState(true);
@@ -82,6 +86,14 @@ function ParcelInfoPageInner() {
         created_at: new Date().toISOString(),
       };
       setProject(demoProject);
+      
+      // Save demo parcel to global store
+      setParcelData({
+        geoJson: DEMO_PARCEL,
+        metadata: DEMO_PARCEL.properties,
+        source: "demo",
+      });
+      
       setLoading(false);
       return;
     }
@@ -126,6 +138,16 @@ function ParcelInfoPageInner() {
 
   const handleSaveAndContinue = () => {
     if (!project) return;
+    
+    // Save project geojson to global store before navigation
+    if (project.geojson) {
+      setParcelData({
+        geoJson: project.geojson,
+        metadata: project.properties ?? undefined,
+        source: "database",
+      });
+    }
+    
     const target = `/projects/${project.id}/preview${
       isDemo ? `?demo=true&title=${encodeURIComponent(project.title)}` : ""
     }`;
@@ -149,7 +171,6 @@ function ParcelInfoPageInner() {
   const shortTitle =
     project.short_title || project.title?.split(" ").slice(-2).join(" ");
   const properties = (project.properties as ParcelProperties) || {};
-  const parcelFeature = (project.geojson as ParcelGeoJson | null) || DEMO_PARCEL;
 
   return (
     <AppShell>
@@ -173,9 +194,6 @@ function ParcelInfoPageInner() {
 
         <div className="glass rounded-[28px] overflow-hidden h-[260px] mb-4 relative">
           <MapboxMap
-            parcel={parcelFeature}
-            centerLat={project.center_lat ?? undefined}
-            centerLon={project.center_lon ?? undefined}
             droneHeight={300}
             cinematic={false}
             showOverlays

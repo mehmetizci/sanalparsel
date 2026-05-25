@@ -3,31 +3,25 @@
  * 
  * Features:
  * - Mapbox Satellite Streets style for high-quality satellite imagery
- * - GeoJSON parcel upload and visualization
+ * - GeoJSON parcel visualization with global state (Zustand)
  * - Cinematic camera with pitch 60° and bearing animation
  * - Smooth flyTo transitions
  * - Frame capture for video rendering
+ * - localStorage persistence
  */
 
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
+import type { Feature, Polygon, MultiPolygon } from "geojson";
+import { useParcelStore } from "@/lib/parcel-store";
 
 // Environment variable for Mapbox token
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 
 export interface MapboxMapProps {
-  /** GeoJSON parcel feature */
-  parcel?: Feature<Polygon | MultiPolygon> | null;
-  /** GeoJSON polygon coordinates as fallback */
-  polygonCoordinates?: Position[];
-  /** Center latitude */
-  centerLat?: number;
-  /** Center longitude */
-  centerLon?: number;
   /** Initial zoom level */
   zoom?: number;
   /** Drone height in meters for zoom offset */
@@ -38,58 +32,7 @@ export interface MapboxMapProps {
   showOverlays?: boolean;
   /** Callback when map is ready */
   onReady?: (map: mapboxgl.Map) => void;
-  /** Callback when parcel is uploaded */
-  onParcelUpload?: (geojson: Feature<Polygon | MultiPolygon>) => void;
   className?: string;
-}
-
-interface ParcelMapProps {
-  Il?: string;
-  Ilce?: string;
-  Mahalle?: string;
-  Ada?: string;
-  ParselNo?: string;
-  Alan?: string;
-  Nitelik?: string;
-}
-
-function isValidCoord(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
-function flattenRings(geometry: Polygon | MultiPolygon): Position[] {
-  if (geometry.type === "Polygon") {
-    return geometry.coordinates[0] || [];
-  }
-  return (geometry.coordinates[0]?.[0] as Position[]) || [];
-}
-
-function computeBounds(positions: Position[]): [[number, number], [number, number]] | null {
-  if (!positions.length) return null;
-  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
-  for (const p of positions) {
-    if (!Array.isArray(p) || !isValidCoord(p[0]) || !isValidCoord(p[1])) continue;
-    if (p[0] < minLon) minLon = p[0];
-    if (p[0] > maxLon) maxLon = p[0];
-    if (p[1] < minLat) minLat = p[1];
-    if (p[1] > maxLat) maxLat = p[1];
-  }
-  if (!Number.isFinite(minLon)) return null;
-  return [[minLon, minLat], [maxLon, maxLat]];
-}
-
-function computeCenter(positions: Position[]): { lat: number; lon: number } | null {
-  if (!positions.length) return null;
-  let lon = 0, lat = 0, count = 0;
-  for (const p of positions) {
-    if (Array.isArray(p) && isValidCoord(p[0]) && isValidCoord(p[1])) {
-      lon += p[0];
-      lat += p[1];
-      count += 1;
-    }
-  }
-  if (!count) return null;
-  return { lat: lat / count, lon: lon / count };
 }
 
 function heightToZoomOffset(height?: number): number {
@@ -193,16 +136,11 @@ function GeoJsonUploader({ onUpload }: { onUpload: (feature: Feature<Polygon | M
  * Main MapboxMap Component
  */
 export default function MapboxMap({
-  parcel,
-  polygonCoordinates,
-  centerLat,
-  centerLon,
   zoom = 16,
   droneHeight,
   cinematic = true,
   showOverlays = true,
   onReady,
-  onParcelUpload,
   className,
 }: MapboxMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -211,70 +149,25 @@ export default function MapboxMap({
   const [isReady, setIsReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [uploadedParcel, setUploadedParcel] = useState<Feature<Polygon | MultiPolygon> | null>(null);
-  const [properties, setProperties] = useState<ParcelMapProps | null>(null);
 
-  // Combine parcel props with uploaded GeoJSON
-  const parcelFeature = uploadedParcel || parcel;
+  // Get data from global store
+  const uploadedGeoJson = useParcelStore((state) => state.uploadedGeoJson);
+  const parcelMetadata = useParcelStore((state) => state.parcelMetadata);
+  const parcelCenter = useParcelStore((state) => state.parcelCenter);
+  const parcelBounds = useParcelStore((state) => state.parcelBounds);
+  const setParcelData = useParcelStore((state) => state.setParcelData);
 
-  // Convert legacy polygonCoordinates to feature
-  const legacyFeature = useCallback(() => {
-    if (polygonCoordinates && polygonCoordinates.length >= 3) {
-      const ring = [...polygonCoordinates];
-      const [firstLon, firstLat] = ring[0] || [];
-      const [lastLon, lastLat] = ring[ring.length - 1] || [];
-      if (firstLon !== lastLon || firstLat !== lastLat) {
-        ring.push(ring[0]);
-      }
-      return {
-        type: "Feature" as const,
-        properties: {},
-        geometry: { type: "Polygon" as const, coordinates: [ring] },
-      };
-    }
-    return null;
-  }, [polygonCoordinates]);
+  // Fallback center from store
+  const fallbackCenter = parcelCenter;
 
-  // Compute center from parcel or provided coordinates
-  const center = useCallback(() => {
-    if (parcelFeature?.geometry) {
-      const positions = flattenRings(parcelFeature.geometry);
-      const computed = computeCenter(positions);
-      if (computed) return computed;
-    }
-    const legacy = legacyFeature();
-    if (legacy) {
-      const positions = flattenRings(legacy.geometry);
-      return computeCenter(positions);
-    }
-    if (isValidCoord(centerLat) && isValidCoord(centerLon)) {
-      return { lat: centerLat as number, lon: centerLon as number };
-    }
-    return null;
-  }, [parcelFeature, centerLat, centerLon, legacyFeature]);
-
-  const fallbackCenter = center();
-
-  // Handle GeoJSON upload
-  const handleGeoJsonUpload = useCallback((feature: Feature<Polygon | MultiPolygon>) => {
-    setUploadedParcel(feature);
-    if (onParcelUpload) {
-      onParcelUpload(feature);
-    }
-    
-    // Extract properties from GeoJSON
-    if (feature.properties) {
-      setProperties({
-        Il: feature.properties.Il || feature.properties.il,
-        Ilce: feature.properties.Ilce || feature.properties.ilce,
-        Mahalle: feature.properties.Mahalle || feature.properties.mahalle,
-        Ada: feature.properties.Ada || feature.properties.ada,
-        ParselNo: feature.properties.ParselNo || feature.properties.parsel_no || feature.properties.parselNo,
-        Alan: feature.properties.Alan || feature.properties.alan,
-        Nitelik: feature.properties.Nitelik || feature.properties.nitelik,
-      });
-    }
-  }, [onParcelUpload]);
+  // Handle GeoJSON upload - save to global store
+  const handleGeoJsonUpload = (feature: Feature<Polygon | MultiPolygon>) => {
+    setParcelData({
+      geoJson: feature,
+      metadata: feature.properties as Record<string, unknown>,
+      source: "upload",
+    });
+  };
 
   // Initialize Mapbox map
   useEffect(() => {
@@ -355,8 +248,10 @@ export default function MapboxMap({
 
       console.log("[MapboxMap] Map loaded, setting up layers...");
       console.log("[MapboxMap] Token:", MAPBOX_TOKEN ? "set" : "not set");
+      console.log("[MapboxMap] uploadedGeoJson:", uploadedGeoJson ? "present" : "null");
 
-      const currentParcel = uploadedParcel || parcel || legacyFeature();
+      // Use GeoJSON from store or create default polygon
+      const currentParcel = uploadedGeoJson;
       
       const defaultPolygon = {
         type: "Feature" as const,
@@ -415,19 +310,19 @@ export default function MapboxMap({
         },
       }, "parcel-outline");
 
-      if (currentParcel && currentParcel.geometry) {
-        const positions = flattenRings(currentParcel.geometry);
-        const bounds = computeBounds(positions);
-        if (bounds) {
-          mapRef.current.fitBounds(bounds, {
+      // Fit to parcel bounds if available
+      if (parcelBounds && currentParcel) {
+        mapRef.current.fitBounds(
+          [[parcelBounds.minLon, parcelBounds.minLat], [parcelBounds.maxLon, parcelBounds.maxLat]] as [[number, number], [number, number]],
+          {
             padding: 80,
             maxZoom: 19,
             pitch: 60,
             bearing: -15,
             duration: 3000,
             essential: true,
-          });
-        }
+          }
+        );
       }
 
       if (cinematic) {
@@ -459,31 +354,29 @@ export default function MapboxMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fallbackCenter?.lon, fallbackCenter?.lat, zoom, cinematic, onReady]);
 
-  // Update parcel source when uploaded
+  // Update parcel source when store data changes
   useEffect(() => {
     if (!mapRef.current || !isReady) return;
     
     const source = mapRef.current.getSource("parcel") as mapboxgl.GeoJSONSource;
-    if (source) {
-      const featureToUse = uploadedParcel || parcel || legacyFeature();
-      if (featureToUse) {
-        source.setData(featureToUse);
-        
-        // Fit to new parcel bounds
-        const positions = flattenRings(featureToUse.geometry);
-        const bounds = computeBounds(positions);
-        if (bounds) {
-          mapRef.current.fitBounds(bounds, {
+    if (source && uploadedGeoJson) {
+      source.setData(uploadedGeoJson);
+      
+      // Fit to new parcel bounds
+      if (parcelBounds) {
+        mapRef.current.fitBounds(
+          [[parcelBounds.minLon, parcelBounds.minLat], [parcelBounds.maxLon, parcelBounds.maxLat]] as [[number, number], [number, number]],
+          {
             padding: 80,
             maxZoom: 19,
             pitch: 60,
             bearing: -15,
             duration: 2000,
-          });
-        }
+          }
+        );
       }
     }
-  }, [uploadedParcel, parcel, isReady, legacyFeature]);
+  }, [uploadedGeoJson, parcelBounds, isReady]);
 
   // Drone height zoom adjustment
   useEffect(() => {
@@ -557,36 +450,36 @@ export default function MapboxMap({
         </div>
       )}
 
-      {/* GeoJSON upload button */}
-      {showOverlays && (
+      {/* GeoJSON upload button - only show if no GeoJSON uploaded */}
+      {showOverlays && !uploadedGeoJson && (
         <GeoJsonUploader onUpload={handleGeoJsonUpload} />
       )}
 
       {/* Top-left info card */}
-      {showOverlays && properties && (
+      {showOverlays && parcelMetadata && (
         <div className="absolute top-3 left-3 right-16 z-10">
           <div className="bg-black/55 backdrop-blur-md rounded-xl px-3 py-2 border border-white/10">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-white font-medium text-sm truncate">
-                  {[properties.Il, properties.Ilce, properties.Mahalle]
+                  {[parcelMetadata.Il, parcelMetadata.Ilce, parcelMetadata.Mahalle]
                     .filter(Boolean)
                     .join(" · ") || "Parsel"}
                 </p>
                 <p className="text-white/60 text-xs truncate">
                   {[
-                    properties.Ada && `${properties.Ada} Ada`,
-                    properties.ParselNo && `${properties.ParselNo} Parsel`,
+                    parcelMetadata.Ada && `${parcelMetadata.Ada} Ada`,
+                    parcelMetadata.ParselNo && `${parcelMetadata.ParselNo} Parsel`,
                   ]
                     .filter(Boolean)
                     .join(" · ") || "—"}
                 </p>
               </div>
-              {properties.Alan && (
+              {parcelMetadata.Alan && (
                 <div className="text-right shrink-0">
                   <p className="text-primary text-[10px] uppercase tracking-wider">Alan</p>
                   <p className="text-white text-xs font-mono">
-                    {parseFloat(properties.Alan).toLocaleString("tr-TR")} m²
+                    {parseFloat(parcelMetadata.Alan).toLocaleString("tr-TR")} m²
                   </p>
                 </div>
               )}
@@ -632,15 +525,17 @@ export default function MapboxMap({
               ) : null}
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-white/60 text-[11px] font-mono">
-                {fallbackCenter.lat.toFixed(4)}, {fallbackCenter.lon.toFixed(4)}
-              </span>
-              {uploadedParcel && (
+              {fallbackCenter ? (
+                <span className="text-white/60 text-[11px] font-mono">
+                  {fallbackCenter.lat.toFixed(4)}, {fallbackCenter.lon.toFixed(4)}
+                </span>
+              ) : null}
+              {uploadedGeoJson ? (
                 <>
                   <span className="text-white/30">|</span>
                   <span className="text-green-400 text-[11px]">GeoJSON ✓</span>
                 </>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -648,6 +543,3 @@ export default function MapboxMap({
     </div>
   );
 }
-
-// Export the token check for external use
-export { MAPBOX_TOKEN };

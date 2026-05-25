@@ -8,6 +8,7 @@ import { Project, ParcelGeoJson } from "@/types";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PrimaryButton from "@/components/PrimaryButton";
+import { useParcelStore } from "@/lib/parcel-store";
 
 // Lazy-load MapboxMap so this route stays light, mobile-fast and SSR-safe.
 const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
@@ -19,32 +20,6 @@ const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
   ),
 });
 
-// Demo polygon roughly over Çiğli / İzmir – used when no parcel is uploaded.
-const DEMO_PARCEL: ParcelGeoJson = {
-  type: "Feature",
-  properties: {
-    Il: "İzmir",
-    Ilce: "Çiğli",
-    Mahalle: "Harmandalı",
-    Ada: "2406",
-    ParselNo: "9",
-    Alan: "1234",
-    Nitelik: "Arsa",
-  },
-  geometry: {
-    type: "Polygon",
-    coordinates: [
-      [
-        [27.1418, 38.4228],
-        [27.1438, 38.4228],
-        [27.1438, 38.4248],
-        [27.1418, 38.4248],
-        [27.1418, 38.4228],
-      ],
-    ],
-  },
-};
-
 function PreviewPageInner() {
   const router = useRouter();
   const params = useParams();
@@ -52,6 +27,10 @@ function PreviewPageInner() {
   const id = (params?.id as string) || "test";
   const isDemo = searchParams.get("demo") === "true";
   const demoTitle = searchParams.get("title") || "Yeni Proje";
+
+  // Zustand store
+  const uploadedGeoJson = useParcelStore((state) => state.uploadedGeoJson);
+  const setParcelData = useParcelStore((state) => state.setParcelData);
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,21 +42,55 @@ function PreviewPageInner() {
         user_id: "demo",
         title: decodeURIComponent(demoTitle),
         short_title: decodeURIComponent(demoTitle).split(" ").slice(-2).join(" "),
-        geojson: DEMO_PARCEL,
-        properties: DEMO_PARCEL.properties,
-        city: DEMO_PARCEL.properties.Il || null,
-        district: DEMO_PARCEL.properties.Ilce || null,
-        neighborhood: DEMO_PARCEL.properties.Mahalle || null,
-        block_no: DEMO_PARCEL.properties.Ada || null,
-        parcel_no: DEMO_PARCEL.properties.ParselNo || null,
-        area: DEMO_PARCEL.properties.Alan || null,
-        property_type: DEMO_PARCEL.properties.Nitelik || null,
+        geojson: null, // Will use store data
+        properties: null,
+        city: "İzmir",
+        district: "Çiğli",
+        neighborhood: "Harmandalı",
+        block_no: null,
+        parcel_no: null,
+        area: null,
+        property_type: null,
         center_lat: 38.4238,
         center_lon: 27.1428,
         custom_note: null,
         status: "draft",
         created_at: new Date().toISOString(),
       });
+      
+      // Initialize store with demo data if not already set
+      if (!uploadedGeoJson) {
+        const demoGeoJson: ParcelGeoJson = {
+          type: "Feature",
+          properties: {
+            Il: "İzmir",
+            Ilce: "Çiğli",
+            Mahalle: "Harmandalı",
+            Ada: "2406",
+            ParselNo: "9",
+            Alan: "1234",
+            Nitelik: "Arsa",
+          },
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [27.1418, 38.4228],
+                [27.1438, 38.4228],
+                [27.1438, 38.4248],
+                [27.1418, 38.4248],
+                [27.1418, 38.4228],
+              ],
+            ],
+          },
+        };
+        setParcelData({
+          geoJson: demoGeoJson,
+          metadata: demoGeoJson.properties,
+          source: "demo",
+        });
+      }
+      
       setLoading(false);
       return;
     }
@@ -106,6 +119,16 @@ function PreviewPageInner() {
       }
 
       setProject(data as Project);
+      
+      // Initialize store with project data
+      if (data.geojson) {
+        setParcelData({
+          geoJson: data.geojson,
+          metadata: data.properties ?? undefined,
+          source: "database",
+        });
+      }
+      
       setLoading(false);
     };
 
@@ -114,7 +137,7 @@ function PreviewPageInner() {
       // Fall back to demo so the page never crashes.
       router.replace(`/projects/${id}/preview?demo=true&title=${encodeURIComponent(demoTitle)}`);
     });
-  }, [id, router, isDemo, demoTitle]);
+  }, [id, router, isDemo, demoTitle, uploadedGeoJson, setParcelData]);
 
   if (loading) {
     return (
@@ -130,8 +153,6 @@ function PreviewPageInner() {
     return null;
   }
 
-  const parcelFeature = (project.geojson as ParcelGeoJson | null) || DEMO_PARCEL;
-
   return (
     <AppShell>
       <div className="px-4 py-8 max-w-4xl mx-auto">
@@ -144,9 +165,6 @@ function PreviewPageInner() {
 
         <div className="glass rounded-[28px] overflow-hidden h-[60vh] min-h-[480px] w-full relative">
           <MapboxMap
-            parcel={parcelFeature}
-            centerLat={project.center_lat ?? undefined}
-            centerLon={project.center_lon ?? undefined}
             droneHeight={300}
             cinematic
             className="!absolute !inset-0"
