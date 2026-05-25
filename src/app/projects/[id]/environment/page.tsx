@@ -4,21 +4,13 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, EnvironmentItem } from "@/types";
+import { useParcelStore } from "@/lib/parcel-store";
+import { fetchNearbyPOIs } from "@/lib/poi-service";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PoiSelectionCard from "@/components/PoiSelectionCard";
 import PrimaryButton from "@/components/PrimaryButton";
 
-const POI_TYPES = [
-  { type: "hospital", label: "Hastane" },
-  { type: "school", label: "Okul" },
-  { type: "university", label: "Üniversite" },
-  { type: "market", label: "Market" },
-  { type: "pharmacy", label: "Eczane" },
-  { type: "transport", label: "Toplu Taşıma" },
-  { type: "highway", label: "Ana Yol" },
-  { type: "marketplace", label: "Pazar Yeri" },
-];
 
 export default function EnvironmentPage({ params }: { params: { id: string } }) {
   const urlParams = useParams();
@@ -26,11 +18,19 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
   const searchParams = useSearchParams();
   const id = (urlParams?.id as string) || params.id;
   const isDemo = searchParams.get("demo") === "true";
+  
+  // Global store for POI
+  const parcelCenter = useParcelStore((state) => state.parcelCenter);
+  const pois = useParcelStore((state) => state.pois);
+  const setPois = useParcelStore((state) => state.setPois);
+  const togglePoi = useParcelStore((state) => state.togglePoi);
+  
   const [project, setProject] = useState<Project | null>(null);
   const [items, setItems] = useState<EnvironmentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fetchingPoI, setFetchingPoI] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProject = async () => {
@@ -57,15 +57,22 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
           created_at: new Date().toISOString(),
         };
         setProject(demoProject);
-        // Set default demo items
-        const demoItems: EnvironmentItem[] = [
-          { id: "1", project_id: "demo", name: "Çigli Devlet Hastanesi", type: "hospital", distance: "1.2 km", lat: 38.4210, lon: 27.1410, selected: true, sort_order: 0, source: "osm" },
-          { id: "2", project_id: "demo", name: "Harmandalı İlkokulu", type: "school", distance: "0.5 km", lat: 38.4250, lon: 27.1440, selected: true, sort_order: 1, source: "osm" },
-          { id: "3", project_id: "demo", name: "Bim Market", type: "market", distance: "0.3 km", lat: 38.4245, lon: 27.1425, selected: true, sort_order: 2, source: "osm" },
-          { id: "4", project_id: "demo", name: "Eczane", type: "pharmacy", distance: "0.8 km", lat: 38.4225, lon: 27.1435, selected: false, sort_order: 3, source: "osm" },
-          { id: "5", project_id: "demo", name: "İZBAN İstasyonu", type: "transport", distance: "1.5 km", lat: 38.4190, lon: 27.1380, selected: false, sort_order: 4, source: "osm" },
-        ];
-        setItems(demoItems);
+        
+        // Use global store POIs if available, otherwise use demo items
+        if (pois.length > 0) {
+          setItems(pois.map((p, i) => ({
+            id: p.id,
+            project_id: "demo",
+            name: p.name,
+            type: p.type as EnvironmentItem["type"],
+            distance: p.distanceText,
+            lat: p.lat,
+            lon: p.lng,
+            selected: p.selected,
+            sort_order: i,
+            source: "osm",
+          })));
+        }
         setLoading(false);
         return;
       }
@@ -101,106 +108,68 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
 
       if (envData && envData.length > 0) {
         setItems(envData as EnvironmentItem[]);
-      } else {
-        // Create default items
-        const defaultItems: Omit<EnvironmentItem, "id">[] = POI_TYPES.slice(0, 5).map((poi, index) => ({
-          project_id: id,
-          name: `${poi.label} (Yakın)`,
-          type: poi.type as EnvironmentItem["type"],
-          distance: `${(index + 1) * 0.5} km`,
-          lat: (data as Project).center_lat || 0,
-          lon: (data as Project).center_lon || 0,
-          selected: index < 3,
-          sort_order: index,
-          source: "osm",
-        }));
-        setItems(defaultItems as EnvironmentItem[]);
       }
 
       setLoading(false);
     };
 
     fetchProject();
-  }, [id, router]);
+  }, [id, router, isDemo, pois]);
 
   const handleFetchFromOsm = async () => {
-    if (!project?.center_lat || !project?.center_lon) return;
+    // Use parcel center from global store, fallback to project center
+    const lat = parcelCenter?.lat || project?.center_lat;
+    const lng = parcelCenter?.lon || project?.center_lon;
+    
+    if (!lat || !lng) {
+      setError("Parsel koordinatları bulunamadı.");
+      return;
+    }
 
     setFetchingPoI(true);
+    setError(null);
+    
     try {
-      // Fetch from Overpass API
-      const lat = project.center_lat;
-      const lon = project.center_lon;
-      const radius = 3000; // 3km radius
-
-      const query = `
-        [out:json][timeout:25];
-        (
-          node["amenity"="hospital"](around:${radius},${lat},${lon});
-          node["amenity"="school"](around:${radius},${lat},${lon});
-          node["amenity"="university"](around:${radius},${lat},${lon});
-          node["shop"="supermarket"](around:${radius},${lat},${lon});
-          node["amenity"="pharmacy"](around:${radius},${lat},${lon});
-          node["railway"="station"](around:${radius},${lat},${lon});
-          way["highway"="primary"](around:${radius},${lat},${lon});
-          node["marketplace"](around:${radius},${lat},${lon});
-        );
-        out body;
-      `;
-
-      const response = await fetch(
-        "https://overpass-api.de/api/interpreter",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: `data=${encodeURIComponent(query)}`,
-        }
-      );
-
-      const data = await response.json();
-      const elements = data.elements || [];
-
-      const newItems: EnvironmentItem[] = elements.slice(0, 10).map((el: { tags?: { name?: string; amenity?: string; shop?: string }; lat: number; lon: number }, index: number) => {
-        const type = el.tags?.amenity || el.tags?.shop || "market";
-        const typeMap: Record<string, string> = {
-          hospital: "hospital",
-          school: "school",
-          university: "university",
-          supermarket: "market",
-          pharmacy: "pharmacy",
-          station: "transport",
-          primary: "highway",
-          marketplace: "marketplace",
-        };
-
-        return {
-          id: `osm-${index}`,
-          project_id: id,
-          name: el.tags?.name || `${type.charAt(0).toUpperCase() + type.slice(1)}`,
-          type: (typeMap[type] || "market") as EnvironmentItem["type"],
-          distance: `${(Math.random() * 2 + 0.5).toFixed(1)} km`,
-          lat: el.lat,
-          lon: el.lon,
-          selected: index < 5,
-          sort_order: index,
-          source: "osm" as const,
-        };
-      });
-
-      setItems(newItems);
-    } catch (error) {
-      console.error("OSM fetch error:", error);
+      console.log(`[Environment] Fetching POIs for ${lat}, ${lng}`);
+      
+      const pois = await fetchNearbyPOIs(lat, lng, 3000);
+      
+      console.log(`[Environment] Got ${pois.length} POIs`);
+      
+      // Update global store
+      setPois(pois);
+      
+      // Update items for UI
+      setItems(pois.map((p, i) => ({
+        id: p.id,
+        project_id: id,
+        name: p.name,
+        type: p.type as EnvironmentItem["type"],
+        distance: p.distanceText,
+        lat: p.lat,
+        lon: p.lng,
+        selected: p.selected,
+        sort_order: i,
+        source: "osm" as const,
+      })));
+      
+    } catch (err) {
+      console.error("[Environment] POI fetch error:", err);
+      setError("Çevre verileri alınamadı. Bağlantınızı kontrol edin.");
     } finally {
       setFetchingPoI(false);
     }
   };
 
   const handleToggleItem = (itemId: string) => {
+    // Update local state
     setItems((prev) =>
       prev.map((item) =>
         item.id === itemId ? { ...item, selected: !item.selected } : item
       )
     );
+    // Update global store
+    togglePoi(itemId);
   };
 
   const handleSaveAndContinue = async () => {
@@ -246,6 +215,12 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
           title="Yakın Çevre Bilgileri"
           description="Videoda gösterilecek çevre bilgilerini seçin"
         />
+
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 mb-4">
+            <p className="text-red-400 text-sm">{error}</p>
+          </div>
+        )}
 
         <div className="flex justify-end mb-4">
           <button

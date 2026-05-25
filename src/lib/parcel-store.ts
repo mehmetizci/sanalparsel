@@ -32,6 +32,30 @@ export interface ParcelCoordinates {
   coordinates: number[][][] | number[][][][];
 }
 
+// POI types
+export type POIType = 
+  | "hospital" 
+  | "school" 
+  | "university" 
+  | "market" 
+  | "pharmacy" 
+  | "transport" 
+  | "highway" 
+  | "park"
+  | "bank"
+  | "mosque";
+
+export interface POI {
+  id: string;
+  type: POIType;
+  name: string;
+  distance: number;
+  distanceText: string;
+  lat: number;
+  lng: number;
+  selected: boolean;
+}
+
 // Helper to convert string coordinates to numbers
 function normalizeCoord(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -130,6 +154,9 @@ export interface ParcelState {
   
   // Track if data came from upload or demo
   source: "upload" | "demo" | "database" | null;
+
+  // POI data (environment items)
+  pois: POI[];
   
   // Actions
   setParcelData: (data: {
@@ -155,6 +182,11 @@ export interface ParcelState {
     center_lat?: number;
     center_lon?: number;
   }) => void;
+  
+  // POI actions
+  setPois: (pois: POI[]) => void;
+  togglePoi: (poiId: string) => void;
+  clearPois: () => void;
 }
 
 export const useParcelStore = create<ParcelState>()(
@@ -165,6 +197,7 @@ export const useParcelStore = create<ParcelState>()(
       parcelBounds: null,
       parcelCenter: null,
       parcelCoordinates: null,
+      pois: [],
       source: null,
 
       setParcelData: (data) => set((state) => {
@@ -221,6 +254,7 @@ export const useParcelStore = create<ParcelState>()(
         parcelBounds: null,
         parcelCenter: null,
         parcelCoordinates: null,
+        pois: [],
         source: null,
       }),
 
@@ -248,6 +282,17 @@ export const useParcelStore = create<ParcelState>()(
 
         set(updates);
       },
+
+      // POI actions
+      setPois: (pois) => set({ pois }),
+      
+      togglePoi: (poiId) => set((state) => ({
+        pois: state.pois.map(poi => 
+          poi.id === poiId ? { ...poi, selected: !poi.selected } : poi
+        ),
+      })),
+      
+      clearPois: () => set({ pois: [] }),
     }),
     {
       name: "sanalparsel-parcel", // localStorage key
@@ -257,6 +302,7 @@ export const useParcelStore = create<ParcelState>()(
         parcelBounds: state.parcelBounds,
         parcelCenter: state.parcelCenter,
         parcelCoordinates: state.parcelCoordinates,
+        pois: state.pois,
         source: state.source,
       }),
     }
