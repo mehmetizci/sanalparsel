@@ -44,6 +44,7 @@ export interface ProjectConfig {
   videoSettings: VideoConfig;
   nearbyPlaces: NearbyPlacesConfig;
   aiNarration: AiNarrationConfig;
+  voiceSettings: VoiceSettings;
   // Timestamps
   createdAt: number;
   updatedAt: number;
@@ -169,6 +170,59 @@ export const DEFAULT_NARRATION_CONFIG: AiNarrationConfig = {
   lastGeneratedAt: null,
 };
 
+// ─── Voice Settings Types ───────────────────────────────────────────────────
+
+export type VoiceType = "female" | "male" | "corporate";
+
+export interface VoiceSettings {
+  selectedVoice: VoiceType;
+  provider: "edge-tts";
+  edgeVoice: string;
+  rate: string;
+  pitch: string;
+  generatedAudioUrl: string | null;
+  generatedAudioBlob: Blob | null;
+  audioDuration: number;
+}
+
+// Edge TTS voice configurations for Turkish
+export const EDGE_VOICE_CONFIGS: Record<VoiceType, {
+  voice: string;
+  rate: string;
+  pitch: string;
+  description: string;
+}> = {
+  female: {
+    voice: "tr-TR-EmelNeural",
+    rate: "0%",
+    pitch: "0Hz",
+    description: "Sıcak ve profesyonel",
+  },
+  male: {
+    voice: "tr-TR-AhmetNeural",
+    rate: "0%",
+    pitch: "0Hz",
+    description: "Güvenilir ve dinamik",
+  },
+  corporate: {
+    voice: "tr-TR-AhmetNeural",
+    rate: "-10%",
+    pitch: "-2Hz",
+    description: "Formal ve ciddi",
+  },
+};
+
+export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
+  selectedVoice: "male",
+  provider: "edge-tts",
+  edgeVoice: "tr-TR-AhmetNeural",
+  rate: "0%",
+  pitch: "0Hz",
+  generatedAudioUrl: null,
+  generatedAudioBlob: null,
+  audioDuration: 0,
+};
+
 // ─── Default Config ───────────────────────────────────────────────────────────
 
 export const DEFAULT_DRONE_CONFIG: DroneConfig = {
@@ -208,6 +262,7 @@ export function createDefaultProjectConfig(projectId: string): ProjectConfig {
     videoSettings: { ...DEFAULT_VIDEO_CONFIG },
     nearbyPlaces: { ...DEFAULT_NEARBY_PLACES_CONFIG },
     aiNarration: { ...DEFAULT_NARRATION_CONFIG },
+    voiceSettings: { ...DEFAULT_VOICE_SETTINGS },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -582,6 +637,7 @@ export function migrateLegacySettings(
     },
     nearbyPlaces: { ...DEFAULT_NEARBY_PLACES_CONFIG },
     aiNarration: { ...DEFAULT_NARRATION_CONFIG },
+    voiceSettings: { ...DEFAULT_VOICE_SETTINGS },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

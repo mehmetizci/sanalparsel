@@ -3,6 +3,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
+import type { VoiceType } from "./project-config";
+import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from "./project-config";
 
 export interface ParcelMetadata {
   Il?: string;
@@ -170,6 +172,12 @@ export interface ParcelState {
   nearbyLastFetchedAt: number | null;
   selectedNearbyPlaceIds: string[];
   
+  // Voice settings
+  voiceSettings: VoiceSettings;
+  cachedAudioBlob: Blob | null;
+  cachedAudioUrl: string | null;
+  cachedNarrationHash: string | null;
+  
   // Actions
   setParcelData: (data: {
     geoJson?: Feature<Polygon | MultiPolygon>;
@@ -205,6 +213,12 @@ export interface ParcelState {
   
   // Persist selected POIs
   setSelectedPoiIds: (ids: string[]) => void;
+  
+  // Voice settings actions
+  setVoiceType: (type: VoiceType) => void;
+  setGeneratedAudio: (blob: Blob, duration: number) => void;
+  clearGeneratedAudio: () => void;
+  invalidateAudioCache: (narrationHash: string) => void;
 }
 
 export const useParcelStore = create<ParcelState>()(
@@ -221,6 +235,12 @@ export const useParcelStore = create<ParcelState>()(
       nearbyParcelKey: null,
       nearbyLastFetchedAt: null,
       selectedNearbyPlaceIds: [],
+      
+      // Voice settings
+      voiceSettings: { ...DEFAULT_VOICE_SETTINGS },
+      cachedAudioBlob: null,
+      cachedAudioUrl: null,
+      cachedNarrationHash: null,
 
       setParcelData: (data) => set((state) => {
         const updates: Partial<ParcelState> = {
@@ -333,6 +353,70 @@ export const useParcelStore = create<ParcelState>()(
       
       // Set selected POI IDs
       setSelectedPoiIds: (ids) => set({ selectedNearbyPlaceIds: ids }),
+      
+      // Voice settings actions
+      setVoiceType: (type) => set((state) => ({
+        voiceSettings: {
+          ...state.voiceSettings,
+          selectedVoice: type,
+        },
+      })),
+      
+      setGeneratedAudio: (blob, duration) => set((state) => {
+        const url = URL.createObjectURL(blob);
+        // Revoke old URL if exists
+        if (state.cachedAudioUrl) {
+          URL.revokeObjectURL(state.cachedAudioUrl);
+        }
+        return {
+          cachedAudioBlob: blob,
+          cachedAudioUrl: url,
+          voiceSettings: {
+            ...state.voiceSettings,
+            generatedAudioBlob: blob,
+            generatedAudioUrl: url,
+            audioDuration: duration,
+          },
+        };
+      }),
+      
+      clearGeneratedAudio: () => set((state) => {
+        if (state.cachedAudioUrl) {
+          URL.revokeObjectURL(state.cachedAudioUrl);
+        }
+        return {
+          cachedAudioBlob: null,
+          cachedAudioUrl: null,
+          cachedNarrationHash: null,
+          voiceSettings: {
+            ...state.voiceSettings,
+            generatedAudioBlob: null,
+            generatedAudioUrl: null,
+            audioDuration: 0,
+          },
+        };
+      }),
+      
+      invalidateAudioCache: (narrationHash) => set((state) => {
+        // Only invalidate if the hash is different
+        if (state.cachedNarrationHash && state.cachedNarrationHash !== narrationHash) {
+          if (state.cachedAudioUrl) {
+            URL.revokeObjectURL(state.cachedAudioUrl);
+          }
+          return {
+            cachedAudioBlob: null,
+            cachedAudioUrl: null,
+            cachedNarrationHash: narrationHash,
+            voiceSettings: {
+              ...state.voiceSettings,
+              generatedAudioBlob: null,
+              generatedAudioUrl: null,
+              audioDuration: 0,
+            },
+          };
+        }
+        return { cachedNarrationHash: narrationHash };
+      }),
     }),
     {
       name: "sanalparsel-parcel", // localStorage key
@@ -348,6 +432,18 @@ export const useParcelStore = create<ParcelState>()(
         nearbyParcelKey: state.nearbyParcelKey,
         nearbyLastFetchedAt: state.nearbyLastFetchedAt,
         selectedNearbyPlaceIds: state.selectedNearbyPlaceIds,
+        // Persist voice settings
+        voiceSettings: {
+          selectedVoice: state.voiceSettings.selectedVoice,
+          provider: state.voiceSettings.provider,
+          edgeVoice: state.voiceSettings.edgeVoice,
+          rate: state.voiceSettings.rate,
+          pitch: state.voiceSettings.pitch,
+          generatedAudioUrl: null, // Don't persist URL (blob reference invalid)
+          generatedAudioBlob: null, // Don't persist blob
+          audioDuration: state.voiceSettings.audioDuration,
+        },
+        cachedNarrationHash: state.cachedNarrationHash,
       }),
     }
   )

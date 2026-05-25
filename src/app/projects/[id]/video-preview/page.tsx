@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { Project, Narration, Video, VoiceType } from "@/types";
+import { Project, Narration, Video } from "@/types";
+import { useParcelStore } from "@/lib/parcel-store";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
@@ -11,16 +12,28 @@ import VoiceSelector from "@/components/VoiceSelector";
 import LoadingRenderState from "@/components/LoadingRenderState";
 import PrimaryButton from "@/components/PrimaryButton";
 
+interface ValidationError {
+  field: string;
+  message: string;
+}
+
 export default function VideoPreviewPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+  const { id: projectId } = params;
   const router = useRouter();
+  
+  // Voice settings from parcel store
+  const voiceSettings = useParcelStore((state) => state.voiceSettings);
+  const cachedAudioUrl = useParcelStore((state) => state.cachedAudioUrl);
+  
   const [project, setProject] = useState<Project | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
   const [video, setVideo] = useState<Video | null>(null);
-  const [voiceType, setVoiceType] = useState<VoiceType>("female");
+  const [localNarrationText, setLocalNarrationText] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [generatingVoice, setGeneratingVoice] = useState(false);
   const [creatingVideo, setCreatingVideo] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -35,7 +48,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       const { data: projectData } = await supabase
         .from("projects")
         .select("*")
-        .eq("id", id)
+        .eq("id", projectId)
         .eq("user_id", user.id)
         .single();
 
@@ -49,18 +62,18 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       const { data: narData } = await supabase
         .from("narrations")
         .select("*")
-        .eq("project_id", id)
+        .eq("project_id", projectId)
         .single();
 
       if (narData) {
         setNarration(narData as Narration);
-        setVoiceType((narData as Narration).voice_type || "female");
+        setLocalNarrationText((narData as Narration).text || "");
       }
 
       const { data: videoData } = await supabase
         .from("videos")
         .select("*")
-        .eq("project_id", id)
+        .eq("project_id", projectId)
         .single();
 
       if (videoData) {
@@ -71,44 +84,60 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     };
 
     fetchData();
-  }, [id, router]);
+  }, [projectId, router]);
 
-  const handleGenerateVoice = async () => {
-    if (!narration?.text) return;
-
+  const handleGenerateVoiceStart = useCallback(() => {
     setGeneratingVoice(true);
-    try {
-      const response = await fetch("/api/voice", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: narration.text,
-          voice_type: voiceType,
-        }),
-      });
+    setErrorMessage(null);
+  }, []);
 
-      const data = await response.json();
-      if (data.audio_url) {
-        const supabase = createClient();
-        await supabase.from("narrations").upsert({
-          project_id: id,
-          text: narration.text,
-          voice_type: voiceType,
-          audio_url: data.audio_url,
-        }, {
-          onConflict: "project_id",
-        });
-        setNarration((prev) => prev ? { ...prev, audio_url: data.audio_url } : null);
-      }
-    } catch (error) {
-      console.error("Voice generation error:", error);
-    } finally {
-      setGeneratingVoice(false);
-    }
-  };
+  const handleGenerateVoiceComplete = useCallback(() => {
+    setGeneratingVoice(false);
+  }, []);
+
+  const handleGenerateVoiceError = useCallback((error: string) => {
+    setGeneratingVoice(false);
+    setErrorMessage(error);
+  }, []);
 
   const handleCreateVideo = async () => {
     setCreatingVideo(true);
+    setValidationErrors([]);
+
+    // Validate all requirements
+    const errors: ValidationError[] = [];
+
+    // Check AI narration text
+    if (!localNarrationText && !narration?.text) {
+      errors.push({
+        field: "aiNarration",
+        message: "AI tanıtım metni oluşturulmamış. Lütfen önce metin oluşturun.",
+      });
+    }
+
+    // Check voice audio
+    if (!voiceSettings.generatedAudioBlob && !cachedAudioUrl) {
+      errors.push({
+        field: "voiceAudio",
+        message: "Seslendirme oluşturulmamış. Lütfen önce sesi oluşturun.",
+      });
+    }
+
+    // Check drone settings (basic check)
+    if (!voiceSettings.selectedVoice) {
+      errors.push({
+        field: "voiceType",
+        message: "Ses tipi seçilmemiş.",
+      });
+    }
+
+    // If there are errors, show them and don't proceed
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      setCreatingVideo(false);
+      return;
+    }
+
     try {
       const supabase = createClient();
       
@@ -116,7 +145,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       const { data: videoData } = await supabase
         .from("videos")
         .insert({
-          project_id: id,
+          project_id: projectId,
           user_id: project?.user_id,
           status: "preparing",
           format: "reels",
@@ -128,13 +157,28 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       if (videoData) {
         setVideo(videoData as Video);
         
-        // Trigger render (in production, this would call a render worker)
+        // Log project config for next steps
+        console.log("=== PROJECT CONFIG FOR RENDERING ===");
+        console.log("Project ID:", projectId);
+        console.log("Voice Settings:", {
+          selectedVoice: voiceSettings.selectedVoice,
+          edgeVoice: voiceSettings.edgeVoice,
+          rate: voiceSettings.rate,
+          pitch: voiceSettings.pitch,
+          audioDuration: voiceSettings.audioDuration,
+        });
+        console.log("Narration Text:", localNarrationText || narration?.text);
+        console.log("Render State: ready_for_recording");
+        console.log("=====================================");
+
+        // Navigate to download page (for now, until render pipeline is ready)
         setTimeout(() => {
-          router.push(`/projects/${id}/download`);
-        }, 3000);
+          router.push(`/projects/${projectId}/download`);
+        }, 2000);
       }
     } catch (error) {
       console.error("Video creation error:", error);
+      setErrorMessage("Video oluşturulurken bir hata oluştu.");
     } finally {
       setCreatingVideo(false);
     }
@@ -151,6 +195,8 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   }
 
   const videoStatus = video?.status || "preparing";
+  const hasGeneratedAudio = !!(voiceSettings.generatedAudioBlob || cachedAudioUrl);
+  const narrationText = localNarrationText || narration?.text || "";
 
   return (
     <AppShell>
@@ -162,25 +208,65 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           description="Seslendirme ve video önizleme"
         />
 
+        {/* Error Message */}
+        {errorMessage && (
+          <GlassCard className="mb-4 border-red-500/30 bg-red-500/5">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-red-200 text-sm">{errorMessage}</p>
+            </div>
+          </GlassCard>
+        )}
+
+        {/* Validation Errors */}
+        {validationErrors.length > 0 && (
+          <GlassCard className="mb-4 border-yellow-500/30 bg-yellow-500/5">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-yellow-200 font-medium text-sm mb-2">Eksik adımlar var:</p>
+                <ul className="space-y-1">
+                  {validationErrors.map((err, idx) => (
+                    <li key={idx} className="text-yellow-200/80 text-sm flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                      {err.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </GlassCard>
+        )}
+
         {video && videoStatus !== "completed" ? (
           <LoadingRenderState status={videoStatus as "preparing" | "audio_creating" | "rendering" | "finalizing" | "completed"} progress={videoStatus === "rendering" ? 50 : 20} />
         ) : (
           <>
             <GlassCard className="mb-4">
               <VoiceSelector
-                voiceType={voiceType}
-                onChange={setVoiceType}
-                onGenerate={handleGenerateVoice}
+                narrationText={narrationText}
                 disabled={generatingVoice}
                 isGenerating={generatingVoice}
-                audioUrl={narration?.audio_url}
+                onGenerateStart={handleGenerateVoiceStart}
+                onGenerateComplete={handleGenerateVoiceComplete}
+                onGenerateError={handleGenerateVoiceError}
               />
             </GlassCard>
 
-            {narration?.audio_url && (
+            {hasGeneratedAudio && (
               <GlassCard className="mb-4">
                 <h4 className="text-white font-semibold mb-3">Tanıtım Metni Önizleme</h4>
-                <p className="text-muted leading-relaxed">{narration.text}</p>
+                <p className="text-muted leading-relaxed">{narrationText}</p>
+                <div className="mt-3 flex items-center gap-2 text-xs text-muted">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>Ses süresi: ~{voiceSettings.audioDuration} saniye</span>
+                </div>
               </GlassCard>
             )}
 
@@ -193,7 +279,15 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 </div>
                 <div className="flex-1">
                   <h3 className="text-white font-bold">{project?.short_title || "Proje Videosu"}</h3>
-                  <p className="text-muted text-sm">30 sn · Reels 1080x1920</p>
+                  <p className="text-muted text-sm">30 sn · Reels 720x1280</p>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className={`text-xs px-2 py-1 rounded-full ${hasGeneratedAudio ? "bg-green-500/20 text-green-400" : "bg-yellow-500/20 text-yellow-400"}`}>
+                    {hasGeneratedAudio ? "✓ Ses Hazır" : "○ Ses Bekliyor"}
+                  </span>
+                  <span className={`text-xs px-2 py-1 rounded-full ${narrationText ? "bg-blue-500/20 text-blue-400" : "bg-gray-500/20 text-gray-400"}`}>
+                    {narrationText ? "✓ Metin Var" : "○ Metin Yok"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -202,7 +296,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
 
         <div className="flex gap-3">
           <button
-            onClick={() => router.push(`/projects/${id}/narration`)}
+            onClick={() => router.push(`/projects/${projectId}/narration`)}
             className="flex-1 py-3 rounded-xl border border-white/10 text-white hover:bg-white/5 transition-colors font-medium"
           >
             Geri
@@ -211,6 +305,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
             onClick={handleCreateVideo}
             loading={creatingVideo}
             className="flex-1"
+            disabled={!hasGeneratedAudio || !narrationText}
           >
             Video Oluştur
           </PrimaryButton>
