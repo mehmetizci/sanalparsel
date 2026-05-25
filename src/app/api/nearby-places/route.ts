@@ -24,14 +24,15 @@ const POI_CATEGORIES = [
 // Optimized Overpass endpoints
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
+  "https://overpass.monicz.ru/api/interpreter",
+  "https://z.overpass-api.de/api/interpreter",
 ];
 
 // In-memory cache (would be Redis in production)
 const cache = new Map<string, { data: POI[]; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
-const OVERPASS_TIMEOUT = 5000; // 5 seconds per query
+const OVERPASS_TIMEOUT = 4000; // 4 seconds per query - very fast to avoid hanging
 
-// Quick health check - if endpoint doesn't respond in 2s, skip it
 
 function getCacheKey(lat: number, lng: number): string {
   const roundedLat = Math.round(lat * 1000) / 1000;
