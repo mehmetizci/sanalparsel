@@ -42,6 +42,7 @@ export interface ProjectConfig {
   projectId: string;
   droneSettings: DroneConfig;
   videoSettings: VideoConfig;
+  nearbyPlaces: NearbyPlacesConfig;
   // Timestamps
   createdAt: number;
   updatedAt: number;
@@ -86,6 +87,25 @@ export const FORMAT_ASPECT_RATIOS: Record<"reels" | "landscape", string> = {
   landscape: "16:9",
 };
 
+// ─── POI/Nearby Places Types ─────────────────────────────────────────────────
+
+export interface NearbyPlace {
+  id: string;
+  name: string;
+  category: string;
+  distanceMeters: number;
+  distanceText: string;
+  lat: number;
+  lng: number;
+  selected: boolean;
+}
+
+export interface NearbyPlacesConfig {
+  places: NearbyPlace[];
+  lastFetchedAt: number | null;
+  parcelKey: string | null;
+}
+
 // ─── Default Config ───────────────────────────────────────────────────────────
 
 export const DEFAULT_DRONE_CONFIG: DroneConfig = {
@@ -112,11 +132,18 @@ export const DEFAULT_VIDEO_CONFIG: VideoConfig = {
   overlays: DEFAULT_OVERLAY_CONFIG,
 };
 
+export const DEFAULT_NEARBY_PLACES_CONFIG: NearbyPlacesConfig = {
+  places: [],
+  lastFetchedAt: null,
+  parcelKey: null,
+};
+
 export function createDefaultProjectConfig(projectId: string): ProjectConfig {
   return {
     projectId,
     droneSettings: { ...DEFAULT_DRONE_CONFIG },
     videoSettings: { ...DEFAULT_VIDEO_CONFIG },
+    nearbyPlaces: { ...DEFAULT_NEARBY_PLACES_CONFIG },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -489,6 +516,7 @@ export function migrateLegacySettings(
         finalContactCard: settings.show_final_card ?? true,
       },
     },
+    nearbyPlaces: { ...DEFAULT_NEARBY_PLACES_CONFIG },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -556,4 +584,177 @@ export function validateVideoConfig(config: VideoConfig): string[] {
   }
 
   return errors;
+}
+
+// ─── Nearby Places Helpers ────────────────────────────────────────────────────
+
+/**
+ * Convert POI from parcel-store to normalized NearbyPlace
+ */
+export function poiToNearbyPlace(poi: { 
+  id: string; 
+  name?: string; 
+  label?: string;
+  category: string; 
+  distanceMeters: number; 
+  distanceText?: string;
+  lat: number; 
+  lng?: number;
+  selected?: boolean;
+}): NearbyPlace {
+  return {
+    id: poi.id,
+    name: poi.name || poi.label || "Bilinmeyen Yer",
+    category: poi.category,
+    distanceMeters: poi.distanceMeters,
+    distanceText: poi.distanceText || `${Math.round(poi.distanceMeters)} m`,
+    lat: poi.lat,
+    lng: poi.lng || poi.lat, // Fallback if lng missing
+    selected: poi.selected ?? true,
+  };
+}
+
+/**
+ * Convert array of POIs to NearbyPlace array
+ */
+export function poisToNearbyPlaces(pois: Array<{
+  id: string;
+  name?: string;
+  label?: string;
+  category: string;
+  distanceMeters: number;
+  distanceText?: string;
+  lat: number;
+  lng?: number;
+  selected?: boolean;
+}>): NearbyPlace[] {
+  return pois.map(poiToNearbyPlace);
+}
+
+/**
+ * Get selected POIs from nearby places config
+ */
+export function getSelectedPOIs(config: NearbyPlacesConfig): NearbyPlace[] {
+  return config.places.filter(p => p.selected);
+}
+
+/**
+ * Get selected POI count
+ */
+export function getSelectedPOICount(config: NearbyPlacesConfig): number {
+  return config.places.filter(p => p.selected).length;
+}
+
+/**
+ * Validate POI selection rules
+ * - At least 1 POI must be selected
+ * - At most 7 POIs can be selected
+ */
+export function validatePOISelection(config: NearbyPlacesConfig): { valid: boolean; error?: string } {
+  const selectedCount = getSelectedPOICount(config);
+  
+  if (selectedCount === 0) {
+    return { valid: false, error: "En az bir POI seçilmelidir" };
+  }
+  
+  if (selectedCount > 7) {
+    return { valid: false, error: "En fazla 7 POI seçilebilir" };
+  }
+  
+  return { valid: true };
+}
+
+/**
+ * Check if can toggle a POI (respects max selection rule)
+ */
+export function canTogglePOI(config: NearbyPlacesConfig, poiId: string): boolean {
+  const selectedCount = getSelectedPOICount(config);
+  const poi = config.places.find(p => p.id === poiId);
+  
+  if (!poi) return false;
+  
+  if (poi.selected) {
+    // Can always deselect
+    return true;
+  } else {
+    // Can only select if under max
+    return selectedCount < 7;
+  }
+}
+
+/**
+ * Toggle POI selection in config
+ */
+export function togglePOIInConfig(config: NearbyPlacesConfig, poiId: string): NearbyPlacesConfig {
+  if (!canTogglePOI(config, poiId)) {
+    return config;
+  }
+  
+  return {
+    ...config,
+    places: config.places.map(p => 
+      p.id === poiId ? { ...p, selected: !p.selected } : p
+    ),
+  };
+}
+
+/**
+ * Build POI sequence for camera animation
+ * Returns POIs sorted by distance for fly-by animations
+ */
+export function buildPOISequence(config: NearbyPlacesConfig): NearbyPlace[] {
+  return config.places
+    .filter(p => p.selected)
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+}
+
+/**
+ * Format POI for AI narration
+ */
+export function formatPOIForNarration(pois: NearbyPlace[]): string {
+  if (pois.length === 0) return "";
+  
+  const descriptions = pois.map(poi => {
+    const categoryLabel = getCategoryLabel(poi.category);
+    const distanceText = poi.distanceMeters < 1000 
+      ? `${Math.round(poi.distanceMeters)} metre`
+      : `${(poi.distanceMeters / 1000).toFixed(1)} kilometre`;
+    return `${poi.name} (${categoryLabel}, ${distanceText} uzaklıkta)`;
+  });
+  
+  if (descriptions.length === 1) {
+    return `${descriptions[0]}`;
+  }
+  
+  const last = descriptions.pop();
+  return `${descriptions.join(", ")} ve ${last}`;
+}
+
+/**
+ * Get Turkish label for POI category
+ */
+export function getCategoryLabel(category: string): string {
+  const labels: Record<string, string> = {
+    hospital: "Hastane",
+    school: "Okul",
+    university: "Üniversite",
+    market: "Market",
+    pharmacy: "Eczane",
+    transport: "Toplu Taşıma",
+    highway: "Otoyol",
+    marketplace: "Pazar Yeri",
+    restaurant: "Restoran",
+    cafe: "Kafe",
+    bank: "Banka",
+    atm: "ATM",
+    fuel: "Benzin İstasyonu",
+    parking: "Otopark",
+    shopping: "Alışveriş",
+    mosque: "Camii",
+    church: "Kilise",
+    park: "Park",
+    gym: "Spor Salonu",
+  };
+  
+  return labels[category.toLowerCase()] || category;
 }
