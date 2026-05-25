@@ -356,29 +356,103 @@ export default function MapboxMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parcelCenter?.lon, parcelCenter?.lat, zoom, cinematic, onReady]);
 
-  // Update parcel source when store data changes
+  // Re-initialize map when store data becomes available
   useEffect(() => {
-    if (!mapRef.current || !isReady) return;
+    // If map is already ready and we have center, don't re-init
+    if (mapRef.current || !MAPBOX_TOKEN) return;
     
-    const source = mapRef.current.getSource("parcel") as mapboxgl.GeoJSONSource;
-    if (source && uploadedGeoJson) {
-      source.setData(uploadedGeoJson);
+    // Wait for parcelCenter to be available
+    if (!parcelCenter) return;
+    
+    // Wait for container
+    if (typeof window === "undefined" || !containerRef.current) return;
+    
+    console.log("[MapboxMap] Re-initializing map with store data...");
+    
+    mapboxgl.accessToken = MAPBOX_TOKEN;
+    
+    const map = new mapboxgl.Map({
+      container: containerRef.current,
+      style: "mapbox://styles/mapbox/satellite-streets-v12",
+      center: [parcelCenter.lon, parcelCenter.lat],
+      zoom: 16,
+      pitch: 60,
+      bearing: -15,
+      antialias: true,
+      preserveDrawingBuffer: true,
+      attributionControl: false,
+    });
+
+    mapRef.current = map;
+
+    map.addControl(new mapboxgl.AttributionControl({ compact: true }), "bottom-right");
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "top-right");
+    map.addControl(new mapboxgl.ScaleControl({ maxWidth: 120, unit: "metric" }), "bottom-left");
+
+    map.on("error", (e) => {
+      console.error("[MapboxMap] Error:", e);
+      setMapError((e.error as { message?: string })?.message || "Harita başlatılamadı");
+    });
+
+    map.on("load", () => {
+      if (!mapRef.current) return;
+
+      console.log("[MapboxMap] Map loaded, setting up layers...");
       
-      // Fit to new parcel bounds
+      const defaultPolygon = {
+        type: "Feature" as const,
+        properties: {},
+        geometry: { 
+          type: "Polygon" as const, 
+          coordinates: [[[parcelCenter.lon, parcelCenter.lat], [parcelCenter.lon + 0.001, parcelCenter.lat], [parcelCenter.lon + 0.001, parcelCenter.lat + 0.001], [parcelCenter.lon, parcelCenter.lat + 0.001], [parcelCenter.lon, parcelCenter.lat]]] 
+        },
+      };
+
+      const featureData = uploadedGeoJson || defaultPolygon;
+      
+      mapRef.current.addSource("parcel", { type: "geojson", data: featureData });
+
+      mapRef.current.addLayer({
+        id: "parcel-fill",
+        type: "fill",
+        source: "parcel",
+        paint: { "fill-color": "#ef4444", "fill-opacity": 0.25 },
+      });
+
+      mapRef.current.addLayer({
+        id: "parcel-outline",
+        type: "line",
+        source: "parcel",
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 },
+      });
+
+      mapRef.current.addLayer({
+        id: "parcel-glow",
+        type: "line",
+        source: "parcel",
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-color": "#fda4af", "line-width": 8, "line-opacity": 0.3 },
+      }, "parcel-outline");
+
       if (parcelBounds) {
         mapRef.current.fitBounds(
           [[parcelBounds.minLon, parcelBounds.minLat], [parcelBounds.maxLon, parcelBounds.maxLat]] as [[number, number], [number, number]],
-          {
-            padding: 80,
-            maxZoom: 19,
-            pitch: 60,
-            bearing: -15,
-            duration: 2000,
-          }
+          { padding: 80, maxZoom: 19, pitch: 60, bearing: -15, duration: 3000 }
         );
       }
-    }
-  }, [uploadedGeoJson, parcelBounds, isReady]);
+
+      setIsReady(true);
+      onReady?.(mapRef.current);
+    });
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [parcelCenter, uploadedGeoJson, parcelBounds, onReady]);
 
   // Drone height zoom adjustment
   useEffect(() => {
