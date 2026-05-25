@@ -20,21 +20,18 @@ const POI_CATEGORIES = [
   { key: "market", shop: "supermarket", label: "Market" },
 ];
 
-const PRIORITY_CATEGORIES = [
-  { key: "hospital", amenity: "hospital", label: "Hastane" },
-  { key: "school", amenity: "school", label: "Okul" },
-];
 
 // Optimized Overpass endpoints
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.openstreetmap.ru/api/interpreter",
 ];
 
 // In-memory cache (would be Redis in production)
-const cache = new Map<string, { data: unknown; timestamp: number }>();
+const cache = new Map<string, { data: POI[]; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
-const OVERPASS_TIMEOUT = 8000; // 8 seconds
+const OVERPASS_TIMEOUT = 5000; // 5 seconds per query
+
+// Quick health check - if endpoint doesn't respond in 2s, skip it
 
 function getCacheKey(lat: number, lng: number): string {
   const roundedLat = Math.round(lat * 1000) / 1000;
@@ -42,7 +39,7 @@ function getCacheKey(lat: number, lng: number): string {
   return `poi_${roundedLat}_${roundedLng}`;
 }
 
-function getFromCache(key: string): unknown | null {
+function getFromCache(key: string): POI[] | null {
   const cached = cache.get(key);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data;
@@ -51,7 +48,7 @@ function getFromCache(key: string): unknown | null {
   return null;
 }
 
-function setCache(key: string, data: unknown): void {
+function setCache(key: string, data: POI[]): void {
   // Limit cache size
   if (cache.size > 100) {
     const firstKey = cache.keys().next().value as string | undefined;
@@ -73,19 +70,6 @@ function buildCategoryQuery(
   return `[out:json][timeout:8][maxsize:67108864];(${type}["${amenityKey}"="${amenityValue}"](around:${radius},${lat},${lng}););out body 5;`;
 }
 
-function buildFallbackQuery(
-  lat: number,
-  lng: number,
-  radius: number,
-  categories: typeof POI_CATEGORIES
-): string {
-  const parts = categories.map(cat => {
-    const key = cat.amenity || cat.shop || "";
-    const value = cat.amenity || cat.shop || "";
-    return `node["${key}"="${value}"](around:${radius},${lat},${lng});`;
-  }).join("");
-  return `[out:json][timeout:12];(${parts});out body 5;`;
-}
 
 // Haversine distance
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -194,73 +178,6 @@ async function fetchCategoriesParallel(
   return allPois;
 }
 
-// Try fallback with priority categories
-async function fetchFallback(
-  lat: number,
-  lng: number,
-  radius: number
-): Promise<POI[]> {
-  const query = buildFallbackQuery(lat, lng, radius, PRIORITY_CATEGORIES);
-  
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT);
-      
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: query,
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) continue;
-      
-      const data = await response.json();
-      const elements = data.elements || [];
-      
-      const poisByType = new Map<string, unknown>();
-      
-      for (const el of elements) {
-        const elLat = el.lat || el.center?.lat;
-        const elLon = el.lon || el.center?.lon;
-        if (!elLat || !elLon) continue;
-        
-        const tags = el.tags || {};
-        const amenity = tags.amenity || "";
-        
-        let poiType = amenity;
-        if (amenity === "hospital") poiType = "hospital";
-        else if (amenity === "school") poiType = "school";
-        else continue;
-        
-        const distance = haversineDistance(lat, lng, elLat, elLon);
-        const existing = poisByType.get(poiType) as { distance: number } | undefined;
-        
-        if (!existing || distance < existing.distance) {
-          poisByType.set(poiType, {
-            id: `poi_${el.id}`,
-            type: poiType,
-            name: tags.name || tags["name:tr"] || `Yakındaki ${poiType === "hospital" ? "Hastane" : "Okul"}`,
-            distance: Math.round(distance),
-            distanceText: formatDistance(distance),
-            lat: elLat,
-            lng: elLon,
-            selected: false,
-          });
-        }
-      }
-      
-      return Array.from(poisByType.values()) as POI[];
-    } catch {
-      continue;
-    }
-  }
-  
-  return [];
-}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -283,56 +200,45 @@ export async function GET(request: NextRequest) {
   const cached = getFromCache(cacheKey);
   if (cached) {
     console.log("[NearbyPlaces] Using cached data for", latNum, lngNum);
-    return NextResponse.json({ ...cached as object, cached: true });
+    return NextResponse.json({ success: true, pois: cached, count: cached.length, center: { lat: latNum, lng: lngNum }, source: "cache", cached: true });
   }
   
-  const radius = 1200; // Optimized radius
-  
+  const radius = 1200;
   console.log(`[NearbyPlaces] Fetching POIs for ${latNum}, ${lngNum}, radius: ${radius}m`);
   
-  // Parallel fetch primary categories
-  let pois = await fetchCategoriesParallel(latNum, lngNum, radius, POI_CATEGORIES);
+  // Try parallel fetch with fast timeout
+  const pois = await fetchCategoriesParallel(latNum, lngNum, radius, POI_CATEGORIES);
   
-  // If no results, try fallback with priority categories
-  if (pois.length === 0) {
-    console.log("[NearbyPlaces] No results from primary, trying fallback...");
-    pois = await fetchFallback(latNum, lngNum, radius);
-  }
-  
-  // If still no results, return demo
-  if (pois.length === 0) {
-    console.log("[NearbyPlaces] No results, returning demo data");
-    const demoPois = generateDemoPois(latNum, lngNum);
+  if (pois.length > 0) {
+    // Sort by distance and select top 4
+    pois.sort((a, b) => a.distance - b.distance);
+    pois.slice(0, 4).forEach(p => p.selected = true);
     
-    // Cache demo data for 1 hour
-    setCache(cacheKey, { pois: demoPois, source: "demo" });
+    // Cache successful results
+    setCache(cacheKey, pois);
+    
+    console.log(`[NearbyPlaces] Returning ${pois.length} POIs from Overpass`);
     
     return NextResponse.json({
       success: true,
-      pois: demoPois,
-      count: demoPois.length,
+      pois,
+      count: pois.length,
       center: { lat: latNum, lng: lngNum },
-      source: "demo",
-      message: "Çevre verileri yoğunluk nedeniyle geç yükleniyor",
+      source: "overpass",
     });
   }
   
-  // Sort by distance and select top 4
-  const sortedPois = pois as POI[];
-  sortedPois.sort((a, b) => a.distance - b.distance);
-  sortedPois.slice(0, 4).forEach(p => p.selected = true);
-  
-  // Cache successful results
-  setCache(cacheKey, { pois, source: "overpass" });
-  
-  console.log(`[NearbyPlaces] Returning ${pois.length} POIs`);
+  // Overpass failed - return demo immediately with helpful message
+  console.log("[NearbyPlaces] Overpass timeout, returning demo data");
+  const demoPois = generateDemoPois(latNum, lngNum);
   
   return NextResponse.json({
     success: true,
-    pois,
-    count: pois.length,
+    pois: demoPois,
+    count: demoPois.length,
     center: { lat: latNum, lng: lngNum },
-    source: "overpass",
+    source: "demo",
+    message: "Çevre verileri yoğunluk nedeniyle geç yükleniyor. Demo veriler gösteriliyor.",
   });
 }
 
