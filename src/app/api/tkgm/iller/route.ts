@@ -4,7 +4,7 @@ const TKGM_API_BASE = "https://cbsapi.tkgm.gov.tr/megsiswebapi.v3.1/api";
 const TKGM_CACHE = new Map<string, { data: unknown[]; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 60 * 24;
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     // Check cache
     const cached = TKGM_CACHE.get("iller");

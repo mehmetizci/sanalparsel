@@ -11,10 +11,27 @@ import StepHeader from "@/components/StepHeader";
 import UploadCard from "@/components/UploadCard";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
+import AdaParselForm from "@/components/tkgm/AdaParselForm";
+
+type NewProjectMode = "upload" | "adaparsel";
+
+interface TKGMParcelResult {
+  adaNo: number;
+  parselNo: number;
+  alan: string;
+  nitelik: string;
+  pafta: string;
+  il: string;
+  ilce: string;
+  mahalle: string;
+  geometri: GeoJSON.Feature;
+  center: { lat: number; lng: number };
+}
 
 export default function NewProjectPage() {
   const router = useRouter();
   const setFromParsed = useParcelStore((state) => state.setFromParsed);
+  const [mode, setMode] = useState<NewProjectMode>("upload");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [geoJsonData, setGeoJsonData] = useState<{
@@ -79,6 +96,44 @@ export default function NewProjectPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleTKGMParcel = (parcel: TKGMParcelResult) => {
+    console.log("[NewProject] TKGM Parcel result:", parcel);
+
+    // Create GeoJSON from TKGM result
+    const geoJson: ParcelGeoJson = {
+      type: "Feature",
+      properties: {
+        Il: parcel.il,
+        Ilce: parcel.ilce,
+        Mahalle: parcel.mahalle,
+        Ada: String(parcel.adaNo),
+        ParselNo: String(parcel.parselNo),
+        Alan: parcel.alan,
+        Nitelik: parcel.nitelik,
+        Pafta: parcel.pafta,
+      },
+      geometry: parcel.geometri.geometry,
+    };
+
+    const projectName = `${parcel.il} / ${parcel.ilce} - Ada ${parcel.adaNo} Parsel ${parcel.parselNo}`;
+    const shortTitle = `Ada ${parcel.adaNo} P${parcel.parselNo}`;
+    const center = { lat: parcel.center.lat, lon: parcel.center.lng };
+
+    // Save to global store
+    setFromParsed({
+      geoJson,
+      metadata: geoJson.properties as ParcelMetadata,
+    });
+
+    setGeoJsonData({
+      geoJson,
+      properties: geoJson.properties,
+      projectName,
+      shortTitle,
+      center,
+    });
   };
 
   const handleCreateProject = async () => {
@@ -154,7 +209,7 @@ export default function NewProjectPage() {
           step={0}
           totalSteps={10}
           title="Yeni Proje Oluştur"
-          description="GeoJSON dosyası yükleyerek başlayın"
+          description="Parsel seçerek başlayın"
         />
 
         {error && (
@@ -180,8 +235,55 @@ export default function NewProjectPage() {
           </div>
         )}
 
+        {/* Show form or preview */}
         {!geoJsonData ? (
-          <UploadCard onFileSelect={handleFileSelect} disabled={loading} />
+          <>
+            {/* Mode selector */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <button
+                onClick={() => setMode("upload")}
+                className={`p-4 rounded-xl border transition-all ${
+                  mode === "upload"
+                    ? "bg-primary/10 border-primary text-white"
+                    : "bg-card/50 border-border text-muted hover:text-white hover:border-border/80"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                </div>
+                <span className="font-medium">GeoJSON Yükle</span>
+                <p className="text-xs mt-1 opacity-70">Parsel dosyası yükleyin</p>
+              </button>
+
+              <button
+                onClick={() => setMode("adaparsel")}
+                className={`p-4 rounded-xl border transition-all ${
+                  mode === "adaparsel"
+                    ? "bg-primary/10 border-primary text-white"
+                    : "bg-card/50 border-border text-muted hover:text-white hover:border-border/80"
+                }`}
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                </div>
+                <span className="font-medium">Ada/Parsel Sorgula</span>
+                <p className="text-xs mt-1 opacity-70">TKGM veritabanından sorgulayın</p>
+              </button>
+            </div>
+
+            {/* Mode content */}
+            {mode === "upload" ? (
+              <UploadCard onFileSelect={handleFileSelect} disabled={loading} />
+            ) : (
+              <GlassCard>
+                <AdaParselForm onSuccess={handleTKGMParcel} />
+              </GlassCard>
+            )}
+          </>
         ) : (
           <div className="space-y-4">
             <GlassCard>
@@ -217,13 +319,13 @@ export default function NewProjectPage() {
               </div>
 
               <button
-                onClick={() => { setGeoJsonData(null); setError(null); }}
+                onClick={() => { setGeoJsonData(null); setError(null); setMode("upload"); }}
                 className="mt-4 text-sm text-muted hover:text-white flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Farklı dosya seç
+                Farklı parsel seç
               </button>
             </GlassCard>
 
