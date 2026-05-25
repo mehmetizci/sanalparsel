@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useParcelStore } from "@/lib/parcel-store";
 import { EDGE_VOICE_CONFIGS, type VoiceType } from "@/lib/project-config";
+import { generateTTS } from "@/lib/ttsClient";
 
 interface VoiceSelectorProps {
   narrationText: string;
@@ -115,30 +116,24 @@ export default function VoiceSelector({
     onGenerateStart?.();
     
     try {
-      const response = await fetch("/api/tts/edge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: narrationText,
-          voice: voiceSettings.edgeVoice,
-          rate: voiceSettings.rate,
-          pitch: voiceSettings.pitch,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("TTS generation failed");
-      }
-
-      const blob = await response.blob();
-      const audioDuration = await getAudioDuration(blob);
+      console.log("[VoiceSelector] Starting TTS generation...");
       
-      setGeneratedAudio(blob, audioDuration);
+      const result = await generateTTS({
+        text: narrationText,
+        voice: voiceSettings.edgeVoice,
+        rate: voiceSettings.rate,
+        pitch: voiceSettings.pitch,
+      });
+      
+      console.log("[VoiceSelector] TTS generation successful, duration:", result.duration);
+      
+      setGeneratedAudio(result.audioBlob, result.duration);
       invalidateAudioCache(hashText(narrationText));
-      onGenerateComplete?.(blob, audioDuration);
-    } catch (error) {
-      console.error("Voice generation error:", error);
-      onGenerateError?.("Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.");
+      onGenerateComplete?.(result.audioBlob, result.duration);
+    } catch (err: unknown) {
+      console.error("[VoiceSelector] TTS generation failed:", err);
+      const errorMessage = (err as { error?: string })?.error || "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.";
+      onGenerateError?.(errorMessage);
     }
   };
 
@@ -269,21 +264,6 @@ export default function VoiceSelector({
       </div>
     </div>
   );
-}
-
-// Helper function to get audio duration
-async function getAudioDuration(blob: Blob): Promise<number> {
-  return new Promise((resolve) => {
-    const audio = new Audio();
-    audio.src = URL.createObjectURL(blob);
-    audio.addEventListener("loadedmetadata", () => {
-      URL.revokeObjectURL(audio.src);
-      resolve(audio.duration);
-    });
-    audio.addEventListener("error", () => {
-      resolve(0);
-    });
-  });
 }
 
 // Simple hash function for narration text
