@@ -109,51 +109,90 @@ export default function VoiceSelector({
   }, [isPlaying, cachedAudioUrl]);
 
   // Test function to verify POST endpoint works
-  const testEndpoint = async () => {
-    console.log("=== TEST ENDPOINT ===");
-    setDebugInfo("Test başlatılıyor...");
+  const testEndpoint = async (mode: "test" | "fake" | "normal" = "test") => {
+    console.log("═══════════════════════════════════════");
+    console.log(`=== TEST ENDPOINT (${mode.toUpperCase()} MODE) ===`);
+    console.log("═══════════════════════════════════════");
+    setDebugInfo(`Test başlatılıyor (${mode})...`);
     
     try {
-      const response = await fetch("/api/generate-tts", {
+      const url = mode === "test" ? "/api/generate-tts" : "/api/generate-tts-test";
+      const body: Record<string, unknown> = mode === "test"
+        ? {
+            text: "Test mesajı",
+            voice: "tr-TR-AhmetNeural",
+            rate: "0%",
+            pitch: "0Hz",
+            test: true
+          }
+        : {
+            text: "Test mesajı",
+            voice: "tr-TR-AhmetNeural",
+            fake: mode === "fake"
+          };
+
+      console.log("URL:", url);
+      console.log("Body:", JSON.stringify(body));
+      
+      const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          test: true,
-          text: "Test mesajı",
-          voice: "tr-TR-AhmetNeural",
-          rate: "0%",
-          pitch: "0Hz"
-        })
+        body: JSON.stringify(body)
       });
 
       const status = response.status;
       const contentType = response.headers.get("Content-Type") || "";
       let bodyText = "";
+      let blobInfo = "";
       
       try {
         const json = await response.json();
-        bodyText = JSON.stringify(json);
+        bodyText = JSON.stringify(json, null, 2);
       } catch {
         bodyText = await response.text();
       }
 
+      // Also check if it's a blob
+      if (contentType.includes("audio") || contentType.includes("mpeg")) {
+        const blob = await response.blob();
+        blobInfo = `\nBlob size: ${blob.size} bytes\nBlob type: ${blob.type}`;
+      }
+
       const debug = `
-=== TEST RESPONSE ===
+═══════════════════════════════════════
+TEST RESPONSE (${mode.toUpperCase()} MODE)
+═══════════════════════════════════════
+URL: ${url}
 Status: ${status}
 Content-Type: ${contentType}
-Body: ${bodyText}
-=====================`;
+${blobInfo}
+Body:
+${bodyText.substring(0, 1000)}
+═══════════════════════════════════════`;
 
       console.log(debug);
       setDebugInfo(debug);
 
-      if (status === 200 && bodyText.includes("ok")) {
-        setDebugInfo(debug + "\n\n✓ Test başarılı! Endpoint çalışıyor.");
+      if (status === 200) {
+        if (mode === "test" && bodyText.includes("ok")) {
+          setDebugInfo(debug + "\n\n✓ TEST MODE başarılı! Endpoint çalışıyor.");
+        } else if (mode === "fake" && blobInfo) {
+          setDebugInfo(debug + "\n\n✓ FAKE AUDIO başarılı! Frontend blob parsing çalışıyor.");
+        } else if (mode === "normal") {
+          setDebugInfo(debug + "\n\n✓ NORMAL endpoint başarılı!");
+        } else {
+          setDebugInfo(debug + "\n\n⚠ Beklenmeyen yanıt formatı");
+        }
       } else {
-        setDebugInfo(debug + "\n\n✗ Test başarısız!");
+        setDebugInfo(debug + "\n\n✗ Test başarısız! HTTP " + status);
       }
     } catch (err) {
-      const debug = `=== TEST ERROR ===\n${err instanceof Error ? err.message : String(err)}`;
+      const debug = `═══════════════════════════════════════
+TEST ERROR (${mode.toUpperCase()} MODE)
+═══════════════════════════════════════
+${err instanceof Error ? err.message : String(err)}
+${err instanceof Error ? err.stack : ""}
+═══════════════════════════════════════`;
       console.error(debug);
       setDebugInfo(debug);
     }
@@ -352,13 +391,30 @@ Body: ${bodyText}
           </div>
         )}
 
-        {/* Test Button - Debug */}
-        <button
-          onClick={testEndpoint}
-          className="w-full py-2 rounded-xl border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/5 transition-colors text-sm font-medium"
-        >
-          🔧 Endpoint Test Et (Debug)
-        </button>
+        {/* Debug Test Buttons */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => testEndpoint("test")}
+            className="flex-1 py-2 rounded-xl border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/5 transition-colors text-xs font-medium"
+          >
+            🔧 Test Mode
+          </button>
+          <button
+            onClick={() => testEndpoint("fake")}
+            className="flex-1 py-2 rounded-xl border border-blue-500/30 text-blue-400 hover:bg-blue-500/5 transition-colors text-xs font-medium"
+          >
+            🔵 Fake Audio
+          </button>
+          <button
+            onClick={() => testEndpoint("normal")}
+            className="flex-1 py-2 rounded-xl border border-green-500/30 text-green-400 hover:bg-green-500/5 transition-colors text-xs font-medium"
+          >
+            🟢 Normal
+          </button>
+        </div>
+        <p className="text-muted text-xs text-center">
+          Test modları: Test (JSON), Fake (MP3 blob), Normal (test endpoint)
+        </p>
       </div>
     </div>
   );

@@ -15,12 +15,16 @@ const MAX_TEXT_LENGTH = 5000;
 const TEST_MAX_TEXT_LENGTH = 1200;
 
 exports.handler = async function (event, context) {
+  console.log("═══════════════════════════════════════════");
+  console.log("NETLIFY FUNCTION: /generate-tts");
+  console.log("═══════════════════════════════════════════");
+  
   // Only accept POST
   if (event.httpMethod !== "POST") {
-    console.log("=== NETLIFY FUNCTION ===");
+    console.log("STEP 0: Method check");
     console.log("Method:", event.httpMethod);
     console.log("Only POST is supported");
-    console.log("========================");
+    console.log("═══════════════════════════════════════════");
     
     return {
       statusCode: 405,
@@ -36,15 +40,20 @@ exports.handler = async function (event, context) {
   }
 
   try {
+    console.log("STEP 1: Parsing body");
+    console.log("Raw body:", event.body?.substring(0, 200) || "empty");
+    
     // Parse body
     let body = {};
     if (event.body) {
       try {
         body = JSON.parse(event.body);
-      } catch {
-        console.log("=== NETLIFY FUNCTION ===");
-        console.log("Error: Invalid JSON body");
-        console.log("========================");
+        console.log("STEP 1: Body parsed successfully");
+        console.log("Parsed keys:", Object.keys(body).join(", "));
+      } catch (e) {
+        console.log("STEP 1: FAILED - Invalid JSON body");
+        console.log("Parse error:", e.message);
+        console.log("═══════════════════════════════════════════");
         
         return {
           statusCode: 400,
@@ -55,28 +64,31 @@ exports.handler = async function (event, context) {
           body: JSON.stringify({
             error: "Invalid JSON body",
             details: "Request body must be valid JSON",
+            parseError: e.message,
           }),
         };
       }
+    } else {
+      console.log("STEP 1: Body is empty");
     }
 
     const { text, voice, rate, pitch, test } = body;
 
-    console.log("=== NETLIFY FUNCTION ===");
-    console.log("Method: POST");
-    console.log("Test mode:", test || false);
-    console.log("Text length:", text?.length || 0);
-    console.log("Text preview:", text?.substring(0, 100) + (text?.length > 100 ? "..." : "") || "N/A");
-    console.log("Voice:", voice || "default");
-    console.log("Rate:", rate || "0%");
-    console.log("Pitch:", pitch || "0Hz");
-    console.log("========================");
+    console.log("");
+    console.log("STEP 2: Request validated");
+    console.log("  text length:", text?.length || 0);
+    console.log("  text preview:", (text?.substring(0, 50) || "N/A") + (text?.length > 50 ? "..." : ""));
+    console.log("  voice:", voice || "default (tr-TR-AhmetNeural)");
+    console.log("  rate:", rate || "0%");
+    console.log("  pitch:", pitch || "0Hz");
+    console.log("  test mode:", test || false);
 
     // TEST MODE: Return success response without actually generating TTS
     if (test === true) {
-      console.log("=== TEST MODE ===");
+      console.log("");
+      console.log("STEP 3: TEST MODE - Skipping TTS generation");
       console.log("Returning test success response");
-      console.log("=================");
+      console.log("═══════════════════════════════════════════");
       
       // Limit text length for test mode
       if (text && text.length > TEST_MAX_TEXT_LENGTH) {
@@ -102,7 +114,7 @@ exports.handler = async function (event, context) {
         },
         body: JSON.stringify({
           ok: true,
-          message: "POST endpoint works",
+          message: "POST endpoint works - test mode",
           received: {
             textLength: text?.length || 0,
             voice: voice || "default",
@@ -114,10 +126,12 @@ exports.handler = async function (event, context) {
     }
 
     // Validate request
+    console.log("");
+    console.log("STEP 4: Validation");
+    
     if (!text || typeof text !== "string") {
-      console.log("=== VALIDATION ERROR ===");
-      console.log("Missing text");
-      console.log("======================");
+      console.log("STEP 4: FAILED - Missing text");
+      console.log("═══════════════════════════════════════════");
       
       return {
         statusCode: 400,
@@ -133,9 +147,10 @@ exports.handler = async function (event, context) {
     }
 
     if (text.length > MAX_TEXT_LENGTH) {
-      console.log("=== VALIDATION ERROR ===");
-      console.log("Text too long:", text.length, "chars");
-      console.log("======================");
+      console.log("STEP 4: FAILED - Text too long");
+      console.log("  Text length:", text.length);
+      console.log("  Max allowed:", MAX_TEXT_LENGTH);
+      console.log("═══════════════════════════════════════════");
       
       return {
         statusCode: 400,
@@ -150,26 +165,93 @@ exports.handler = async function (event, context) {
       };
     }
 
-    console.log("=== EDGE TTS START ===");
-    console.log("Generating speech...");
-    console.log("=====================");
+    console.log("STEP 4: Validation passed");
+    console.log("");
+    console.log("STEP 5: Loading edge-tts package");
+    
+    // Check if edge-tts can be loaded
+    let edgeTts;
+    try {
+      edgeTts = require("edge-tts/out/index.js");
+      console.log("STEP 5: edge-tts package loaded");
+      console.log("  Package keys:", Object.keys(edgeTts).join(", "));
+    } catch (loadError) {
+      console.log("STEP 5: FAILED - Cannot load edge-tts");
+      console.log("  Load error:", loadError.message);
+      console.log("  Stack:", loadError.stack?.substring(0, 500));
+      console.log("═══════════════════════════════════════════");
+      
+      return {
+        statusCode: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+        body: JSON.stringify({
+          error: "Cannot load edge-tts package",
+          message: loadError.message,
+          stack: loadError.stack,
+          name: loadError.name,
+        }),
+      };
+    }
+
+    console.log("");
+    console.log("STEP 6: Starting TTS generation");
+    console.log("  Voice:", voice || "tr-TR-AhmetNeural");
+    console.log("  Rate:", rate || "+0%");
+    console.log("  Pitch:", pitch || "+0Hz");
 
     // Generate speech
-    const result = await edgeTtsService.generateSpeech({
-      text,
-      voice: voice || edgeTtsService.DEFAULT_VOICE,
-      rate: rate || "+0%",
-      pitch: pitch || "+0Hz",
-    });
+    let audioBuffer;
+    try {
+      const tts = edgeTts.tts;
+      
+      console.log("STEP 7: Calling tts() function");
+      
+      audioBuffer = await tts(text, {
+        voice: voice || "tr-TR-AhmetNeural",
+        rate: rate || "+0%",
+        pitch: pitch || "+0Hz",
+      });
+      
+      console.log("STEP 7: tts() completed");
+      console.log("  Audio buffer type:", typeof audioBuffer);
+      console.log("  Audio buffer length:", audioBuffer?.length || "undefined");
+      console.log("  Audio buffer constructor:", audioBuffer?.constructor?.name);
+      
+    } catch (ttsError) {
+      console.log("");
+      console.log("STEP 7: FAILED - TTS generation error");
+      console.log("  Error name:", ttsError.name);
+      console.log("  Error message:", ttsError.message);
+      console.log("  Error stack:", ttsError.stack?.substring(0, 1000));
+      console.log("═══════════════════════════════════════════");
+      
+      return {
+        statusCode: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+        body: JSON.stringify({
+          error: "TTS generation failed",
+          message: ttsError.message,
+          stack: ttsError.stack,
+          name: ttsError.name,
+          step: "tts generation",
+        }),
+      };
+    }
 
-    console.log("=== EDGE TTS SUCCESS ===");
-    console.log("Audio buffer size:", result.audio.length, "bytes");
-    console.log("Voice used:", result.voice);
-    console.log("Duration:", result.duration, "seconds");
-    console.log("========================");
+    console.log("");
+    console.log("STEP 8: TTS success - preparing response");
+    console.log("  Audio size:", audioBuffer.length, "bytes");
 
     // Convert Buffer to base64 for binary response
-    const audioBase64 = result.audio.toString("base64");
+    const audioBase64 = audioBuffer.toString("base64");
+    console.log("  Base64 length:", audioBase64.length);
+    console.log("═══════════════════════════════════════════");
 
     return {
       statusCode: 200,
@@ -182,10 +264,14 @@ exports.handler = async function (event, context) {
       isBase64Encoded: true,
     };
   } catch (error) {
-    console.log("=== EDGE TTS ERROR ===");
+    console.log("");
+    console.log("═══════════════════════════════════════════");
+    console.log("STEP 9: UNHANDLED ERROR");
+    console.log("═══════════════════════════════════════════");
+    console.log("Error name:", error.name);
     console.log("Error message:", error.message);
-    console.log("Error stack:", process.env.NODE_ENV === "development" ? error.stack : "hidden in production");
-    console.log("====================");
+    console.log("Error stack:", error.stack?.substring(0, 2000));
+    console.log("═══════════════════════════════════════════");
 
     return {
       statusCode: 500,
@@ -194,9 +280,10 @@ exports.handler = async function (event, context) {
         "Access-Control-Allow-Origin": "*",
       },
       body: JSON.stringify({
-        error: "TTS generation failed",
-        details: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+        error: "TTS generation failed - unhandled error",
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
       }),
     };
   }
