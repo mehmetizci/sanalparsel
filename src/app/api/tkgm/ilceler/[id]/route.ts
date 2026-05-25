@@ -45,7 +45,8 @@ export async function GET(
       for (const feature of data.features) {
         if (feature?.type === "Feature" && feature.properties) {
           const id = Number(feature.properties.id || 0);
-          const name = String(feature.properties.name || feature.properties.adi || feature.properties.ilceAd || "").trim();
+          // TKGM uses 'text' for name
+          const name = String(feature.properties.text || feature.properties.name || "").trim();
           if (id && name) {
             result.push({ id, name });
           }

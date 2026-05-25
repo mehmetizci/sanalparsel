@@ -33,12 +33,14 @@ export async function GET() {
     const data = await response.json();
 
     // Parse FeatureCollection
+    // TKGM returns: { features: [{ properties: { id, text } }] }
     const result: { id: number; name: string }[] = [];
     if (data?.type === "FeatureCollection" && Array.isArray(data.features)) {
       for (const feature of data.features) {
         if (feature?.type === "Feature" && feature.properties) {
           const id = Number(feature.properties.id || 0);
-          const name = String(feature.properties.name || feature.properties.adi || "").trim();
+          // TKGM uses 'text' for name
+          const name = String(feature.properties.text || feature.properties.name || "").trim();
           if (id && name) {
             result.push({ id, name });
           }
