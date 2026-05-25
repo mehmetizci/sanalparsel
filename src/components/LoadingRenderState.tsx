@@ -1,19 +1,25 @@
 "use client";
 
 interface LoadingRenderStateProps {
-  status: "preparing" | "audio_creating" | "rendering" | "finalizing" | "completed";
+  status: "preparing" | "map_init" | "recording" | "audio" | "merging" | "exporting" | "completed" | "preparing" | "audio_creating" | "rendering" | "finalizing";
   progress?: number;
+  customMessage?: string;
 }
 
 const statusLabels: Record<string, { label: string; description: string }> = {
   preparing: { label: "Hazırlanıyor", description: "Proje ayarları hazırlanıyor..." },
-  audio_creating: { label: "Ses Oluşturuluyor", description: "ElevenLabs ile ses sentezleniyor..." },
-  rendering: { label: "Video Render Ediliyor", description: "Remotion ile video oluşturuluyor..." },
+  map_init: { label: "Harita Hazırlanıyor", description: "Uydu görüntüsü yükleniyor..." },
+  recording: { label: "Kayıt Yapılıyor", description: "Kamera hareketi kaydediliyor..." },
+  audio: { label: "Ses Oluşturuluyor", description: "Seslendirme sentezleniyor..." },
+  audio_creating: { label: "Ses Oluşturuluyor", description: "Ses sentezleniyor..." },
+  merging: { label: "Birleştiriliyor", description: "Video ve ses birleştiriliyor..." },
+  rendering: { label: "Video Render Ediliyor", description: "Video kodlanıyor..." },
   finalizing: { label: "Tamamlanıyor", description: "Son rötuşlar yapılıyor..." },
+  exporting: { label: "Dışa Aktarılıyor", description: "Video formatı düzenleniyor..." },
   completed: { label: "Tamamlandı", description: "Video hazır!" },
 };
 
-export default function LoadingRenderState({ status, progress = 0 }: LoadingRenderStateProps) {
+export default function LoadingRenderState({ status, progress = 0, customMessage }: LoadingRenderStateProps) {
   const { label, description } = statusLabels[status] || statusLabels.preparing;
 
   return (
@@ -48,7 +54,7 @@ export default function LoadingRenderState({ status, progress = 0 }: LoadingRend
       </div>
       
       <h3 className="text-xl font-bold text-white mb-2">{label}</h3>
-      <p className="text-muted">{description}</p>
+      <p className="text-muted">{customMessage || description}</p>
 
       {status !== "completed" && (
         <div className="mt-6 flex items-center justify-center gap-2 text-sm text-muted">

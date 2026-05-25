@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
@@ -10,14 +10,22 @@ import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
 
-export default function DownloadPage({ params }: { params: { id: string } }) {
+interface DownloadPageProps {
+  params: { id: string };
+}
+
+export default function DownloadPage({ params }: DownloadPageProps) {
   const { id } = params;
   const router = useRouter();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  
   const [project, setProject] = useState<Project | null>(null);
   const [video, setVideo] = useState<Video | null>(null);
   const [credits, setCredits] = useState(0);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -53,7 +61,6 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
         setVideo(videoData as Video);
       }
 
-      // Fetch credits
       const { data: creditsData } = await supabase
         .from("credits")
         .select("amount")
@@ -70,8 +77,26 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
     fetchData();
   }, [id, router]);
 
+  // Store video URL for localStorage cleanup
+  useEffect(() => {
+    return () => {
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+      }
+    };
+  }, [videoUrl]);
+
+  // Load video from project data or localStorage
+  useEffect(() => {
+    // Check localStorage for rendered video
+    const localVideoUrl = localStorage.getItem(`video_${id}`);
+    if (localVideoUrl) {
+      setVideoUrl(localVideoUrl);
+    }
+  }, [id]);
+
   const handleDownload = async () => {
-    if (credits < 1) {
+    if (credits < 1 && video?.status !== "completed") {
       router.push("/billing");
       return;
     }
@@ -79,13 +104,15 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
     setDownloading(true);
     try {
       const supabase = createClient();
-      
+
       // Deduct credit
-      await supabase.from("credits").insert({
-        user_id: project?.user_id,
-        amount: -1,
-        source: "video_download",
-      });
+      if (video?.status !== "completed") {
+        await supabase.from("credits").insert({
+          user_id: project?.user_id,
+          amount: -1,
+          source: "video_download",
+        });
+      }
 
       // Update video status
       if (video) {
@@ -101,12 +128,26 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
         .update({ status: "completed" })
         .eq("id", id);
 
-      // In production, this would trigger actual video download
-      alert("Video indirme başlatılıyor...");
+      // Trigger actual download
+      if (videoUrl) {
+        const a = document.createElement("a");
+        a.href = videoUrl;
+        a.download = `${project?.short_title || "video"}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
     } catch (error) {
       console.error("Download error:", error);
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const handlePlayPreview = () => {
+    if (videoRef.current && videoUrl) {
+      videoRef.current.play();
+      setIsPlaying(true);
     }
   };
 
@@ -142,6 +183,33 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
           </p>
         </GlassCard>
 
+        {/* Video Preview */}
+        {videoUrl && (
+          <GlassCard className="mt-4 overflow-hidden">
+            <div className="relative aspect-[9/16] bg-black rounded-lg overflow-hidden">
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                className="w-full h-full object-cover"
+                controls
+                onEnded={() => setIsPlaying(false)}
+              />
+              {!isPlaying && (
+                <button
+                  onClick={handlePlayPreview}
+                  className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-colors"
+                >
+                  <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                    <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  </div>
+                </button>
+              )}
+            </div>
+          </GlassCard>
+        )}
+
         <GlassCard className="mt-4">
           <div className="flex items-center gap-4 mb-4">
             <div className="w-16 h-16 rounded-xl bg-card flex items-center justify-center">
@@ -151,27 +219,27 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
             </div>
             <div className="flex-1">
               <h3 className="text-white font-bold">{project?.short_title || project?.title}</h3>
-              <p className="text-muted text-sm">30 sn · Reels 1080x1920</p>
+              <p className="text-muted text-sm">{video?.duration || 30} sn · Reels 720x1280</p>
             </div>
           </div>
 
           <div className="border-t border-white/10 pt-4 space-y-3">
             <div className="flex justify-between text-sm">
               <span className="text-muted">Format</span>
-              <span className="text-white">MP4 / Reels</span>
+              <span className="text-white">MP4 / WebM</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted">Çözünürlük</span>
-              <span className="text-white">1080 x 1920</span>
+              <span className="text-white">720 x 1280</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-muted">Süre</span>
-              <span className="text-white">30 saniye</span>
+              <span className="text-white">{video?.duration || 30} saniye</span>
             </div>
           </div>
         </GlassCard>
 
-        {credits < 1 ? (
+        {credits < 1 && video?.status !== "completed" ? (
           <div className="mt-6">
             <div className="bg-warning/10 border border-warning/20 rounded-xl p-4 text-center mb-4">
               <p className="text-warning">Bu videoyu indirmek için 1 video kredisi gerekir.</p>
@@ -195,7 +263,7 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              MP4 İndir
+              Video İndir
             </PrimaryButton>
             
             <button className="w-full py-3 rounded-xl border border-white/10 text-white hover:bg-white/5 transition-colors font-medium flex items-center justify-center gap-2">
