@@ -77,3 +77,39 @@ body {
     display: none;
   }
 }
+
+/* Mapbox canvas visibility fixes */
+.mapboxgl-map {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+}
+
+.mapboxgl-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  position: absolute !important;
+}
+
+.mapboxgl-canvas-container {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+}
+
+.mapboxgl-wrapper {
+  position: absolute !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.mapboxgl-control-container {
+  position: absolute !important;
+  width: 100% !important;
+  height: 100% !important;
+}

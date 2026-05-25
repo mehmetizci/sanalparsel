@@ -202,7 +202,7 @@ function ParcelInfoPageInner() {
           </div>
         )}
 
-        <div className="glass rounded-[28px] overflow-hidden h-[260px] mb-4 relative">
+        <div className="overflow-hidden rounded-[28px] h-[420px] mb-4 relative">
           <MapboxMap
             droneHeight={300}
             cinematic={false}
