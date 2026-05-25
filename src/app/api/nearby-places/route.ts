@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 // Overpass API endpoints (with fallback)
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
-  "https://lz4.overpass-api.de/api/interpreter",
+  "https://overpass.openstreetmap.ru/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
 ];
 
 // Overpass query for nearby places
@@ -84,6 +85,15 @@ const FALLBACK_NAMES: Record<string, string> = {
   "highway": "Yakındaki Ana Yol",
 };
 
+// Check if error is rate limiting
+function isRateLimitError(statusCode: number, body: string): boolean {
+  return statusCode === 429 || 
+         statusCode === 406 || 
+         body.includes("rate") || 
+         body.includes("quota") ||
+         body.includes("Too Many Requests");
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const lat = searchParams.get("lat");
@@ -126,6 +136,7 @@ export async function GET(request: NextRequest) {
 
   // Try each Overpass endpoint
   let lastError: Error | null = null;
+  let lastStatusCode: number = 0;
   
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
@@ -134,20 +145,38 @@ export async function GET(request: NextRequest) {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "text/plain",
         },
-        body: `data=${encodeURIComponent(query)}`,
+        body: query,
         signal: AbortSignal.timeout(15000), // 15 second timeout for backend
       });
 
-      if (!response.ok) {
-        const statusText = await response.text();
-        console.error(`[NearbyPlaces] Overpass error ${response.status}:`, statusText);
-        lastError = new Error(`HTTP ${response.status}: ${statusText}`);
+      const responseText = await response.text();
+      lastStatusCode = response.status;
+
+      // Check for rate limiting or other errors
+      if (isRateLimitError(response.status, responseText)) {
+        console.warn(`[NearbyPlaces] Rate limited or blocked by ${endpoint}: ${response.status}`);
+        lastError = new Error(`HTTP ${response.status}: Rate limited`);
         continue; // Try next endpoint
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        console.error(`[NearbyPlaces] Overpass error ${response.status}:`, responseText.substring(0, 200));
+        lastError = new Error(`HTTP ${response.status}: ${responseText.substring(0, 100)}`);
+        continue; // Try next endpoint
+      }
+
+      // Try to parse JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        console.error(`[NearbyPlaces] Invalid JSON from ${endpoint}`);
+        lastError = new Error("Invalid JSON response");
+        continue;
+      }
+
       console.log(`[NearbyPlaces] Got ${data.elements?.length || 0} elements from Overpass`);
 
       // Process elements
@@ -174,7 +203,8 @@ export async function GET(request: NextRequest) {
         // Get name from various tag options
         const name = tags.name || tags["name:tr"] || tags.short_name || FALLBACK_NAMES[poiType] || "Bilinmeyen";
 
-        const poi = {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const poi: any = {
           id: `poi_${element.id}`,
           type: poiType,
           name,
@@ -193,10 +223,10 @@ export async function GET(request: NextRequest) {
       }
 
       // Convert to array and sort by distance
-      const pois = Array.from(poisByType.values()).sort((a, b) => a.distance - b.distance);
+      const pois = Array.from(poisByType.values()).sort((a: { distance: number }, b: { distance: number }) => a.distance - b.distance);
 
       // Auto-select top 5
-      pois.slice(0, 5).forEach(poi => poi.selected = true);
+      pois.slice(0, 5).forEach((poi: { selected: boolean }) => poi.selected = true);
 
       console.log(`[NearbyPlaces] Processed ${pois.length} unique POIs`);
       
@@ -211,13 +241,25 @@ export async function GET(request: NextRequest) {
     } catch (error: unknown) {
       const err = error as Error;
       console.error(`[NearbyPlaces] Endpoint ${endpoint} failed:`, err.message);
-      lastError = error as Error;
+      lastError = err;
       continue; // Try next endpoint
     }
   }
 
   // All endpoints failed
-  console.error("[NearbyPlaces] All Overpass endpoints failed:", lastError?.message);
+  console.error("[NearbyPlaces] All Overpass endpoints failed:", lastError?.message, "Last status:", lastStatusCode);
+  
+  // Return a more helpful error message
+  if (lastStatusCode === 406 || lastStatusCode === 429) {
+    return NextResponse.json(
+      { 
+        error: "OSM sunucuları şu anda meşgul. Lütfen biraz bekleyip tekrar deneyin.", 
+        code: "RATE_LIMITED",
+        details: lastError?.message || "Sunucu meşgul",
+      },
+      { status: 503 }
+    );
+  }
   
   return NextResponse.json(
     { 
