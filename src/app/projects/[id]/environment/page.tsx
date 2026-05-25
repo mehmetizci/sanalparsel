@@ -5,12 +5,18 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, EnvironmentItem } from "@/types";
 import { useParcelStore } from "@/lib/parcel-store";
-import { fetchNearbyPOIs } from "@/lib/poi-service";
+import { fetchNearbyPOIs, POIServiceError } from "@/lib/poi-service";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PoiSelectionCard from "@/components/PoiSelectionCard";
 import PrimaryButton from "@/components/PrimaryButton";
 
+type ErrorType = "MISSING_COORDS" | "TIMEOUT" | "OVERPASS_ERROR" | "NETWORK_ERROR" | "UNKNOWN";
+
+interface ErrorInfo {
+  type: ErrorType;
+  message: string;
+}
 
 export default function EnvironmentPage({ params }: { params: { id: string } }) {
   const urlParams = useParams();
@@ -30,7 +36,7 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fetchingPoI, setFetchingPoI] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
 
   useEffect(() => {
     const fetchProject = async () => {
@@ -122,7 +128,10 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
     const lng = parcelCenter?.lon || project?.center_lon;
     
     if (!lat || !lng) {
-      setError("Parsel koordinatları bulunamadı.");
+      setError({
+        type: "MISSING_COORDS",
+        message: "Parsel koordinatları bulunamadı. Lütfen önce parsel bilgilerini girin.",
+      });
       return;
     }
 
@@ -135,6 +144,14 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
       const pois = await fetchNearbyPOIs(lat, lng, 3000);
       
       console.log(`[Environment] Got ${pois.length} POIs`);
+      
+      if (pois.length === 0) {
+        setError({
+          type: "OVERPASS_ERROR",
+          message: "Bu bölgede çevre verisi bulunamadı. Farklı bir konum deneyin.",
+        });
+        return;
+      }
       
       // Update global store
       setPois(pois);
@@ -155,7 +172,27 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
       
     } catch (err) {
       console.error("[Environment] POI fetch error:", err);
-      setError("Çevre verileri alınamadı. Bağlantınızı kontrol edin.");
+      
+      if (err instanceof POIServiceError) {
+        switch (err.code) {
+          case "MISSING_COORDS":
+            setError({ type: "MISSING_COORDS", message: err.message });
+            break;
+          case "TIMEOUT":
+            setError({ type: "TIMEOUT", message: "Overpass API zaman aşımına uğradı. Lütfen tekrar deneyin." });
+            break;
+          case "OVERPASS_ERROR":
+            setError({ type: "OVERPASS_ERROR", message: err.message });
+            break;
+          case "NETWORK_ERROR":
+            setError({ type: "NETWORK_ERROR", message: "Sunucu bağlantı hatası. Lütfen internet bağlantınızı kontrol edin." });
+            break;
+          default:
+            setError({ type: "UNKNOWN", message: err.message });
+        }
+      } else {
+        setError({ type: "UNKNOWN", message: "Bilinmeyen hata oluştu." });
+      }
     } finally {
       setFetchingPoI(false);
     }
@@ -218,7 +255,12 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
 
         {error && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 mb-4">
-            <p className="text-red-400 text-sm">{error}</p>
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-red-400 text-sm">{error.message}</p>
+            </div>
           </div>
         )}
 
@@ -226,7 +268,7 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
           <button
             onClick={handleFetchFromOsm}
             disabled={fetchingPoI}
-            className="text-sm text-primary hover:underline flex items-center gap-2"
+            className="text-sm text-primary hover:underline flex items-center gap-2 disabled:opacity-50"
           >
             {fetchingPoI ? (
               <>

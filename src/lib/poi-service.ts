@@ -1,5 +1,6 @@
 /**
- * POI Service - Real environment data from OpenStreetMap Overpass API
+ * POI Service - Fetches real environment data via backend proxy
+ * Uses backend API route to avoid CORS issues and properly format Overpass queries
  */
 
 export interface POI {
@@ -33,7 +34,7 @@ export interface POITypeConfig {
   fallbackName: string;
 }
 
-// POI type configurations for Overpass queries
+// POI type configurations
 const POI_CONFIGS: POITypeConfig[] = [
   { type: "hospital", label: "Hastane", amenityKey: "amenity", amenityValue: "hospital", fallbackName: "Yakındaki Hastane" },
   { type: "school", label: "Okul", amenityKey: "amenity", amenityValue: "school", fallbackName: "Yakındaki Okul" },
@@ -84,45 +85,12 @@ export function formatDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
-/**
- * Map OSM amenity type to our POI type
- */
-function mapOsmTypeToPoiType(amenityKey: string, amenityValue: string): POIType {
-  const mapping: Record<string, POIType> = {
-    "hospital": "hospital",
-    "school": "school",
-    "university": "university",
-    "supermarket": "market",
-    "pharmacy": "pharmacy",
-    "station": "transport",
-    "park": "park",
-    "bank": "bank",
-    "place_of_worship": "mosque",
-    "primary": "highway",
-  };
-  return mapping[amenityValue] || "market";
-}
+// Cache for POI data
+const poiCache = new Map<string, { data: POI[]; timestamp: number }>();
+const CACHE_TTL = 1000 * 60 * 30; // 30 minutes
 
 /**
- * Build Overpass query for nearby POIs
- */
-function buildOverpassQuery(lat: number, lng: number, radius: number = 3000): string {
-  const configs = POI_CONFIGS.map(c => {
-    if (c.type === "highway") {
-      return `way["${c.amenityKey}"="${c.amenityValue}"](around:${radius},${lat},${lng});`;
-    }
-    return `node["${c.amenityKey}"="${c.amenityValue}"](around:${radius},${lat},${lng});`;
-  }).join("\n");
-
-  return `[out:json][timeout:25][maxsize:1073741824];
-(
-${configs}
-);
-out center;`;
-}
-
-/**
- * Cache key for POI data
+ * Get cache key for coordinates
  */
 function getCacheKey(lat: number, lng: number): string {
   // Round to ~100m precision
@@ -131,12 +99,23 @@ function getCacheKey(lat: number, lng: number): string {
   return `poi_${roundedLat}_${roundedLng}`;
 }
 
-// In-memory cache
-const poiCache = new Map<string, { data: POI[]; timestamp: number }>();
-const CACHE_TTL = 1000 * 60 * 30; // 30 minutes
+/**
+ * Custom error class for POI service
+ */
+export class POIServiceError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public statusCode: number = 500
+  ) {
+    super(message);
+    this.name = "POIServiceError";
+  }
+}
 
 /**
- * Fetch POIs from Overpass API with caching
+ * Fetch POIs from backend API (which proxies to Overpass)
+ * Uses in-memory cache to avoid repeated API calls
  */
 export async function fetchNearbyPOIs(
   lat: number, 
@@ -155,96 +134,73 @@ export async function fetchNearbyPOIs(
     }
   }
 
-  const query = buildOverpassQuery(lat, lng, radius);
-  
   try {
-    console.log("[POI Service] Fetching POIs from Overpass API...");
+    console.log(`[POI Service] Fetching from backend API: ${lat}, ${lng}`);
     
-    const response = await fetch(
-      "https://overpass-api.de/api/interpreter",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: AbortSignal.timeout(10000), // 10 second timeout
-      }
-    );
+    const params = new URLSearchParams({
+      lat: lat.toString(),
+      lng: lng.toString(),
+      radius: radius.toString(),
+    });
+    
+    const response = await fetch(`/api/nearby-places?${params}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(12000), // 12 second timeout
+    });
 
     if (!response.ok) {
-      throw new Error(`Overpass API error: ${response.status}`);
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || `API error: ${response.status}`;
+      const errorCode = errorData.code || "API_ERROR";
+      
+      console.error("[POI Service] API error:", errorMessage, errorCode);
+      throw new POIServiceError(errorMessage, errorCode, response.status);
     }
 
     const data = await response.json();
-    const elements = data.elements || [];
-
-    console.log(`[POI Service] Found ${elements.length} POIs`);
-
-    // Process and deduplicate POIs
-    const poisByType = new Map<POIType, POI[]>();
     
-    for (const element of elements) {
-      let elLat = element.lat;
-      let elLon = element.lon;
-      
-      // For ways, use the center coordinates
-      if (element.type === "way" && element.center) {
-        elLat = element.center.lat;
-        elLon = element.center.lon;
-      }
-      
-      if (!elLat || !elLon) continue;
-      
-      const tags = element.tags || {};
-      const amenityKey = tags.amenity || tags.shop || tags.leisure || tags.highway || "";
-      const amenityValue = amenityKey;
-      
-      const poiType = mapOsmTypeToPoiType(amenityKey, amenityValue);
-      const config = POI_CONFIGS.find(c => c.type === poiType);
-      
-      if (!config) continue;
-      
-      const distance = haversineDistance(lat, lng, elLat, elLon);
-      const name = tags.name || 
-                   tags["name:tr"] || 
-                   tags.short_name || 
-                   `${config.label} ${tags.ref || ""}`.trim() ||
-                   config.fallbackName;
-      
-      const poi: POI = {
-        id: `poi_${element.id}`,
-        type: poiType,
-        name: name || config.fallbackName,
-        distance,
-        distanceText: formatDistance(distance),
-        lat: elLat,
-        lng: elLon,
-        selected: false,
-      };
-      
-      // Keep only the closest POI for each type
-      const existing = poisByType.get(poiType);
-      if (!existing || poi.distance < existing[0].distance) {
-        poisByType.set(poiType, [poi]);
-      }
+    if (!data.success || !data.pois) {
+      console.error("[POI Service] Invalid response:", data);
+      throw new POIServiceError(
+        "Çevre verileri alınamadı",
+        "INVALID_RESPONSE",
+        500
+      );
     }
 
-    // Convert to array and sort by distance
-    const pois = Array.from(poisByType.values())
-      .flat()
-      .sort((a, b) => a.distance - b.distance);
-
-    // Auto-select the closest ones (up to 5)
-    pois.slice(0, 5).forEach(poi => poi.selected = true);
-
+    const pois = data.pois as POI[];
+    
     // Cache the result
     poiCache.set(cacheKey, { data: pois, timestamp: Date.now() });
-
-    console.log(`[POI Service] Processed ${pois.length} unique POIs`);
+    
+    console.log(`[POI Service] Got ${pois.length} POIs from API`);
     return pois;
 
-  } catch (error) {
-    console.error("[POI Service] Error fetching POIs:", error);
-    throw error;
+  } catch (error: unknown) {
+    console.error("[POI Service] Error:", error);
+    
+    if (error instanceof POIServiceError) {
+      throw error;
+    }
+    
+    // Handle network errors
+    const err = error as Error;
+    if (err.name === "AbortError" || err.name === "TimeoutError") {
+      throw new POIServiceError(
+        "Çevre verileri alınamadı. Bağlantı zaman aşımına uğradı.",
+        "TIMEOUT",
+        408
+      );
+    }
+    
+    throw new POIServiceError(
+      "Çevre verileri alınamadı. Bağlantınızı kontrol edin.",
+      "NETWORK_ERROR",
+      500
+    );
   }
 }
 
