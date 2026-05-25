@@ -46,13 +46,19 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
   const selectedRate = rate || "0%";
   const selectedPitch = pitch || "0Hz";
 
-  console.log("=== TTS POST REQUEST ===");
+  console.log("═══════════════════════════════════════");
+  console.log("=== TTS CLIENT - POST REQUEST ===");
+  console.log("═══════════════════════════════════════");
+  console.log("Endpoint: /api/generate-tts");
+  console.log("Method: POST");
+  console.log("Content-Type: application/json");
+  console.log("");
   console.log("Text length:", text.length, "chars");
-  console.log("Text preview:", text.substring(0, 100) + (text.length > 100 ? "..." : ""));
+  console.log("Text preview (first 100):", text.substring(0, 100) + (text.length > 100 ? "..." : ""));
   console.log("Voice:", selectedVoice);
   console.log("Rate:", selectedRate);
   console.log("Pitch:", selectedPitch);
-  console.log("========================");
+  console.log("═══════════════════════════════════════");
 
   // Build request payload
   const payload = {
@@ -62,43 +68,54 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
     pitch: selectedPitch,
   };
 
-  console.log("POST body:", JSON.stringify(payload, null, 2).substring(0, 500));
+  const bodyString = JSON.stringify(payload);
+  console.log("POST body (first 500):", bodyString.substring(0, 500));
+  console.log("═══════════════════════════════════════");
 
   try {
-    console.log("Calling /api/generate-tts...");
+    console.log("");
+    console.log(">>> SENDING FETCH REQUEST...");
     
     const response = await fetch("/api/generate-tts", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: bodyString,
     });
 
-    console.log("=== TTS RESPONSE ===");
+    console.log("");
+    console.log("═══════════════════════════════════════");
+    console.log("=== TTS CLIENT - RESPONSE RECEIVED ===");
+    console.log("═══════════════════════════════════════");
     console.log("Status:", response.status);
     console.log("StatusText:", response.statusText);
     console.log("Content-Type:", response.headers.get("Content-Type"));
-    console.log("===================");
+    console.log("═══════════════════════════════════════");
 
     // Check for non-ok responses
     if (!response.ok) {
+      console.log("");
+      console.log("!!! RESPONSE NOT OK !!!");
       let errorDetails = "";
       
       try {
         const errorBody = await response.json();
         errorDetails = errorBody.error || errorBody.details || JSON.stringify(errorBody);
+        console.log("Error JSON:", errorBody);
       } catch {
         // Not JSON, try text
         try {
           errorDetails = await response.text();
+          console.log("Error text:", errorDetails);
         } catch {
           errorDetails = `HTTP ${response.status}: ${response.statusText}`;
+          console.log("Error fallback:", errorDetails);
         }
       }
 
-      console.error("TTS Error Response:", errorDetails);
-
+      console.log("");
+      console.log("=== THROWING ERROR ===");
       throw {
         error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
         details: errorDetails,
@@ -107,40 +124,58 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
 
     // Get content type
     const contentType = response.headers.get("Content-Type") || "";
-    
-    console.log("Processing response as blob...");
+    console.log("");
+    console.log(">>> READING RESPONSE AS BLOB...");
     
     // Always try to read as blob first (for audio responses)
     const audioBlob = await response.blob();
+    console.log("");
+    console.log("=== BLOB INFO ===");
     console.log("Blob size:", audioBlob.size, "bytes");
     console.log("Blob type:", audioBlob.type);
+    console.log("═══════════════════════════════════════");
 
     // Check if response is actually audio or JSON error
     if (contentType.includes("audio") || contentType.includes("mpeg") || audioBlob.type.includes("audio")) {
-      console.log("Response is audio - creating preview");
+      console.log("");
+      console.log("✓ Response appears to be audio/mpeg");
+      console.log(">>> Creating preview...");
       
       // Calculate duration
       const duration = await getAudioDuration(audioBlob);
+      console.log("");
+      console.log("=== SUCCESS ===");
       console.log("Audio duration:", duration, "seconds");
+      console.log("═══════════════════════════════════════");
 
       return {
         audioBlob,
         duration,
       };
     } else {
-      // Might be JSON error in blob body - try to read as text
-      console.log("Response might be JSON, checking content...");
+      console.log("");
+      console.log("!!! Response NOT audio/mpeg !!!");
+      console.log("Content-Type:", contentType);
+      console.log("Blob type:", audioBlob.type);
+      console.log("");
+      console.log(">>> Trying to read as text...");
       
+      // Might be JSON error in blob body - try to read as text
       const textResponse = await audioBlob.text();
-      console.log("Raw response (first 500 chars):", textResponse.substring(0, 500));
+      console.log("");
+      console.log("Raw response (first 500 chars):");
+      console.log(textResponse.substring(0, 500));
+      console.log("═══════════════════════════════════════");
       
       // Try to parse as JSON
       try {
         const jsonResponse = JSON.parse(textResponse);
-        console.error("JSON Error Response:", jsonResponse);
+        console.log("");
+        console.log("!!! JSON ERROR RESPONSE !!!");
+        console.log("Parsed JSON:", jsonResponse);
         throw {
           error: jsonResponse.error || "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
-          details: jsonResponse.details || "Unknown error",
+          details: jsonResponse.details || "Unknown error from server",
         };
       } catch (parseErr) {
         if (parseErr && typeof parseErr === "object" && "error" in parseErr) {
@@ -149,24 +184,31 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
         
         // Not JSON - might be test response or other format
         if (textResponse.includes("ok") || textResponse.includes("success")) {
-          console.log("Test response received:", textResponse);
-          // This is a test/success response, not actual audio
+          console.log("");
+          console.log("!!! TEST/SUCCESS RESPONSE (not audio) !!!");
+          console.log("This is a test mode response, not actual audio");
           throw {
-            error: "Test modunda ses oluşturulamadı",
+            error: "Test modunda ses oluşturulamadı - gerçek ses üretimi için 'test: true' kaldırın",
             details: textResponse,
           };
         }
         
-        console.error("Could not parse response as audio or JSON");
+        console.log("");
+        console.log("!!! UNKNOWN RESPONSE FORMAT !!!");
+        console.log("Could not parse response as audio or JSON");
         throw {
           error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
-          details: "Invalid response format from server",
+          details: `Invalid response format from server. Content-Type: ${contentType}, Blob type: ${audioBlob.type}`,
         };
       }
     }
   } catch (err) {
     // Log the error
-    console.error("=== TTS EXCEPTION ===");
+    console.log("");
+    console.log("═══════════════════════════════════════");
+    console.log("=== TTS CLIENT - EXCEPTION ===");
+    console.log("═══════════════════════════════════════");
+    
     if (err instanceof Error) {
       console.error("Exception message:", err.message);
       console.error("Exception stack:", err.stack);

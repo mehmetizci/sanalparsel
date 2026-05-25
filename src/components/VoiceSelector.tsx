@@ -12,7 +12,7 @@ interface VoiceSelectorProps {
   isGenerating?: boolean;
   onGenerateStart?: () => void;
   onGenerateComplete?: (blob: Blob, duration: number) => void;
-  onGenerateError?: (error: string) => void;
+  onGenerateError?: (error: string, debug?: string) => void;
 }
 
 export default function VoiceSelector({
@@ -35,6 +35,7 @@ export default function VoiceSelector({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hasGeneratedAudio = !!cachedAudioUrl && !!voiceSettings.audioDuration;
 
@@ -107,6 +108,57 @@ export default function VoiceSelector({
     }
   }, [isPlaying, cachedAudioUrl]);
 
+  // Test function to verify POST endpoint works
+  const testEndpoint = async () => {
+    console.log("=== TEST ENDPOINT ===");
+    setDebugInfo("Test başlatılıyor...");
+    
+    try {
+      const response = await fetch("/api/generate-tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          test: true,
+          text: "Test mesajı",
+          voice: "tr-TR-AhmetNeural",
+          rate: "0%",
+          pitch: "0Hz"
+        })
+      });
+
+      const status = response.status;
+      const contentType = response.headers.get("Content-Type") || "";
+      let bodyText = "";
+      
+      try {
+        const json = await response.json();
+        bodyText = JSON.stringify(json);
+      } catch {
+        bodyText = await response.text();
+      }
+
+      const debug = `
+=== TEST RESPONSE ===
+Status: ${status}
+Content-Type: ${contentType}
+Body: ${bodyText}
+=====================`;
+
+      console.log(debug);
+      setDebugInfo(debug);
+
+      if (status === 200 && bodyText.includes("ok")) {
+        setDebugInfo(debug + "\n\n✓ Test başarılı! Endpoint çalışıyor.");
+      } else {
+        setDebugInfo(debug + "\n\n✗ Test başarısız!");
+      }
+    } catch (err) {
+      const debug = `=== TEST ERROR ===\n${err instanceof Error ? err.message : String(err)}`;
+      console.error(debug);
+      setDebugInfo(debug);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!narrationText || narrationText.trim().length === 0) {
       onGenerateError?.("Önce AI tanıtım metni oluşturmalısınız.");
@@ -114,6 +166,7 @@ export default function VoiceSelector({
     }
 
     onGenerateStart?.();
+    setDebugInfo("Ses oluşturuluyor...");
     
     try {
       console.log("[VoiceSelector] Starting TTS generation...");
@@ -126,14 +179,25 @@ export default function VoiceSelector({
       });
       
       console.log("[VoiceSelector] TTS generation successful, duration:", result.duration);
+      setDebugInfo(null);
       
       setGeneratedAudio(result.audioBlob, result.duration);
       invalidateAudioCache(hashText(narrationText));
       onGenerateComplete?.(result.audioBlob, result.duration);
     } catch (err: unknown) {
       console.error("[VoiceSelector] TTS generation failed:", err);
-      const errorMessage = (err as { error?: string })?.error || "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.";
-      onGenerateError?.(errorMessage);
+      
+      const errObj = err as { error?: string; details?: string };
+      const userMessage = errObj?.error || "Ses oluşturulurken bir hata oluştu.";
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const debugDetails = errObj?.details || errorMessage;
+      
+      const fullDebug = `=== DEBUG BILGI ===\n${debugDetails}\n\nSes ayarları:\n- Voice: ${voiceSettings.edgeVoice}\n- Rate: ${voiceSettings.rate}\n- Pitch: ${voiceSettings.pitch}\n=================`;
+      
+      console.error(fullDebug);
+      setDebugInfo(fullDebug);
+      
+      onGenerateError?.(userMessage, debugDetails);
     }
   };
 
@@ -261,6 +325,40 @@ export default function VoiceSelector({
             </div>
           </div>
         )}
+
+        {/* Debug Info Display */}
+        {debugInfo && (
+          <div className="glass rounded-xl p-4 border-red-500/30 bg-red-500/5">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-red-200 font-medium text-sm mb-1">Debug Bilgi:</p>
+                <pre className="text-red-300 text-xs whitespace-pre-wrap font-mono bg-black/20 rounded p-2 max-h-48 overflow-auto">
+                  {debugInfo}
+                </pre>
+              </div>
+              <button
+                onClick={() => setDebugInfo(null)}
+                className="text-red-400 hover:text-red-300 p-1"
+                title="Kapat"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Test Button - Debug */}
+        <button
+          onClick={testEndpoint}
+          className="w-full py-2 rounded-xl border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/5 transition-colors text-sm font-medium"
+        >
+          🔧 Endpoint Test Et (Debug)
+        </button>
       </div>
     </div>
   );

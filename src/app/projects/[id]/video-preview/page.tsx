@@ -34,6 +34,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [creatingVideo, setCreatingVideo] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -95,9 +96,12 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     setGeneratingVoice(false);
   }, []);
 
-  const handleGenerateVoiceError = useCallback((error: string) => {
+  const handleGenerateVoiceError = useCallback((error: string, debug?: string) => {
     setGeneratingVoice(false);
     setErrorMessage(error);
+    if (debug) {
+      setDebugInfo(debug);
+    }
   }, []);
 
   const handleCreateVideo = async () => {
@@ -208,14 +212,35 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           description="Seslendirme ve video önizleme"
         />
 
-        {/* Error Message */}
-        {errorMessage && (
+        {/* Error Message with Debug */}
+        {(errorMessage || debugInfo) && (
           <GlassCard className="mb-4 border-red-500/30 bg-red-500/5">
             <div className="flex items-start gap-3">
               <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <p className="text-red-200 text-sm">{errorMessage}</p>
+              <div className="flex-1">
+                <p className="text-red-200 text-sm">{errorMessage}</p>
+                {debugInfo && (
+                  <div className="mt-3">
+                    <p className="text-red-400 text-xs font-mono font-bold mb-1">Debug Bilgi:</p>
+                    <pre className="text-red-300 text-xs whitespace-pre-wrap font-mono bg-black/30 rounded p-2 max-h-64 overflow-auto">
+                      {debugInfo}
+                    </pre>
+                  </div>
+                )}
+              </div>
+              {debugInfo && (
+                <button
+                  onClick={() => { setErrorMessage(null); setDebugInfo(null); }}
+                  className="text-red-400 hover:text-red-300 p-1 flex-shrink-0"
+                  title="Kapat"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
           </GlassCard>
         )}
