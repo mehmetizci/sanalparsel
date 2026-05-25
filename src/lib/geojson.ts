@@ -105,13 +105,40 @@ export function getParcelCenter(geoJson: ParcelGeoJson): { lat: number; lon: num
   }
 }
 
-export function formatArea(area: string | undefined): string {
-  if (!area) return "Bilinmiyor";
+export function formatArea(area: string | undefined | null): string {
+  if (!area) return "Alan bilgisi bulunamadı";
   
-  const numArea = parseFloat(area);
-  if (isNaN(numArea)) return area;
+  const trimmed = String(area).trim();
   
-  return numArea.toLocaleString("tr-TR", { maximumFractionDigits: 2 }) + " m²";
+  // Check for empty or zero values
+  if (!trimmed || trimmed === "0" || trimmed === "0.00" || trimmed === "0,00") {
+    return "Alan bilgisi bulunamadı";
+  }
+  
+  // Parse Turkish number format
+  let numArea: number;
+  
+  if (trimmed.includes(".") && trimmed.includes(",")) {
+    // Turkish format: "4.207,00" => 4207
+    numArea = parseFloat(trimmed.replace(/\./g, "").replace(",", "."));
+  } else if (trimmed.includes(",") && !trimmed.includes(".")) {
+    const parts = trimmed.split(",");
+    if (parts.length === 2 && parts[0].length <= 3) {
+      // Likely Turkish: "1234,56" => 1234.56
+      numArea = parseFloat(trimmed.replace(",", "."));
+    } else {
+      // Likely thousands separator: "1,234" => 1234
+      numArea = parseFloat(trimmed.replace(/,/g, ""));
+    }
+  } else {
+    numArea = parseFloat(trimmed);
+  }
+  
+  if (isNaN(numArea) || numArea <= 0) {
+    return "Alan bilgisi bulunamadı";
+  }
+  
+  return numArea.toLocaleString("tr-TR", { maximumFractionDigits: 0 }) + " m²";
 }
 
 export function validateGeoJsonFile(file: File): Promise<boolean> {

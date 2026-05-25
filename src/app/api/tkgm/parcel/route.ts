@@ -61,8 +61,29 @@ export async function POST(request: NextRequest) {
     const props = data.properties || {};
     const geom = data.geometry || {};
     
+    // First, try to get area from TKGM properties
+    let areaM2: number | null = null;
+    const rawAlan = props.alan;
+    
+    if (rawAlan !== undefined && rawAlan !== null && rawAlan !== 0) {
+      // Parse area from TKGM - can be string like "4.207,00" or number
+      if (typeof rawAlan === "string") {
+        const trimmed = rawAlan.trim();
+        if (trimmed && trimmed !== "0" && trimmed !== "0.00" && trimmed !== "0,00") {
+          // Turkish format: "4.207,00" => 4207
+          const normalized = trimmed.replace(/\./g, "").replace(",", ".");
+          const parsed = parseFloat(normalized);
+          if (Number.isFinite(parsed) && parsed > 0) {
+            areaM2 = parsed;
+          }
+        }
+      } else if (typeof rawAlan === "number" && rawAlan > 0) {
+        areaM2 = rawAlan;
+      }
+    }
+    
+    // Calculate center from polygon
     let centerLat = 0, centerLng = 0;
-    let areaM2 = 0;
     
     if (geom.type === "Polygon" && geom.coordinates?.[0]) {
       const ring = geom.coordinates[0];
@@ -78,11 +99,19 @@ export async function POST(request: NextRequest) {
         centerLng = sumLng / ring.length;
       }
       
-      for (let i = 0; i < ring.length - 1; i++) {
-        areaM2 += ring[i][0] * ring[i + 1][1];
-        areaM2 -= ring[i + 1][0] * ring[i][1];
+      // If no area from TKGM, calculate from geometry using spherical approximation
+      if (areaM2 === null && ring.length >= 3) {
+        let area = 0;
+        for (let i = 0; i < ring.length - 1; i++) {
+          const j = i + 1;
+          const lat1Rad = ring[i][1] * Math.PI / 180;
+          const lat2Rad = ring[j][1] * Math.PI / 180;
+          const dLon = (ring[j][0] - ring[i][0]) * Math.PI / 180;
+          area += dLon * (2 + Math.sin(lat1Rad) + Math.sin(lat2Rad));
+        }
+        const EARTH_RADIUS = 6371000;
+        areaM2 = Math.abs(area * EARTH_RADIUS * EARTH_RADIUS / 2);
       }
-      areaM2 = Math.abs(areaM2) / 2;
     }
     
     const geojsonFeature = {
@@ -93,7 +122,7 @@ export async function POST(request: NextRequest) {
         Mahalle: props.mahalleAd || "",
         Ada: String(props.adaNo || adaNo),
         ParselNo: String(props.parselNo || parselNo),
-        Alan: String(Math.round(areaM2)),
+        Alan: areaM2 !== null ? String(Math.round(areaM2)) : "",
         Nitelik: props.nitelik || "",
         Pafta: props.pafta || "",
       },
@@ -105,7 +134,7 @@ export async function POST(request: NextRequest) {
       parcel: {
         adaNo: Number(props.adaNo || adaNo),
         parselNo: Number(props.parselNo || parselNo),
-        alan: Math.round(areaM2).toString(),
+        alan: areaM2 !== null ? Math.round(areaM2).toString() : "",
         nitelik: props.nitelik || "",
         pafta: props.pafta || "",
         il: props.ilAd || "",
