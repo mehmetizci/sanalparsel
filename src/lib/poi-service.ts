@@ -15,6 +15,7 @@ export interface POI {
   lat: number;
   lng: number;
   selected: boolean;
+  source?: "overpass" | "nominatim" | "fallback";
 }
 
 export type POIType = 

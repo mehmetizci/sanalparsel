@@ -45,6 +45,7 @@ export interface POI {
   lat: number;
   lng: number;
   selected: boolean;
+  source?: "overpass" | "nominatim" | "fallback";
 }
 
 // Legacy support - convert old format to new
