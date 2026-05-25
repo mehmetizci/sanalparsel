@@ -103,26 +103,30 @@ async function fetchFromOverpass(
   endpoint: string,
   query: string
 ): Promise<{ elements: unknown[]; error?: string }> {
+  let response: Response | null = null;
+  
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds
+    console.log("[NearbyPlaces] Fetching from", endpoint);
     
-    const response = await fetch(endpoint, {
+    const fetchPromise = fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
-        "User-Agent": "SanalParsel/1.0 (contact: mehmetizcix@gmail.com)",
+        "User-Agent": "SanalParsel/1.0",
       },
-      body: new URLSearchParams({ data: query }),
-      signal: controller.signal,
+      body: `data=${encodeURIComponent(query)}`,
     });
 
-    clearTimeout(timeoutId);
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("Request timeout")), 30000);
+    });
 
-    const text = await response.text();
+    response = await Promise.race([fetchPromise, timeoutPromise]);
+    console.log("[NearbyPlaces] Response status:", response.status);
 
     if (response.status === 406) {
+      const text = await response.text();
       return { elements: [], error: `Server returned 406: ${text.substring(0, 200)}` };
     }
 
@@ -130,14 +134,21 @@ async function fetchFromOverpass(
       return { elements: [], error: "Rate limit exceeded" };
     }
 
-    if (!response.ok) {
+    if (response.status !== 200) {
+      const text = await response.text();
       return { elements: [], error: `HTTP ${response.status}: ${text.substring(0, 200)}` };
     }
 
+    const text = await response.text();
+    console.log("[NearbyPlaces] Response text length:", text.length);
+    
     const data = JSON.parse(text);
+    console.log("[NearbyPlaces] Parsed JSON, elements:", data.elements?.length || 0);
+    
     return { elements: data.elements || [] };
   } catch (err) {
     const error = err as Error;
+    console.log("[NearbyPlaces] Fetch error:", error.message);
     return { elements: [], error: error.message };
   }
 }
