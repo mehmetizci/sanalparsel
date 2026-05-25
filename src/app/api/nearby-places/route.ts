@@ -233,47 +233,95 @@ export async function GET(request: NextRequest) {
   
   console.log("[NearbyPlaces] Processing", allElements.length, "elements");
   
-  for (const el of allElements as { id: number; type: string; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[]) {
-    const elLat = el.lat || el.center?.lat;
-    const elLon = el.lon || el.center?.lon;
-    if (!elLat || !elLon) {
-      console.log("[NearbyPlaces] Skipping element", el.id, "no coords");
-      continue;
-    }
+  // Map tags to category
+  for (const el of allElements as { id: number; type: string; lat: number; lon: number; tags?: Record<string, string> }[]) {
+    if (!el.lat || !el.lon) continue;
     
     const tags = el.tags || {};
-    const amenity = tags.amenity || tags.shop;
-    const distance = haversineDistance(latNum, lngNum, elLat, elLon);
-    console.log("[NearbyPlaces] Element", el.id, "type:", el.type, "amenity:", amenity, "name:", tags.name || tags.brand || "none", "dist:", Math.round(distance));
+    const distance = haversineDistance(latNum, lngNum, el.lat, el.lon);
+    const name = tags.name || tags.brand || tags["name:tr"] || tags.official_name || "Unknown";
     
-    // Find matching category
-    for (const cat of POI_CATEGORIES) {
-      const key = cat.amenity || cat.shop || "";
-      const value = cat.amenity || cat.shop || "";
-      
-      if (tags[key] === value || tags[key]?.includes(value)) {
-        const poi: POI = {
-          id: `${el.type}_${el.id}`,
-          osmId: el.id,
-          osmType: el.type,
-          category: cat.key,
-          label: cat.label,
-          name: getBestName(tags, cat.fallbackName),
-          distanceMeters: Math.round(distance),
-          distanceText: formatDistance(distance),
-          lat: elLat,
-          lng: elLon,
-          selected: false,
-        };
-        
-        const existing = poisByCategory.get(cat.key);
-        if (!existing || distance < existing.distanceMeters) {
-          poisByCategory.set(cat.key, poi);
-        }
-        break;
+    // Explicit category matching
+    if (tags.amenity === "hospital") {
+      console.log("[NearbyPlaces] Found hospital:", name, "dist:", Math.round(distance));
+      const poi: POI = {
+        id: `node_${el.id}`,
+        osmId: el.id,
+        osmType: el.type,
+        category: "hospital",
+        label: "Hastane",
+        name: name,
+        distanceMeters: Math.round(distance),
+        distanceText: formatDistance(distance),
+        lat: el.lat,
+        lng: el.lon,
+        selected: false,
+      };
+      const existing = poisByCategory.get("hospital");
+      if (!existing || distance < existing.distanceMeters) {
+        poisByCategory.set("hospital", poi);
+      }
+    } else if (tags.amenity === "school") {
+      console.log("[NearbyPlaces] Found school:", name, "dist:", Math.round(distance));
+      const poi: POI = {
+        id: `node_${el.id}`,
+        osmId: el.id,
+        osmType: el.type,
+        category: "school",
+        label: "Okul",
+        name: name,
+        distanceMeters: Math.round(distance),
+        distanceText: formatDistance(distance),
+        lat: el.lat,
+        lng: el.lon,
+        selected: false,
+      };
+      const existing = poisByCategory.get("school");
+      if (!existing || distance < existing.distanceMeters) {
+        poisByCategory.set("school", poi);
+      }
+    } else if (tags.amenity === "pharmacy") {
+      console.log("[NearbyPlaces] Found pharmacy:", name, "dist:", Math.round(distance));
+      const poi: POI = {
+        id: `node_${el.id}`,
+        osmId: el.id,
+        osmType: el.type,
+        category: "pharmacy",
+        label: "Eczane",
+        name: name,
+        distanceMeters: Math.round(distance),
+        distanceText: formatDistance(distance),
+        lat: el.lat,
+        lng: el.lon,
+        selected: false,
+      };
+      const existing = poisByCategory.get("pharmacy");
+      if (!existing || distance < existing.distanceMeters) {
+        poisByCategory.set("pharmacy", poi);
+      }
+    } else if (tags.shop === "supermarket") {
+      console.log("[NearbyPlaces] Found supermarket:", name, "dist:", Math.round(distance));
+      const poi: POI = {
+        id: `node_${el.id}`,
+        osmId: el.id,
+        osmType: el.type,
+        category: "market",
+        label: "Market",
+        name: name,
+        distanceMeters: Math.round(distance),
+        distanceText: formatDistance(distance),
+        lat: el.lat,
+        lng: el.lon,
+        selected: false,
+      };
+      const existing = poisByCategory.get("market");
+      if (!existing || distance < existing.distanceMeters) {
+        poisByCategory.set("market", poi);
       }
     }
   }
+  
+  console.log("[NearbyPlaces] Matched categories:", Array.from(poisByCategory.keys()).join(", "));
   
   const pois = Array.from(poisByCategory.values()).sort((a, b) => a.distanceMeters - b.distanceMeters);
   
