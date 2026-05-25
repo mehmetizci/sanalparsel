@@ -278,7 +278,10 @@ export default function MapboxMap({
 
   // Initialize Mapbox map
   useEffect(() => {
-    if (!MAPBOX_TOKEN) return;
+    if (!MAPBOX_TOKEN) {
+      console.log("[MapboxMap] No token, skipping init");
+      return;
+    }
     if (typeof window === "undefined" || !containerRef.current) return;
     if (!fallbackCenter) return;
 
@@ -294,160 +297,166 @@ export default function MapboxMap({
     }
 
     mapboxgl.accessToken = MAPBOX_TOKEN;
+    console.log("[MapboxMap] Creating map with token length:", MAPBOX_TOKEN.length);
 
+    let map: mapboxgl.Map;
     try {
-      const map = new mapboxgl.Map({
+      map = new mapboxgl.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/satellite-streets-v12",
         center: [fallbackCenter.lon, fallbackCenter.lat],
         zoom,
-        // Cinematic camera settings
         pitch: 60,
         bearing: -15,
-        // High quality rendering
         antialias: true,
-        // Required for frame capture
         preserveDrawingBuffer: true,
-        // Attribution
         attributionControl: false,
       });
-
-      mapRef.current = map;
-
-      // Add minimal attribution
-      map.addControl(
-        new mapboxgl.AttributionControl({ compact: true }),
-        "bottom-right"
-      );
-
-      map.addControl(
-        new mapboxgl.NavigationControl({ visualizePitch: true }),
-        "top-right"
-      );
-
-      map.addControl(
-        new mapboxgl.ScaleControl({ maxWidth: 120, unit: "metric" }),
-        "bottom-left"
-      );
-
-      map.on("error", (e) => {
-        console.error("[MapboxMap] Error:", e);
-        setMapError(e.error?.message || "Harita başlatılamadı");
-      });
-
-      map.on("load", () => {
-        if (!mapRef.current) return;
-
-        // Determine which feature to use - check uploaded, then parcel prop, then fallback
-        const currentParcel = uploadedParcel || parcel || legacyFeature();
-        
-        // Default fallback polygon if no parcel data
-        const defaultPolygon = {
-          type: "Feature" as const,
-          properties: {},
-          geometry: { 
-            type: "Polygon" as const, 
-            coordinates: [[[fallbackCenter.lon, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat]]] 
-          },
-        };
-
-        // Add parcel source with whatever data we have
-        const featureData = currentParcel || defaultPolygon;
-        mapRef.current.addSource("parcel", {
-          type: "geojson",
-          data: featureData,
-        });
-
-        // Fill layer with transparent red
-        mapRef.current.addLayer({
-          id: "parcel-fill",
-          type: "fill",
-          source: "parcel",
-          paint: {
-            "fill-color": "#ef4444",
-            "fill-opacity": 0.25,
-          },
-        });
-
-        // Outline with solid red
-        mapRef.current.addLayer({
-          id: "parcel-outline",
-          type: "line",
-          source: "parcel",
-          layout: {
-            "line-join": "round",
-            "line-cap": "round",
-          },
-          paint: {
-            "line-color": "#ef4444",
-            "line-width": 3,
-            "line-opacity": 0.95,
-          },
-        });
-
-        // Glow effect
-        mapRef.current.addLayer({
-          id: "parcel-glow",
-          type: "line",
-          source: "parcel",
-          layout: {
-            "line-join": "round",
-            "line-cap": "round",
-          },
-          paint: {
-            "line-color": "#fda4af",
-            "line-width": 8,
-            "line-opacity": 0.3,
-          },
-        }, "parcel-outline");
-
-        // Fit bounds to parcel if we have valid geometry
-        if (currentParcel && currentParcel.geometry) {
-          const positions = flattenRings(currentParcel.geometry);
-          const bounds = computeBounds(positions);
-          if (bounds) {
-            mapRef.current.fitBounds(bounds, {
-              padding: 80,
-              maxZoom: 19,
-              pitch: 60,
-              bearing: -15,
-              duration: 3000,
-              essential: true,
-            });
-          }
-        }
-
-        // Start cinematic bearing animation
-        if (cinematic) {
-          let bearing = -15;
-          const animateBearing = () => {
-            if (!mapRef.current) return;
-            bearing += 0.05;
-            mapRef.current.setBearing(bearing);
-            bearingRafRef.current = requestAnimationFrame(animateBearing);
-          };
-          bearingRafRef.current = requestAnimationFrame(animateBearing);
-        }
-
-        setIsReady(true);
-        setMapError(null);
-        onReady?.(mapRef.current);
-      });
-
-      return () => {
-        if (bearingRafRef.current) {
-          cancelAnimationFrame(bearingRafRef.current);
-          bearingRafRef.current = null;
-        }
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-      };
     } catch (err) {
-      console.error("[MapboxMap] Initialization error:", err);
+      console.error("[MapboxMap] Map constructor error:", err);
       setMapError("Harita başlatılamadı");
+      return;
     }
+
+    console.log("[MapboxMap] Map instance created");
+
+    mapRef.current = map;
+
+    map.addControl(
+      new mapboxgl.AttributionControl({ compact: true }),
+      "bottom-right"
+    );
+
+    map.addControl(
+      new mapboxgl.NavigationControl({ visualizePitch: true }),
+      "top-right"
+    );
+
+    map.addControl(
+      new mapboxgl.ScaleControl({ maxWidth: 120, unit: "metric" }),
+      "bottom-left"
+    );
+
+    map.on("error", (e) => {
+      console.error("[MapboxMap] Error:", e);
+      const err = e.error as { status?: number; message?: string; url?: string } | undefined;
+      if (err) {
+        console.error("[MapboxMap] Error details:", {
+          status: err.status,
+          message: err.message,
+          url: err.url,
+        });
+      }
+      setMapError(err?.message || "Harita başlatılamadı");
+    });
+
+    map.on("load", () => {
+      if (!mapRef.current) return;
+
+      console.log("[MapboxMap] Map loaded, setting up layers...");
+      console.log("[MapboxMap] Token:", MAPBOX_TOKEN ? "set" : "not set");
+
+      const currentParcel = uploadedParcel || parcel || legacyFeature();
+      
+      const defaultPolygon = {
+        type: "Feature" as const,
+        properties: {},
+        geometry: { 
+          type: "Polygon" as const, 
+          coordinates: [[[fallbackCenter.lon, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat]]] 
+        },
+      };
+
+      const featureData = currentParcel || defaultPolygon;
+      console.log("[MapboxMap] Using parcel:", JSON.stringify(featureData).substring(0, 200));
+      
+      mapRef.current.addSource("parcel", {
+        type: "geojson",
+        data: featureData,
+      });
+
+      mapRef.current.addLayer({
+        id: "parcel-fill",
+        type: "fill",
+        source: "parcel",
+        paint: {
+          "fill-color": "#ef4444",
+          "fill-opacity": 0.25,
+        },
+      });
+
+      mapRef.current.addLayer({
+        id: "parcel-outline",
+        type: "line",
+        source: "parcel",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": "#ef4444",
+          "line-width": 3,
+          "line-opacity": 0.95,
+        },
+      });
+
+      mapRef.current.addLayer({
+        id: "parcel-glow",
+        type: "line",
+        source: "parcel",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": "#fda4af",
+          "line-width": 8,
+          "line-opacity": 0.3,
+        },
+      }, "parcel-outline");
+
+      if (currentParcel && currentParcel.geometry) {
+        const positions = flattenRings(currentParcel.geometry);
+        const bounds = computeBounds(positions);
+        if (bounds) {
+          mapRef.current.fitBounds(bounds, {
+            padding: 80,
+            maxZoom: 19,
+            pitch: 60,
+            bearing: -15,
+            duration: 3000,
+            essential: true,
+          });
+        }
+      }
+
+      if (cinematic) {
+        let bearing = -15;
+        const animateBearing = () => {
+          if (!mapRef.current) return;
+          bearing += 0.05;
+          mapRef.current.setBearing(bearing);
+          bearingRafRef.current = requestAnimationFrame(animateBearing);
+        };
+        bearingRafRef.current = requestAnimationFrame(animateBearing);
+      }
+
+      setIsReady(true);
+      setMapError(null);
+      onReady?.(mapRef.current);
+    });
+
+    return () => {
+      if (bearingRafRef.current) {
+        cancelAnimationFrame(bearingRafRef.current);
+        bearingRafRef.current = null;
+      }
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fallbackCenter?.lon, fallbackCenter?.lat, zoom, cinematic, onReady]);
 
   // Update parcel source when uploaded
