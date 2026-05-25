@@ -27,6 +27,93 @@ export interface ParcelCenter {
   lon: number;
 }
 
+export interface ParcelCoordinates {
+  type: "Polygon" | "MultiPolygon";
+  coordinates: number[][][] | number[][][][];
+}
+
+// Helper to convert string coordinates to numbers
+function normalizeCoord(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const num = parseFloat(value);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+// Helper to get all coordinates from a geometry (flatten nested arrays)
+function extractCoordinates(coords: unknown): [number, number][] {
+  const result: [number, number][] = [];
+  
+  if (!Array.isArray(coords)) return result;
+  
+  const processCoord = (c: unknown) => {
+    if (Array.isArray(c) && c.length >= 2) {
+      const lon = normalizeCoord(c[0]);
+      const lat = normalizeCoord(c[1]);
+      if (lon !== null && lat !== null) {
+        result.push([lon, lat]);
+      }
+    }
+  };
+  
+  // Handle Polygon: coords is number[][][]
+  if (Array.isArray(coords) && Array.isArray(coords[0])) {
+    // Check if it's a ring (just coords) or multiple rings
+    if (Array.isArray(coords[0]) && !Array.isArray(coords[0][0])) {
+      // It's a single ring: number[][]
+      processCoord(coords);
+    } else {
+      // It's multiple rings: number[][][]
+      for (const ring of coords) {
+        if (Array.isArray(ring)) {
+          for (const point of ring) {
+            processCoord(point);
+          }
+        }
+      }
+    }
+  }
+  
+  return result;
+}
+
+// Helper to validate coordinates are in valid range
+function isValidCoordinate(lon: number, lat: number): boolean {
+  return lon >= -180 && lon <= 180 && lat >= -90 && lat <= 90;
+}
+
+// Helper to compute bounds from coordinates
+function computeBoundsFromCoords(coords: [number, number][]): { minLon: number; minLat: number; maxLon: number; maxLat: number } | null {
+  if (!coords.length) return null;
+
+  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+  
+  for (const [lon, lat] of coords) {
+    if (isValidCoordinate(lon, lat)) {
+      minLon = Math.min(minLon, lon);
+      minLat = Math.min(minLat, lat);
+      maxLon = Math.max(maxLon, lon);
+      maxLat = Math.max(maxLat, lat);
+    }
+  }
+
+  if (!Number.isFinite(minLon)) return null;
+  return { minLon, minLat, maxLon, maxLat };
+}
+
+// Helper to compute center from coordinates
+function computeCenterFromCoords(coords: [number, number][]): { lat: number; lon: number } | null {
+  const bounds = computeBoundsFromCoords(coords);
+  if (!bounds) return null;
+  
+  return {
+    lat: (bounds.minLat + bounds.maxLat) / 2,
+    lon: (bounds.minLon + bounds.maxLon) / 2,
+  };
+}
+
 export interface ParcelState {
   // GeoJSON data
   uploadedGeoJson: Feature<Polygon | MultiPolygon> | null;
@@ -37,6 +124,9 @@ export interface ParcelState {
   // Calculated bounds and center
   parcelBounds: ParcelBounds | null;
   parcelCenter: ParcelCenter | null;
+  
+  // Raw coordinates for rendering
+  parcelCoordinates: ParcelCoordinates | null;
   
   // Track if data came from upload or demo
   source: "upload" | "demo" | "database" | null;
@@ -50,6 +140,12 @@ export interface ParcelState {
     source?: "upload" | "demo" | "database";
   }) => void;
   
+  // Set from raw parsed data (from new project page)
+  setFromParsed: (data: {
+    geoJson: Feature<Polygon | MultiPolygon>;
+    metadata: ParcelMetadata;
+  }) => void;
+  
   clearParcelData: () => void;
   
   // Initialize from existing project data (from database)
@@ -61,47 +157,6 @@ export interface ParcelState {
   }) => void;
 }
 
-// Helper to compute bounds from GeoJSON
-function computeBoundsFromGeoJSON(geometry: Polygon | MultiPolygon): ParcelBounds | null {
-  const getCoords = (geom: Polygon | MultiPolygon) => {
-    if (geom.type === "Polygon") {
-      return geom.coordinates[0] || [];
-    }
-    return (geom.coordinates[0]?.[0] as [number, number][]) || [];
-  };
-
-  const coords = getCoords(geometry);
-  if (!coords.length) return null;
-
-  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
-  
-  for (const coord of coords) {
-    if (Array.isArray(coord) && coord.length >= 2) {
-      const [lon, lat] = coord;
-      if (typeof lon === "number" && typeof lat === "number") {
-        minLon = Math.min(minLon, lon);
-        minLat = Math.min(minLat, lat);
-        maxLon = Math.max(maxLon, lon);
-        maxLat = Math.max(maxLat, lat);
-      }
-    }
-  }
-
-  if (!Number.isFinite(minLon)) return null;
-  return { minLon, minLat, maxLon, maxLat };
-}
-
-// Helper to compute center from GeoJSON
-function computeCenterFromGeoJSON(geometry: Polygon | MultiPolygon): ParcelCenter | null {
-  const bounds = computeBoundsFromGeoJSON(geometry);
-  if (!bounds) return null;
-  
-  return {
-    lat: (bounds.minLat + bounds.maxLat) / 2,
-    lon: (bounds.minLon + bounds.maxLon) / 2,
-  };
-}
-
 export const useParcelStore = create<ParcelState>()(
   persist(
     (set) => ({
@@ -109,6 +164,7 @@ export const useParcelStore = create<ParcelState>()(
       parcelMetadata: null,
       parcelBounds: null,
       parcelCenter: null,
+      parcelCoordinates: null,
       source: null,
 
       setParcelData: (data) => set((state) => {
@@ -119,10 +175,15 @@ export const useParcelStore = create<ParcelState>()(
         if (data.geoJson !== undefined) {
           updates.uploadedGeoJson = data.geoJson;
           
-          // Auto-compute bounds and center if not provided
-          if (data.geoJson?.geometry && !data.bounds) {
-            updates.parcelBounds = computeBoundsFromGeoJSON(data.geoJson.geometry);
-            updates.parcelCenter = computeCenterFromGeoJSON(data.geoJson.geometry);
+          // Auto-compute bounds and center from geometry
+          if (data.geoJson?.geometry) {
+            const coords = extractCoordinates(data.geoJson.geometry.coordinates);
+            updates.parcelCoordinates = data.geoJson.geometry as ParcelCoordinates;
+            
+            if (coords.length > 0) {
+              updates.parcelBounds = computeBoundsFromCoords(coords) as ParcelBounds;
+              updates.parcelCenter = computeCenterFromCoords(coords);
+            }
           }
         }
 
@@ -141,11 +202,25 @@ export const useParcelStore = create<ParcelState>()(
         return updates;
       }),
 
+      setFromParsed: (data) => {
+        const coords = extractCoordinates(data.geoJson.geometry.coordinates);
+        
+        set({
+          uploadedGeoJson: data.geoJson,
+          parcelMetadata: data.metadata,
+          parcelCoordinates: data.geoJson.geometry as ParcelCoordinates,
+          parcelBounds: coords.length > 0 ? computeBoundsFromCoords(coords) as ParcelBounds : null,
+          parcelCenter: coords.length > 0 ? computeCenterFromCoords(coords) : null,
+          source: "upload",
+        });
+      },
+
       clearParcelData: () => set({
         uploadedGeoJson: null,
         parcelMetadata: null,
         parcelBounds: null,
         parcelCenter: null,
+        parcelCoordinates: null,
         source: null,
       }),
 
@@ -157,8 +232,13 @@ export const useParcelStore = create<ParcelState>()(
 
         if (project.geojson) {
           updates.uploadedGeoJson = project.geojson;
-          updates.parcelBounds = computeBoundsFromGeoJSON(project.geojson.geometry);
-          updates.parcelCenter = computeCenterFromGeoJSON(project.geojson.geometry);
+          updates.parcelCoordinates = project.geojson.geometry as ParcelCoordinates;
+          
+          const coords = extractCoordinates(project.geojson.geometry.coordinates);
+          if (coords.length > 0) {
+            updates.parcelBounds = computeBoundsFromCoords(coords) as ParcelBounds;
+            updates.parcelCenter = computeCenterFromCoords(coords);
+          }
         } else if (project.center_lat && project.center_lon) {
           updates.parcelCenter = {
             lat: project.center_lat,
@@ -176,6 +256,7 @@ export const useParcelStore = create<ParcelState>()(
         parcelMetadata: state.parcelMetadata,
         parcelBounds: state.parcelBounds,
         parcelCenter: state.parcelCenter,
+        parcelCoordinates: state.parcelCoordinates,
         source: state.source,
       }),
     }

@@ -157,8 +157,10 @@ export default function MapboxMap({
   const parcelBounds = useParcelStore((state) => state.parcelBounds);
   const setParcelData = useParcelStore((state) => state.setParcelData);
 
-  // Fallback center from store
-  const fallbackCenter = parcelCenter;
+  // Check if we have any data to display
+  const hasMetadata = parcelMetadata && Object.keys(parcelMetadata).length > 0;
+  const hasCoordinates = parcelCenter !== null && parcelBounds !== null;
+  const hasAnyData = hasMetadata || hasCoordinates;
 
   // Handle GeoJSON upload - save to global store
   const handleGeoJsonUpload = (feature: Feature<Polygon | MultiPolygon>) => {
@@ -176,7 +178,7 @@ export default function MapboxMap({
       return;
     }
     if (typeof window === "undefined" || !containerRef.current) return;
-    if (!fallbackCenter) return;
+    if (!parcelCenter) return;
 
     // Cleanup previous map
     if (mapRef.current) {
@@ -197,7 +199,7 @@ export default function MapboxMap({
       map = new mapboxgl.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/satellite-streets-v12",
-        center: [fallbackCenter.lon, fallbackCenter.lat],
+        center: [parcelCenter.lon, parcelCenter.lat],
         zoom,
         pitch: 60,
         bearing: -15,
@@ -258,7 +260,7 @@ export default function MapboxMap({
         properties: {},
         geometry: { 
           type: "Polygon" as const, 
-          coordinates: [[[fallbackCenter.lon, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat], [fallbackCenter.lon + 0.001, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat + 0.001], [fallbackCenter.lon, fallbackCenter.lat]]] 
+          coordinates: [[[parcelCenter.lon, parcelCenter.lat], [parcelCenter.lon + 0.001, parcelCenter.lat], [parcelCenter.lon + 0.001, parcelCenter.lat + 0.001], [parcelCenter.lon, parcelCenter.lat + 0.001], [parcelCenter.lon, parcelCenter.lat]]] 
         },
       };
 
@@ -352,7 +354,7 @@ export default function MapboxMap({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fallbackCenter?.lon, fallbackCenter?.lat, zoom, cinematic, onReady]);
+  }, [parcelCenter?.lon, parcelCenter?.lat, zoom, cinematic, onReady]);
 
   // Update parcel source when store data changes
   useEffect(() => {
@@ -401,12 +403,36 @@ export default function MapboxMap({
   }
 
   // Show waiting for coordinates
-  if (!fallbackCenter) {
+  if (!parcelCenter) {
+    // Check if we have metadata but missing coordinates
+    if (hasMetadata && !hasCoordinates) {
+      return (
+        <div className={`w-full h-full min-h-[300px] bg-card rounded-2xl flex items-center justify-center ${className || ""}`}>
+          <div className="text-center p-4">
+            <p className="text-white font-semibold mb-1">Parsel bilgileri okundu</p>
+            <p className="text-muted text-sm">Ancak poligon koordinatları alınamadı.</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // No data at all
+    if (!hasAnyData) {
+      return (
+        <div className={`w-full h-full min-h-[300px] bg-card rounded-2xl flex items-center justify-center ${className || ""}`}>
+          <div className="text-center p-4">
+            <p className="text-white font-semibold mb-1">Parsel verisi bekleniyor</p>
+            <p className="text-muted text-sm">GeoJSON dosyası yükleyin.</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // Fallback: show placeholder
     return (
       <div className={`w-full h-full min-h-[300px] bg-card rounded-2xl flex items-center justify-center ${className || ""}`}>
         <div className="text-center p-4">
-          <p className="text-white font-semibold mb-1">Parsel verisi bekleniyor</p>
-          <p className="text-muted text-sm">Geçerli koordinat bulunamadı.</p>
+          <p className="text-white font-semibold mb-1">Harita yükleniyor...</p>
         </div>
       </div>
     );
@@ -525,9 +551,9 @@ export default function MapboxMap({
               ) : null}
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {fallbackCenter ? (
+              {parcelCenter ? (
                 <span className="text-white/60 text-[11px] font-mono">
-                  {fallbackCenter.lat.toFixed(4)}, {fallbackCenter.lon.toFixed(4)}
+                  {parcelCenter.lat.toFixed(4)}, {parcelCenter.lon.toFixed(4)}
                 </span>
               ) : null}
               {uploadedGeoJson ? (

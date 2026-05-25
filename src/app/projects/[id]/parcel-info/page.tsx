@@ -125,6 +125,16 @@ function ParcelInfoPageInner() {
 
       setProject(data as Project);
       setCustomNote(data.custom_note || "");
+      
+      // Initialize store with project data
+      if (data.geojson) {
+        setParcelData({
+          geoJson: data.geojson,
+          metadata: data.properties ?? undefined,
+          source: "database",
+        });
+      }
+      
       setLoading(false);
     };
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { parseParcelGeoJson, generateProjectName, generateShortProjectName, getParcelCenter } from "@/lib/geojson";
 import { ParcelGeoJson, ParcelProperties } from "@/types";
+import { useParcelStore, ParcelMetadata } from "@/lib/parcel-store";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import UploadCard from "@/components/UploadCard";
@@ -13,6 +14,7 @@ import PrimaryButton from "@/components/PrimaryButton";
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const setFromParsed = useParcelStore((state) => state.setFromParsed);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [geoJsonData, setGeoJsonData] = useState<{
@@ -57,6 +59,12 @@ export default function NewProjectPage() {
       const projectName = generateProjectName(properties);
       const shortTitle = generateShortProjectName(properties);
       const center = getParcelCenter(geoJson);
+
+      // Save to global store immediately
+      setFromParsed({
+        geoJson,
+        metadata: properties as ParcelMetadata,
+      });
 
       setGeoJsonData({
         geoJson,
