@@ -104,6 +104,9 @@ async function fetchFromOverpass(
   query: string
 ): Promise<{ elements: unknown[]; error?: string }> {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds
+    
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -112,8 +115,10 @@ async function fetchFromOverpass(
         "User-Agent": "SanalParsel/1.0 (contact: mehmetizcix@gmail.com)",
       },
       body: new URLSearchParams({ data: query }),
-      signal: AbortSignal.timeout(15000),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     const text = await response.text();
 
@@ -215,13 +220,20 @@ export async function GET(request: NextRequest) {
   // Process elements - keep closest POI per category
   const poisByCategory = new Map<string, POI>();
   
+  console.log("[NearbyPlaces] Processing", allElements.length, "elements");
+  
   for (const el of allElements as { id: number; type: string; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[]) {
     const elLat = el.lat || el.center?.lat;
     const elLon = el.lon || el.center?.lon;
-    if (!elLat || !elLon) continue;
+    if (!elLat || !elLon) {
+      console.log("[NearbyPlaces] Skipping element", el.id, "no coords");
+      continue;
+    }
     
     const tags = el.tags || {};
+    const amenity = tags.amenity || tags.shop;
     const distance = haversineDistance(latNum, lngNum, elLat, elLon);
+    console.log("[NearbyPlaces] Element", el.id, "type:", el.type, "amenity:", amenity, "name:", tags.name || tags.brand || "none", "dist:", Math.round(distance));
     
     // Find matching category
     for (const cat of POI_CATEGORIES) {
