@@ -43,6 +43,7 @@ export interface ProjectConfig {
   droneSettings: DroneConfig;
   videoSettings: VideoConfig;
   nearbyPlaces: NearbyPlacesConfig;
+  aiNarration: AiNarrationConfig;
   // Timestamps
   createdAt: number;
   updatedAt: number;
@@ -106,6 +107,68 @@ export interface NearbyPlacesConfig {
   parcelKey: string | null;
 }
 
+// ─── AI Narration Types ─────────────────────────────────────────────────────
+
+export type NarrationMode = "corporate" | "investment" | "social" | "short" | "premium";
+
+export interface NarrationModeInfo {
+  value: NarrationMode;
+  label: string;
+  description: string;
+  maxWords: number;
+  avgSpeechDuration: number; // seconds per word
+}
+
+export const NARRATION_MODES: NarrationModeInfo[] = [
+  { 
+    value: "corporate", 
+    label: "Kurumsal", 
+    description: "Profesyonel ve güven veren",
+    maxWords: 150,
+    avgSpeechDuration: 0.35,
+  },
+  { 
+    value: "investment", 
+    label: "Yatırım Odaklı", 
+    description: "Değer ve potansiyel vurgulu",
+    maxWords: 180,
+    avgSpeechDuration: 0.38,
+  },
+  { 
+    value: "social", 
+    label: "Sosyal Medya", 
+    description: "Kısa ve dikkat çekici",
+    maxWords: 80,
+    avgSpeechDuration: 0.30,
+  },
+  { 
+    value: "short", 
+    label: "Kısa", 
+    description: "60-90 kelime özet",
+    maxWords: 90,
+    avgSpeechDuration: 0.32,
+  },
+  { 
+    value: "premium", 
+    label: "Premium", 
+    description: "Lüks ve prestijli",
+    maxWords: 140,
+    avgSpeechDuration: 0.40,
+  },
+];
+
+export interface AiNarrationConfig {
+  mode: NarrationMode;
+  text: string;
+  lastGeneratedAt: number | null;
+}
+
+export const DEFAULT_NARRATION_CONFIG: AiNarrationConfig = {
+  mode: "corporate",
+  text: "",
+  lastGeneratedAt: null,
+};
+
 // ─── Default Config ───────────────────────────────────────────────────────────
 
 export const DEFAULT_DRONE_CONFIG: DroneConfig = {
@@ -144,6 +207,7 @@ export function createDefaultProjectConfig(projectId: string): ProjectConfig {
     droneSettings: { ...DEFAULT_DRONE_CONFIG },
     videoSettings: { ...DEFAULT_VIDEO_CONFIG },
     nearbyPlaces: { ...DEFAULT_NEARBY_PLACES_CONFIG },
+    aiNarration: { ...DEFAULT_NARRATION_CONFIG },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -517,6 +581,7 @@ export function migrateLegacySettings(
       },
     },
     nearbyPlaces: { ...DEFAULT_NEARBY_PLACES_CONFIG },
+    aiNarration: { ...DEFAULT_NARRATION_CONFIG },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
