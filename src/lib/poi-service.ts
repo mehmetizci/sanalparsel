@@ -164,21 +164,25 @@ export async function fetchNearbyPOIs(
 
     const data = await response.json();
     
+    if (!data.success && data.error) {
+      console.error("[POI Service] API error:", data.error, data.details);
+      throw new POIServiceError(
+        data.error || "Gerçek çevre verisi alınamadı",
+        "API_ERROR",
+        response.status
+      );
+    }
+    
     if (!data.success) {
       console.error("[POI Service] Invalid response:", data);
       throw new POIServiceError(
-        data.message || "Çevre verileri alınamadı",
+        "Çevre verileri alınamadı",
         "INVALID_RESPONSE",
         500
       );
     }
 
     const pois = data.pois as POI[];
-    const message = data.message;
-    
-    if (message) {
-      console.log(`[POI Service] Message from API: ${message}`);
-    }
     
     // Cache the result
     poiCache.set(cacheKey, { data: pois, timestamp: Date.now() });

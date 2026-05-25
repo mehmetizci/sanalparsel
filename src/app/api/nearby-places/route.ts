@@ -15,7 +15,7 @@ interface POI {
   selected: boolean;
 }
 
-// Optimized POI categories with better key mapping
+// Optimized POI categories
 const POI_CATEGORIES = [
   { key: "hospital", amenity: "hospital", label: "Hastane", fallbackName: "Hastane" },
   { key: "school", amenity: "school", label: "Okul", fallbackName: "Okul" },
@@ -23,17 +23,16 @@ const POI_CATEGORIES = [
   { key: "market", shop: "supermarket", label: "Market", fallbackName: "Market" },
 ];
 
-// Overpass endpoints
+// Overpass endpoints - sequential fallback
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.monicz.ru/api/interpreter",
-  "https://z.overpass-api.de/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
 ];
 
 // In-memory cache
 const cache = new Map<string, { data: POI[]; timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 60 * 24;
-const OVERPASS_TIMEOUT = 4000;
 
 function getCacheKey(lat: number, lng: number): string {
   const roundedLat = Math.round(lat * 1000) / 1000;
@@ -60,59 +59,27 @@ function setCache(key: string, data: POI[]): void {
 
 // Get best name from OSM tags - priority: name:tr > official_name > name > brand > operator
 function getBestName(tags: Record<string, string>, fallbackName: string): string {
-  // Try name:tr first (Turkish name)
-  if (tags["name:tr"] && tags["name:tr"].length > 2) {
-    return tags["name:tr"];
-  }
-  // Try official_name
-  if (tags.official_name && tags.official_name.length > 2) {
-    return tags.official_name;
-  }
-  // Try name
-  if (tags.name && tags.name.length > 2) {
-    return tags.name;
-  }
-  // Try brand
-  if (tags.brand && tags.brand.length > 2) {
-    return tags.brand;
-  }
-  // Try operator
-  if (tags.operator && tags.operator.length > 2) {
-    return tags.operator;
-  }
-  // Fallback to category name
+  if (tags["name:tr"] && tags["name:tr"].length > 2) return tags["name:tr"];
+  if (tags.official_name && tags.official_name.length > 2) return tags.official_name;
+  if (tags.name && tags.name.length > 2) return tags.name;
+  if (tags.brand && tags.brand.length > 2) return tags.brand;
+  if (tags.operator && tags.operator.length > 2) return tags.operator;
   return fallbackName;
 }
 
-// Build query for node + way + relation
-function buildCategoryQuery(
-  lat: number,
-  lng: number,
-  radius: number,
-  amenityKey: string,
-  amenityValue: string
-): string {
-  return `[out:json][timeout:8][maxsize:67108864];
-(
-  node["${amenityKey}"="${amenityValue}"](around:${radius},${lat},${lng});
-  way["${amenityKey}"="${amenityValue}"](around:${radius},${lat},${lng});
-);
-out center tags 5;`;
-}
-
-// Build query for shop type
-function buildShopQuery(
-  lat: number,
-  lng: number,
-  radius: number,
-  shopValue: string
-): string {
-  return `[out:json][timeout:8][maxsize:67108864];
-(
-  node["shop"="${shopValue}"](around:${radius},${lat},${lng});
-  way["shop"="${shopValue}"](around:${radius},${lat},${lng});
-);
-out center tags 5;`;
+// Build single combined query
+function buildCombinedQuery(lat: number, lng: number, radius: number): string {
+  const parts: string[] = [];
+  
+  for (const cat of POI_CATEGORIES) {
+    const key = cat.amenity || cat.shop || "";
+    const value = cat.amenity || cat.shop || "";
+    
+    parts.push(`node(around:${radius},${lat},${lng})["${key}"="${value}"]`);
+    parts.push(`way(around:${radius},${lat},${lng})["${key}"="${value}"]`);
+  }
+  
+  return `[out:json][timeout:15];(${parts.join(";")});out center tags 30;`;
 }
 
 // Haversine distance
@@ -132,103 +99,44 @@ function formatDistance(meters: number): string {
   return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
 }
 
-// Normalize POI from OSM element
-function normalizePoi(
-  el: { id: number; type: string; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> },
-  category: typeof POI_CATEGORIES[0],
-  userLat: number,
-  userLng: number
-): POI | null {
-  const elLat = el.lat || el.center?.lat;
-  const elLon = el.lon || el.center?.lon;
-  
-  if (!elLat || !elLon) return null;
-  
-  const distance = haversineDistance(userLat, userLng, elLat, elLon);
-  const tags = el.tags || {};
-  
-  return {
-    id: `${el.type}_${el.id}`,
-    osmId: el.id,
-    osmType: el.type,
-    category: category.key,
-    label: category.label,
-    name: getBestName(tags, category.fallbackName),
-    distanceMeters: Math.round(distance),
-    distanceText: formatDistance(distance),
-    lat: elLat,
-    lng: elLon,
-    selected: false,
-  };
-}
 
-// Fetch single category from Overpass
-async function fetchCategory(
+// Fetch from Overpass with proper formatting
+async function fetchFromOverpass(
   endpoint: string,
-  lat: number,
-  lng: number,
-  radius: number,
-  category: typeof POI_CATEGORIES[0]
-): Promise<POI[] | null> {
-  const query = category.amenity 
-    ? buildCategoryQuery(lat, lng, radius, "amenity", category.amenity)
-    : buildShopQuery(lat, lng, radius, category.shop || "");
-  
+  query: string
+): Promise<{ elements: unknown[]; error?: string }> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT);
-    
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: query,
-      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "User-Agent": "SanalParsel/1.0 (contact: mehmetizcix@gmail.com)",
+      },
+      body: new URLSearchParams({ data: query }),
+      signal: AbortSignal.timeout(15000),
     });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) return null;
-    
-    const data = await response.json();
-    const elements = data.elements || [];
-    
-    const pois = elements
-      .map((el: { id: number; type: string; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }) => 
-        normalizePoi(el, category, lat, lng)
-      )
-      .filter(Boolean) as POI[];
-    
-    return pois;
-  } catch {
-    return null;
-  }
-}
 
-// Fetch multiple categories in parallel
-async function fetchCategoriesParallel(
-  lat: number,
-  lng: number,
-  radius: number,
-  categories: typeof POI_CATEGORIES
-): Promise<POI[]> {
-  const promises = categories.map(cat => {
-    return OVERPASS_ENDPOINTS.reduce(async (prev, endpoint) => {
-      const result = await prev;
-      if (result && result.length > 0) return result;
-      return await fetchCategory(endpoint, lat, lng, radius, cat);
-    }, Promise.resolve<POI[] | null>(null));
-  });
-  
-  const results = await Promise.allSettled(promises);
-  
-  const allPois: POI[] = [];
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value) {
-      allPois.push(...result.value);
+    const text = await response.text();
+
+    if (response.status === 406) {
+      return { elements: [], error: `Server returned 406: ${text.substring(0, 200)}` };
     }
+
+    if (response.status === 429) {
+      return { elements: [], error: "Rate limit exceeded" };
+    }
+
+    if (!response.ok) {
+      return { elements: [], error: `HTTP ${response.status}: ${text.substring(0, 200)}` };
+    }
+
+    const data = JSON.parse(text);
+    return { elements: data.elements || [] };
+  } catch (err) {
+    const error = err as Error;
+    return { elements: [], error: error.message };
   }
-  
-  return allPois;
 }
 
 export async function GET(request: NextRequest) {
@@ -266,19 +174,94 @@ export async function GET(request: NextRequest) {
   const radius = 1200;
   console.log(`[NearbyPlaces] Fetching POIs for ${latNum}, ${lngNum}, radius: ${radius}m`);
   
-  // Parallel fetch all categories
-  const pois = await fetchCategoriesParallel(latNum, lngNum, radius, POI_CATEGORIES);
+  // Build single combined query
+  const query = buildCombinedQuery(latNum, lngNum, radius);
+  console.log("[NearbyPlaces] Query:", query.replace(/\s+/g, " ").trim());
+  
+  // Try each endpoint sequentially
+  let allElements: unknown[] = [];
+  let lastError = "";
+  
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    console.log(`[NearbyPlaces] Trying endpoint: ${endpoint}`);
+    
+    const result = await fetchFromOverpass(endpoint, query);
+    
+    if (result.error) {
+      console.log(`[NearbyPlaces] Error from ${endpoint}:`, result.error);
+      lastError = result.error;
+      continue;
+    }
+    
+    if (result.elements.length > 0) {
+      allElements = result.elements;
+      console.log(`[NearbyPlaces] Success from ${endpoint}: ${allElements.length} elements`);
+      break;
+    }
+  }
+  
+  if (allElements.length === 0) {
+    console.log("[NearbyPlaces] All endpoints failed. Last error:", lastError);
+    return NextResponse.json({
+      success: false,
+      error: "Gerçek çevre verisi alınamadı",
+      details: lastError || "Tüm Overpass sunucuları yanıt vermedi veya rate limit'e takıldı.",
+      count: 0,
+      pois: [],
+      center: { lat: latNum, lng: lngNum },
+      source: "error",
+      parcelKey: cacheKey,
+    });
+  }
+  
+  // Process elements - keep closest POI per category
+  const poisByCategory = new Map<string, POI>();
+  
+  for (const el of allElements as { id: number; type: string; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[]) {
+    const elLat = el.lat || el.center?.lat;
+    const elLon = el.lon || el.center?.lon;
+    if (!elLat || !elLon) continue;
+    
+    const tags = el.tags || {};
+    const distance = haversineDistance(latNum, lngNum, elLat, elLon);
+    
+    // Find matching category
+    for (const cat of POI_CATEGORIES) {
+      const key = cat.amenity || cat.shop || "";
+      const value = cat.amenity || cat.shop || "";
+      
+      if (tags[key] === value || tags[key]?.includes(value)) {
+        const poi: POI = {
+          id: `${el.type}_${el.id}`,
+          osmId: el.id,
+          osmType: el.type,
+          category: cat.key,
+          label: cat.label,
+          name: getBestName(tags, cat.fallbackName),
+          distanceMeters: Math.round(distance),
+          distanceText: formatDistance(distance),
+          lat: elLat,
+          lng: elLon,
+          selected: false,
+        };
+        
+        const existing = poisByCategory.get(cat.key);
+        if (!existing || distance < existing.distanceMeters) {
+          poisByCategory.set(cat.key, poi);
+        }
+        break;
+      }
+    }
+  }
+  
+  const pois = Array.from(poisByCategory.values()).sort((a, b) => a.distanceMeters - b.distanceMeters);
   
   if (pois.length > 0) {
-    // Sort by distance and select top 4
-    pois.sort((a, b) => a.distanceMeters - b.distanceMeters);
     pois.slice(0, 4).forEach(p => p.selected = true);
-    
-    // Cache successful results
     setCache(cacheKey, pois);
     
-    console.log(`[NearbyPlaces] Returning ${pois.length} POIs from Overpass`);
-    console.log("[NearbyPlaces] Sample names:", pois.map(p => p.name).join(", "));
+    console.log(`[NearbyPlaces] Returning ${pois.length} POIs`);
+    console.log("[NearbyPlaces] Names:", pois.map(p => `${p.category}: ${p.name}`).join(", "));
     
     return NextResponse.json({
       success: true,
@@ -290,43 +273,15 @@ export async function GET(request: NextRequest) {
     });
   }
   
-  // Overpass failed - return demo with better naming
-  console.log("[NearbyPlaces] Overpass timeout, returning demo data");
-  const demoPois = generateDemoPois(latNum, lngNum);
-  
+  // No matching categories found
   return NextResponse.json({
-    success: true,
-    pois: demoPois,
-    count: demoPois.length,
+    success: false,
+    error: "Bu bölgede çevre verisi bulunamadı",
+    details: "Belirtilen kategorilerde (hastane, okul, eczane, market) hiç sonuç bulunamadı.",
+    count: 0,
+    pois: [],
     center: { lat: latNum, lng: lngNum },
-    source: "demo",
+    source: "empty",
     parcelKey: cacheKey,
-    message: "Çevre verileri yoğunluk nedeniyle geç yükleniyor. Demo veriler gösteriliyor.",
   });
-}
-
-function generateDemoPois(lat: number, lng: number): POI[] {
-  const demoData = [
-    { category: "hospital", label: "Hastane", name: "Devlet Hastanesi", baseDist: 800 },
-    { category: "school", label: "Okul", name: "İlkokul", baseDist: 400 },
-    { category: "pharmacy", label: "Eczane", name: "Eczane", baseDist: 350 },
-    { category: "market", label: "Market", name: "Süpermarket", baseDist: 250 },
-  ];
-  
-  return demoData.map((item, i) => {
-    const dist = Math.max(50, item.baseDist + (Math.random() * 200 - 100));
-    return {
-      id: `demo_${i}`,
-      osmId: 0,
-      osmType: "demo",
-      category: item.category,
-      label: item.label,
-      name: item.name,
-      distanceMeters: Math.round(dist),
-      distanceText: formatDistance(dist),
-      lat: lat + (Math.random() - 0.5) * 0.003,
-      lng: lng + (Math.random() - 0.5) * 0.003,
-      selected: i < 3,
-    };
-  }).sort((a, b) => a.distanceMeters - b.distanceMeters);
 }

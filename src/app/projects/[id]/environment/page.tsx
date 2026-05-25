@@ -171,7 +171,7 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
       if (apiPois.length === 0) {
         setError({
           type: "OVERPASS_ERROR",
-          message: "Bu bölgede çevre verisi bulunamadı. Farklı bir konum deneyin.",
+          message: "Bu bölgede çevre verisi bulunamadı",
         });
         return;
       }
@@ -197,7 +197,10 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
             setError({ type: "TIMEOUT", message: "Overpass API zaman aşımına uğradı. Lütfen tekrar deneyin." });
             break;
           case "OVERPASS_ERROR":
-            setError({ type: "OVERPASS_ERROR", message: err.message });
+            setError({ type: "OVERPASS_ERROR", message: "Gerçek çevre verisi alınamadı: " + err.message });
+            break;
+          case "API_ERROR":
+            setError({ type: "OVERPASS_ERROR", message: "Gerçek çevre verisi alınamadı. Sunucular meşgul veya erişim sınırlandırıldı." });
             break;
           case "NETWORK_ERROR":
             setError({ type: "NETWORK_ERROR", message: "Sunucu bağlantı hatası. Lütfen internet bağlantınızı kontrol edin." });
