@@ -71,19 +71,30 @@ export function generateShortProjectName(properties: ParcelProperties): string {
 
 export function getParcelCenter(geoJson: ParcelGeoJson): { lat: number; lon: number } | null {
   try {
-    const coordinates = geoJson.geometry?.coordinates?.[0];
-    if (!coordinates || coordinates.length === 0) return null;
+    // Handle both Polygon and MultiPolygon
+    const polygonCoords = geoJson.geometry?.type === "MultiPolygon" 
+      ? geoJson.geometry.coordinates[0] 
+      : geoJson.geometry?.coordinates[0];
+    
+    if (!polygonCoords || polygonCoords.length === 0) return null;
 
     let totalLat = 0;
     let totalLon = 0;
-    const count = coordinates.length;
+    let count = 0;
 
-    for (const coord of coordinates) {
-      if (Array.isArray(coord) && coord.length >= 2) {
-        totalLon += coord[0];
-        totalLat += coord[1];
+    for (const ring of polygonCoords) {
+      if (Array.isArray(ring)) {
+        for (const coord of ring) {
+          if (Array.isArray(coord) && coord.length >= 2 && typeof coord[0] === 'number') {
+            totalLon += coord[0] as number;
+            totalLat += coord[1] as number;
+            count++;
+          }
+        }
       }
     }
+
+    if (count === 0) return null;
 
     return {
       lat: totalLat / count,

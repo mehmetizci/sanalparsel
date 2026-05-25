@@ -18,7 +18,7 @@ interface TKGMMahalle {
   name: string;
 }
 
-interface ParcelQueryResult {
+export interface ParcelQueryResult {
   success: boolean;
   parcel?: {
     adaNo: number;
@@ -37,7 +37,7 @@ interface ParcelQueryResult {
 }
 
 interface AdaParselFormProps {
-  onSuccess: (result: ParcelQueryResult["parcel"]) => void;
+  onSuccess: (result: NonNullable<ParcelQueryResult["parcel"]>) => void;
   onCancel?: () => void;
 }
 

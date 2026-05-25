@@ -32,7 +32,6 @@ export async function GET(request: NextRequest) {
     clearTimeout(timeoutId);
     
     if (!response.ok) {
-      // Log error if needed
       return NextResponse.json({ error: `TKGM API error: ${response.status}` }, { status: response.status });
     }
     

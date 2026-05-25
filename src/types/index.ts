@@ -1,3 +1,5 @@
+import type { Polygon, MultiPolygon } from "geojson";
+
 export interface User {
   id: string;
   email: string;
@@ -19,15 +21,13 @@ export interface ParcelProperties {
   ParselNo?: string;
   Alan?: string;
   Nitelik?: string;
+  Pafta?: string;
 }
 
 export interface ParcelGeoJson {
   type: "Feature";
   properties: ParcelProperties;
-  geometry: {
-    type: "Polygon";
-    coordinates: number[][][];
-  };
+  geometry: Polygon | MultiPolygon;
 }
 
 export interface Project {

@@ -1,5 +1,6 @@
 "use client";
 
+import type { Polygon, MultiPolygon } from "geojson";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
@@ -12,21 +13,9 @@ import UploadCard from "@/components/UploadCard";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
 import AdaParselForm from "@/components/tkgm/AdaParselForm";
+import type { ParcelQueryResult } from "@/components/tkgm/AdaParselForm";
 
 type NewProjectMode = "upload" | "adaparsel";
-
-interface TKGMParcelResult {
-  adaNo: number;
-  parselNo: number;
-  alan: string;
-  nitelik: string;
-  pafta: string;
-  il: string;
-  ilce: string;
-  mahalle: string;
-  geometri: GeoJSON.Feature;
-  center: { lat: number; lng: number };
-}
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -98,7 +87,7 @@ export default function NewProjectPage() {
     }
   };
 
-  const handleTKGMParcel = (parcel: TKGMParcelResult) => {
+  const handleTKGMParcel = (parcel: NonNullable<ParcelQueryResult["parcel"]>) => {
     console.log("[NewProject] TKGM Parcel result:", parcel);
 
     // Create GeoJSON from TKGM result
@@ -114,7 +103,7 @@ export default function NewProjectPage() {
         Nitelik: parcel.nitelik,
         Pafta: parcel.pafta,
       },
-      geometry: parcel.geometri.geometry,
+      geometry: parcel.geometri.geometry as Polygon | MultiPolygon,
     };
 
     const projectName = `${parcel.il} / ${parcel.ilce} - Ada ${parcel.adaNo} Parsel ${parcel.parselNo}`;
