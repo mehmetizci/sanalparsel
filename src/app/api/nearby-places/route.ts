@@ -16,12 +16,6 @@ interface POI {
 }
 
 // Optimized POI categories
-const POI_CATEGORIES = [
-  { key: "hospital", amenity: "hospital", label: "Hastane", fallbackName: "Hastane" },
-  { key: "school", amenity: "school", label: "Okul", fallbackName: "Okul" },
-  { key: "pharmacy", amenity: "pharmacy", label: "Eczane", fallbackName: "Eczane" },
-  { key: "market", shop: "supermarket", label: "Market", fallbackName: "Market" },
-];
 
 // Overpass endpoints - sequential fallback
 const OVERPASS_ENDPOINTS = [
@@ -58,14 +52,6 @@ function setCache(key: string, data: POI[]): void {
 }
 
 // Get best name from OSM tags - priority: name:tr > official_name > name > brand > operator
-function getBestName(tags: Record<string, string>, fallbackName: string): string {
-  if (tags["name:tr"] && tags["name:tr"].length > 2) return tags["name:tr"];
-  if (tags.official_name && tags.official_name.length > 2) return tags.official_name;
-  if (tags.name && tags.name.length > 2) return tags.name;
-  if (tags.brand && tags.brand.length > 2) return tags.brand;
-  if (tags.operator && tags.operator.length > 2) return tags.operator;
-  return fallbackName;
-}
 
 // Build single combined query - optimized for speed
 function buildCombinedQuery(lat: number, lng: number, radius: number): string {
