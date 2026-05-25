@@ -120,7 +120,7 @@ export class POIServiceError extends Error {
 export async function fetchNearbyPOIs(
   lat: number, 
   lng: number, 
-  radius: number = 3000,
+  
   useCache: boolean = true
 ): Promise<POI[]> {
   const cacheKey = getCacheKey(lat, lng);
@@ -140,7 +140,6 @@ export async function fetchNearbyPOIs(
     const params = new URLSearchParams({
       lat: lat.toString(),
       lng: lng.toString(),
-      radius: radius.toString(),
     });
     
     const response = await fetch(`/api/nearby-places?${params}`, {
@@ -148,7 +147,7 @@ export async function fetchNearbyPOIs(
       headers: {
         "Content-Type": "application/json",
       },
-      signal: AbortSignal.timeout(12000), // 12 second timeout
+      signal: AbortSignal.timeout(10000), // 10 second timeout for client
     });
 
     if (!response.ok) {
@@ -162,24 +161,29 @@ export async function fetchNearbyPOIs(
 
     const data = await response.json();
     
-    if (!data.success || !data.pois) {
+    if (!data.success) {
       console.error("[POI Service] Invalid response:", data);
       throw new POIServiceError(
-        "Çevre verileri alınamadı",
+        data.message || "Çevre verileri alınamadı",
         "INVALID_RESPONSE",
         500
       );
     }
 
     const pois = data.pois as POI[];
+    const message = data.message;
+    
+    if (message) {
+      console.log(`[POI Service] Message from API: ${message}`);
+    }
     
     // Cache the result
     poiCache.set(cacheKey, { data: pois, timestamp: Date.now() });
     
-    console.log(`[POI Service] Got ${pois.length} POIs from API`);
+    console.log(`[POI Service] Got ${pois.length} POIs from API, source: ${data.source}`);
     return pois;
 
-  } catch (error: unknown) {
+  } catch (error) {
     console.error("[POI Service] Error:", error);
     
     if (error instanceof POIServiceError) {
@@ -190,7 +194,7 @@ export async function fetchNearbyPOIs(
     const err = error as Error;
     if (err.name === "AbortError" || err.name === "TimeoutError") {
       throw new POIServiceError(
-        "Çevre verileri alınamadı. Bağlantı zaman aşımına uğradı.",
+        "Çevre verileri yoğunluk nedeniyle geç yükleniyor",
         "TIMEOUT",
         408
       );

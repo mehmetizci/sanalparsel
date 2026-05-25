@@ -141,7 +141,7 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
     try {
       console.log(`[Environment] Fetching POIs for ${lat}, ${lng}`);
       
-      const pois = await fetchNearbyPOIs(lat, lng, 3000);
+      const pois = await fetchNearbyPOIs(lat, lng);
       
       console.log(`[Environment] Got ${pois.length} POIs`);
       
