@@ -222,20 +222,39 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
           <GlassCard>
             <label className="text-white font-semibold mb-3 block">Kamera Hissi</label>
             <div className="grid grid-cols-3 gap-3">
-              {CAMERA_STYLES.map((style) => (
-                <button
-                  key={style.value}
-                  onClick={() => setDroneSettings({ cameraFeel: style.value })}
-                  className={`glass rounded-xl p-4 text-center transition-all ${
-                    droneSettings.cameraFeel === style.value
-                      ? "border-primary bg-primary/10"
-                      : "border-white/10 hover:border-white/20"
-                  }`}
-                >
-                  <p className="text-white font-medium">{style.label}</p>
-                  <p className="text-muted text-xs mt-1">{style.description}</p>
-                </button>
-              ))}
+              {CAMERA_STYLES.map((style) => {
+                const isSelected = droneSettings.cameraFeel === style.value;
+                return (
+                  <button
+                    key={style.value}
+                    onClick={() => {
+                      console.log(`cameraFeel selected: ${style.value}`);
+                      setDroneSettings({ cameraFeel: style.value });
+                    }}
+                    className={`
+                      relative rounded-xl p-4 text-center transition-all duration-200
+                      ${isSelected 
+                        ? "border-2 border-blue-500 bg-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.5)]" 
+                        : "border border-white/20 bg-card/50 hover:bg-card hover:border-white/30"
+                      }
+                    `}
+                  >
+                    {isSelected && (
+                      <div className="absolute -top-2 -right-2 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    )}
+                    <p className={`font-medium ${isSelected ? "text-blue-400" : "text-white"}`}>
+                      {style.label}
+                    </p>
+                    <p className={`text-xs mt-1 ${isSelected ? "text-blue-300/70" : "text-gray-400"}`}>
+                      {style.description}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           </GlassCard>
 
