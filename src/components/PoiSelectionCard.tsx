@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { EnvironmentItem } from "@/types";
 
 interface PoiSelectionCardProps {
@@ -7,6 +8,20 @@ interface PoiSelectionCardProps {
   onToggleItem: (id: string) => void;
   maxSelections?: number;
 }
+
+// Category priority for sorting
+const CATEGORY_PRIORITY: Record<string, number> = {
+  hospital: 1,
+  transport: 2,
+  market: 3,
+  school: 4,
+  restaurant: 5,
+  cafe: 6,
+  university: 7,
+  pharmacy: 8,
+  highway: 9,
+  marketplace: 10,
+};
 
 const typeLabels: Record<string, string> = {
   hospital: "Hastane",
@@ -76,54 +91,141 @@ const typeIcons: Record<string, React.ReactNode> = {
   ),
 };
 
+// Sort items by category priority, then by distance
+function sortItems(items: EnvironmentItem[]): EnvironmentItem[] {
+  return [...items].sort((a, b) => {
+    const priorityA = CATEGORY_PRIORITY[a.type] || 999;
+    const priorityB = CATEGORY_PRIORITY[b.type] || 999;
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+    // Parse distance for sorting (e.g., "450 m" -> 450, "1.2 km" -> 1200)
+    const parseDistance = (d: string) => {
+      const kmMatch = d.match(/([\d.]+)\s*km/);
+      const mMatch = d.match(/(\d+)\s*m/);
+      if (kmMatch) return parseFloat(kmMatch[1]) * 1000;
+      if (mMatch) return parseInt(mMatch[1]);
+      return 9999;
+    };
+    return parseDistance(a.distance) - parseDistance(b.distance);
+  });
+}
+
+// Animated check icon component
+function AnimatedCheck({ isSelected }: { isSelected: boolean }) {
+  return (
+    <div
+      className={`relative w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${
+        isSelected
+          ? "border-blue-500 bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)] scale-100"
+          : "border-white/30 scale-95"
+      }`}
+    >
+      <div
+        className={`transition-all duration-300 ${
+          isSelected ? "opacity-100 scale-100" : "opacity-0 scale-0"
+        }`}
+      >
+        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 export default function PoiSelectionCard({ items, onToggleItem, maxSelections = 7 }: PoiSelectionCardProps) {
-  const selectedCount = items.filter((i) => i.selected).length;
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
+  const sortedItems = sortItems(items);
+  const selectedCount = sortedItems.filter((i) => i.selected).length;
   const canSelectMore = selectedCount < maxSelections;
+
+  const handleToggle = (id: string) => {
+    if (!sortedItems.find(i => i.id === id)?.selected && !canSelectMore) return;
+    setLastSelectedId(id);
+    onToggleItem(id);
+  };
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <label className="text-white font-semibold">Yakın Çevre Bilgileri</label>
-        <span className="text-sm text-muted">
-          {selectedCount}/{maxSelections} seçili
-        </span>
+        {selectedCount > 0 ? (
+          <div className="flex items-center gap-1.5">
+            <span className="px-2.5 py-1 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-400 text-xs font-medium shadow-[0_0_10px_rgba(59,130,246,0.2)]">
+              {selectedCount}
+            </span>
+            <span className="text-sm text-blue-400/80 font-medium">
+              Lokasyon Videoda Gösterilecek
+            </span>
+          </div>
+        ) : (
+          <span className="text-sm text-muted">
+            Seçim yapın
+          </span>
+        )}
       </div>
-      <div className="space-y-2">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => {
-              if (!item.selected && !canSelectMore) return;
-              onToggleItem(item.id);
-            }}
-            disabled={!item.selected && !canSelectMore}
-            className={`glass rounded-xl p-4 flex items-center gap-4 w-full transition-all duration-200 ${
-              item.selected
-                ? "border-primary/50 bg-primary/5"
-                : "border-white/10 hover:border-white/20"
-            } ${!item.selected && !canSelectMore ? "opacity-50" : ""}`}
-          >
-            <div className={`${item.selected ? "text-primary" : "text-muted"}`}>
-              {typeIcons[item.type] || typeIcons.market}
-            </div>
-            <div className="flex-1 text-left">
-              <p className="text-white font-medium">{item.name}</p>
-              <p className="text-muted text-sm">{typeLabels[item.type]} · {item.distance}</p>
-            </div>
-            <div
-              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                item.selected ? "border-primary bg-primary" : "border-white/30"
-              }`}
+      
+      {sortedItems.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
+            <svg className="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <p className="text-muted text-sm">
+            Bu bölgede uygun çevre bilgisi bulunamadı.
+          </p>
+          <p className="text-muted/60 text-xs mt-1">
+            "Çevre Bilgilerini Getir" butonuna tıklayın.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {sortedItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleToggle(item.id)}
+              disabled={!item.selected && !canSelectMore}
+              className={`
+                relative w-full rounded-xl p-4 flex items-center gap-4 
+                transition-all duration-300 ease-out
+                ${item.selected
+                  ? "bg-blue-500/10 border-2 border-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)] hover:shadow-[0_0_25px_rgba(59,130,246,0.2)] hover:bg-blue-500/15"
+                  : "bg-white/[0.02] border-2 border-white/10 hover:border-white/20 hover:bg-white/[0.04]"
+                }
+                ${!item.selected && !canSelectMore ? "opacity-40 cursor-not-allowed" : "cursor-pointer active:scale-[0.98]"}
+                ${lastSelectedId === item.id ? "scale-[1.02]" : ""}
+              `}
             >
-              {item.selected && (
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-            </div>
-          </button>
-        ))}
-      </div>
+              {/* Category Icon */}
+              <div className={`flex-shrink-0 transition-colors duration-300 ${
+                item.selected ? "text-blue-400" : "text-muted"
+              }`}>
+                {typeIcons[item.type] || typeIcons.market}
+              </div>
+              
+              {/* Content */}
+              <div className="flex-1 text-left min-w-0">
+                <p className={`font-medium transition-colors duration-300 ${
+                  item.selected ? "text-white" : "text-white/80"
+                }`}>
+                  {item.name}
+                </p>
+                <p className="text-muted text-sm flex items-center gap-1.5">
+                  <span>{typeLabels[item.type] || item.type}</span>
+                  <span className="text-white/30">·</span>
+                  <span>{item.distance}</span>
+                </p>
+              </div>
+              
+              {/* Animated Check */}
+              <AnimatedCheck isSelected={item.selected} />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

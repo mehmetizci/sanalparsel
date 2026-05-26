@@ -512,37 +512,33 @@ out body 50;`;
     allPois = generateFallbackPois(latNum, lngNum);
   }
 
-  // Sort POIs: selected first, then by distance, then by category priority
+  // Sort POIs: category priority first, then by distance
   const categoryPriority: Record<string, number> = {
     hospital: 1,
-    school: 2,
-    university: 3,
-    pharmacy: 4,
-    market: 5,
+    transport: 2,
+    market: 3,
+    school: 4,
+    restaurant: 5,
     cafe: 6,
-    restaurant: 7,
-    transport: 8,
+    university: 7,
+    pharmacy: 8,
   };
 
   allPois.sort((a, b) => {
-    // Selected items come first
-    if (a.selected !== b.selected) {
-      return a.selected ? -1 : 1;
-    }
-    // Then by distance
-    if (a.distanceMeters !== b.distanceMeters) {
-      return a.distanceMeters - b.distanceMeters;
-    }
-    // Then by category priority
+    // First by category priority
     const priorityA = categoryPriority[a.category] || 999;
     const priorityB = categoryPriority[b.category] || 999;
-    return priorityA - priorityB;
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+    // Then by distance
+    return a.distanceMeters - b.distanceMeters;
   });
 
   // Limit to max 7 POIs
   const displayPois = allPois.slice(0, 7);
   
-  // Auto-select up to 4 POIs (based on sorted order)
+  // Auto-select up to 4 POIs (based on sorted order - first 4 are highest priority)
   displayPois.forEach((poi, index) => {
     poi.selected = index < 4;
   });

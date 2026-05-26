@@ -56,6 +56,7 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fetchingPoI, setFetchingPoI] = useState(false);
+  const [fetchSuccess, setFetchSuccess] = useState(false);
   const [error, setError] = useState<ErrorInfo | null>(null);
 
   useEffect(() => {
@@ -205,6 +206,10 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
       const displayPois = apiPois.slice(0, 7);
       setItems(displayPois.map((p, i) => poiToEnvironmentItem(p, id, i)));
       
+      // Show success state briefly
+      setFetchSuccess(true);
+      setTimeout(() => setFetchSuccess(false), 2000);
+      
     } catch (err) {
       console.error("[Environment] POI fetch error:", err);
       
@@ -313,10 +318,16 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
           <button
             onClick={handleFetchFromOsm}
             disabled={fetchingPoI}
-            className="px-5 py-2.5 rounded-xl border-2 border-blue-500/50 text-blue-400 
-                       hover:border-blue-400 hover:bg-blue-500/10 transition-all duration-200
-                       flex items-center gap-2 disabled:opacity-50 cursor-pointer
-                       shadow-[0_0_15px_rgba(59,130,246,0.15)] hover:shadow-[0_0_20px_rgba(59,130,246,0.25)]"
+            className={`
+              px-5 py-2.5 rounded-xl border-2 text-blue-400 
+              transition-all duration-300 flex items-center gap-2 cursor-pointer
+              ${fetchingPoI 
+                ? "border-blue-500/30 bg-blue-500/5 opacity-50" 
+                : fetchSuccess
+                  ? "border-green-500/50 bg-green-500/10 shadow-[0_0_15px_rgba(34,197,94,0.2)]"
+                  : "border-blue-500/50 hover:border-blue-400 hover:bg-blue-500/10 shadow-[0_0_15px_rgba(59,130,246,0.15)] hover:shadow-[0_0_20px_rgba(59,130,246,0.25)]"
+              }
+            `}
           >
             {fetchingPoI ? (
               <>
@@ -324,7 +335,14 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Çevre aranıyor...
+                Çevre Bilgileri Aranıyor...
+              </>
+            ) : fetchSuccess ? (
+              <>
+                <svg className="h-4 w-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Çevre Bilgileri Alındı
               </>
             ) : (
               <>
