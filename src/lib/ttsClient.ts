@@ -2,7 +2,8 @@
  * TTS Client
  * 
  * Frontend client for Text-to-Speech generation.
- * Always calls /api/generate-tts endpoint regardless of hosting platform.
+ * Uses VITE_TTS_API_URL environment variable if available,
+ * otherwise falls back to /api/generate-tts (for local/Vercel).
  */
 
 export interface TTSRequest {
@@ -14,6 +15,7 @@ export interface TTSRequest {
 
 export interface TTSResponse {
   audioBlob: Blob;
+  audioUrl: string;
   duration: number;
 }
 
@@ -22,15 +24,29 @@ export interface TTSError {
   details?: string;
 }
 
+// Environment variable for Render backend URL
+const TTS_API_URL = import.meta.env.VITE_TTS_API_URL || "";
+
+// Build endpoint URL - uses env var if set, otherwise relative path
+function getEndpoint(): string {
+  if (TTS_API_URL) {
+    const baseUrl = TTS_API_URL.replace(/\/$/, ""); // Remove trailing slash
+    return `${baseUrl}/generate-tts`;
+  }
+  return "/api/generate-tts";
+}
+
 /**
  * Generate speech using the TTS API
  * 
  * @param request - TTS request options
- * @returns Promise with audio blob and duration
+ * @returns Promise with audio blob, URL, and duration
  * @throws TTSError on failure
  */
 export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
   const { text, voice, rate, pitch } = request;
+  
+  const endpoint = getEndpoint();
 
   // Validate input
   if (!text || text.trim().length === 0) {
@@ -49,9 +65,14 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
   console.log("═══════════════════════════════════════");
   console.log("=== TTS CLIENT - POST REQUEST ===");
   console.log("═══════════════════════════════════════");
-  console.log("Endpoint: /api/generate-tts");
+  console.log("Endpoint:", endpoint);
   console.log("Method: POST");
   console.log("Content-Type: application/json");
+  if (TTS_API_URL) {
+    console.log("Using backend:", TTS_API_URL);
+  } else {
+    console.log("Using local API: /api/generate-tts");
+  }
   console.log("");
   console.log("Text length:", text.length, "chars");
   console.log("Text preview (first 100):", text.substring(0, 100) + (text.length > 100 ? "..." : ""));
@@ -76,7 +97,7 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
     console.log("");
     console.log(">>> SENDING FETCH REQUEST...");
     
-    const response = await fetch("/api/generate-tts", {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -115,93 +136,88 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
       }
 
       console.log("");
+      console.log("=== DEBUG INFO ===");
+      console.log("Endpoint:", endpoint);
+      console.log("HTTP Status:", response.status);
+      console.log("Backend Response:", errorDetails);
+      console.log("Selected Voice:", selectedVoice);
+      console.log("Request Body:", bodyString);
+      console.log("================");
+
+      console.log("");
       console.log("=== THROWING ERROR ===");
       throw {
         error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
-        details: errorDetails,
+        details: `Endpoint: ${endpoint}\nHTTP: ${response.status}\nVoice: ${selectedVoice}\n${errorDetails}`,
       };
     }
 
-    // Get content type
-    const contentType = response.headers.get("Content-Type") || "";
     console.log("");
-    console.log(">>> READING RESPONSE AS BLOB...");
+    console.log(">>> READING RESPONSE...");
     
-    // Always try to read as blob first (for audio responses)
-    const audioBlob = await response.blob();
+    // Parse JSON response (new format)
+    const jsonResponse = await response.json();
     console.log("");
-    console.log("=== BLOB INFO ===");
-    console.log("Blob size:", audioBlob.size, "bytes");
-    console.log("Blob type:", audioBlob.type);
+    console.log("=== JSON RESPONSE ===");
+    console.log("Success:", jsonResponse.success);
+    console.log("Has audioUrl:", !!jsonResponse.audioUrl);
+    console.log("Has audioData:", !!jsonResponse.audioData);
+    console.log("Duration:", jsonResponse.duration);
+    console.log("Voice:", jsonResponse.voice);
     console.log("═══════════════════════════════════════");
 
-    // Check if response is actually audio or JSON error
-    if (contentType.includes("audio") || contentType.includes("mpeg") || audioBlob.type.includes("audio")) {
+    // Check for error in JSON response
+    if (!jsonResponse.success) {
       console.log("");
-      console.log("✓ Response appears to be audio/mpeg");
-      console.log(">>> Creating preview...");
-      
-      // Calculate duration
-      const duration = await getAudioDuration(audioBlob);
-      console.log("");
-      console.log("=== SUCCESS ===");
-      console.log("Audio duration:", duration, "seconds");
+      console.log("!!! JSON RESPONSE INDICATES ERROR !!!");
+      console.log("Error:", jsonResponse.error);
+      console.log("Details:", jsonResponse.details);
       console.log("═══════════════════════════════════════");
-
-      return {
-        audioBlob,
-        duration,
+      
+      throw {
+        error: jsonResponse.error || "Ses oluşturulurken bir hata oluştu.",
+        details: jsonResponse.details || "Unknown error from server",
       };
-    } else {
-      console.log("");
-      console.log("!!! Response NOT audio/mpeg !!!");
-      console.log("Content-Type:", contentType);
-      console.log("Blob type:", audioBlob.type);
-      console.log("");
-      console.log(">>> Trying to read as text...");
-      
-      // Might be JSON error in blob body - try to read as text
-      const textResponse = await audioBlob.text();
-      console.log("");
-      console.log("Raw response (first 500 chars):");
-      console.log(textResponse.substring(0, 500));
-      console.log("═══════════════════════════════════════");
-      
-      // Try to parse as JSON
-      try {
-        const jsonResponse = JSON.parse(textResponse);
-        console.log("");
-        console.log("!!! JSON ERROR RESPONSE !!!");
-        console.log("Parsed JSON:", jsonResponse);
-        throw {
-          error: jsonResponse.error || "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
-          details: jsonResponse.details || "Unknown error from server",
-        };
-      } catch (parseErr) {
-        if (parseErr && typeof parseErr === "object" && "error" in parseErr) {
-          throw parseErr;
-        }
-        
-        // Not JSON - might be test response or other format
-        if (textResponse.includes("ok") || textResponse.includes("success")) {
-          console.log("");
-          console.log("!!! TEST/SUCCESS RESPONSE (not audio) !!!");
-          console.log("This is a test mode response, not actual audio");
-          throw {
-            error: "Test modunda ses oluşturulamadı - gerçek ses üretimi için 'test: true' kaldırın",
-            details: textResponse,
-          };
-        }
-        
-        console.log("");
-        console.log("!!! UNKNOWN RESPONSE FORMAT !!!");
-        console.log("Could not parse response as audio or JSON");
-        throw {
-          error: "Ses oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.",
-          details: `Invalid response format from server. Content-Type: ${contentType}, Blob type: ${audioBlob.type}`,
-        };
-      }
     }
+
+    // Extract audio data
+    let audioBlob: Blob;
+    let audioUrl: string;
+
+    if (jsonResponse.audioUrl) {
+      // Use data URL directly
+      audioUrl = jsonResponse.audioUrl;
+      // Create blob from base64
+      const base64Data = jsonResponse.audioData || jsonResponse.audioUrl.split(",")[1];
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      audioBlob = new Blob([byteArray], { type: "audio/mpeg" });
+    } else {
+      // Fallback: try to get blob from response
+      console.log("");
+      console.log(">>> No audioUrl in response, trying blob...");
+      audioBlob = await response.blob();
+      audioUrl = URL.createObjectURL(audioBlob);
+    }
+
+    console.log("");
+    console.log("=== AUDIO CREATED ===");
+    console.log("Blob size:", audioBlob.size, "bytes");
+    console.log("Blob type:", audioBlob.type);
+    console.log("Audio URL:", audioUrl.substring(0, 50) + "...");
+    console.log("Duration:", jsonResponse.duration || 0, "seconds");
+    console.log("═══════════════════════════════════════");
+
+    return {
+      audioBlob,
+      audioUrl,
+      duration: jsonResponse.duration || 0,
+    };
+
   } catch (err) {
     // Log the error
     console.log("");
@@ -234,42 +250,32 @@ export async function generateTTS(request: TTSRequest): Promise<TTSResponse> {
 }
 
 /**
- * Get audio duration from blob
- */
-function getAudioDuration(blob: Blob): Promise<number> {
-  return new Promise((resolve) => {
-    const audio = new Audio();
-    const url = URL.createObjectURL(blob);
-    audio.src = url;
-    
-    audio.addEventListener("loadedmetadata", () => {
-      URL.revokeObjectURL(url);
-      resolve(audio.duration);
-    });
-    
-    audio.addEventListener("error", () => {
-      URL.revokeObjectURL(url);
-      resolve(0);
-    });
-
-    // Fallback timeout
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-      resolve(0);
-    }, 5000);
-  });
-}
-
-/**
  * Check if TTS service is available
  */
 export async function checkTTSService(): Promise<boolean> {
+  const endpoint = getEndpoint();
+  
   try {
-    const response = await fetch("/api/generate-tts", {
-      method: "HEAD",
+    // Try POST with test mode
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ test: true, text: "test" })
     });
-    return response.ok;
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data.success !== false;
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Get current endpoint URL
+ */
+export function getTTSEndpoint(): string {
+  return getEndpoint();
 }

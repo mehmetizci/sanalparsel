@@ -3,7 +3,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useParcelStore } from "@/lib/parcel-store";
 import { EDGE_VOICE_CONFIGS, type VoiceType } from "@/lib/project-config";
-import { generateTTS } from "@/lib/ttsClient";
+import { generateTTS, getTTSEndpoint } from "@/lib/ttsClient";
+
+// Get backend URL from environment
+const TTS_API_URL = import.meta.env.VITE_TTS_API_URL || "";
 
 interface VoiceSelectorProps {
   narrationText: string;
@@ -84,7 +87,6 @@ export default function VoiceSelector({
   const handleVoiceChange = (type: VoiceType) => {
     const config = EDGE_VOICE_CONFIGS[type];
     setVoiceType(type);
-    // Update edge voice and settings
     useParcelStore.setState((state) => ({
       voiceSettings: {
         ...state.voiceSettings,
@@ -98,7 +100,7 @@ export default function VoiceSelector({
 
   const handlePlay = useCallback(() => {
     if (!audioRef.current || !cachedAudioUrl) return;
-    
+
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
@@ -108,42 +110,73 @@ export default function VoiceSelector({
     }
   }, [isPlaying, cachedAudioUrl]);
 
-  // Test function to verify POST endpoint works
-  const testEndpoint = async (mode: "test" | "fake" | "normal" = "test") => {
+  // Test HEALTH endpoint
+  const testHealth = async () => {
     console.log("═══════════════════════════════════════");
-    console.log(`=== TEST ENDPOINT (${mode.toUpperCase()} MODE) ===`);
+    console.log("=== TEST HEALTH ENDPOINT ===");
     console.log("═══════════════════════════════════════");
-    setDebugInfo(`Test başlatılıyor (${mode})...`);
+    console.log("Backend URL:", TTS_API_URL || "(not set - using local)");
+    console.log("═══════════════════════════════════════");
+    
+    setDebugInfo(`Sağlık kontrolü yapılıyor...\nBackend: ${TTS_API_URL || "localhost"}`);
     
     try {
-      const url = mode === "test" ? "/api/generate-tts" : "/api/generate-tts-test";
-      const body: Record<string, unknown> = mode === "test"
-        ? {
-            text: "Test mesajı",
-            voice: "tr-TR-AhmetNeural",
-            rate: "0%",
-            pitch: "0Hz",
-            test: true
-          }
-        : {
-            text: "Test mesajı",
-            voice: "tr-TR-AhmetNeural",
-            fake: mode === "fake"
-          };
+      if (TTS_API_URL) {
+        const response = await fetch(`${TTS_API_URL}/health`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        });
+        
+        const status = response.status;
+        let body = "";
+        
+        try {
+          body = JSON.stringify(await response.json(), null, 2);
+        } catch {
+          body = await response.text();
+        }
+        
+        const debug = `=== HEALTH CHECK (Render) ===\nURL: ${TTS_API_URL}/health\nStatus: ${status}\n\nResponse:\n${body}\n\n${status === 200 ? "✓ Backend çalışıyor!" : "✗ Backend hatası"}`;
+        
+        console.log(debug);
+        setDebugInfo(debug);
+      } else {
+        setDebugInfo(`Sağlık kontrolü: VITE_TTS_API_URL ayarlanmamış\n\nBackend URL'i .env dosyasına ekleyin:\nVITE_TTS_API_URL=https://sanalparsel.onrender.com`);
+      }
+    } catch (err) {
+      const debug = `=== HEALTH CHECK ERROR ===\n${err instanceof Error ? err.message : String(err)}\n\nBackend: ${TTS_API_URL || "localhost"}\n\nBağlantı başarısız. Backend'in çalıştığından emin olun.`;
+      console.error(debug);
+      setDebugInfo(debug);
+    }
+  };
 
-      console.log("URL:", url);
-      console.log("Body:", JSON.stringify(body));
-      
-      const response = await fetch(url, {
+  // Test TTS endpoint
+  const testTTS = async () => {
+    const endpoint = getTTSEndpoint();
+    
+    console.log("═══════════════════════════════════════");
+    console.log("=== TEST TTS ENDPOINT ===");
+    console.log("═══════════════════════════════════════");
+    console.log("Endpoint:", endpoint);
+    console.log("═══════════════════════════════════════");
+    
+    setDebugInfo(`TTS test başlatılıyor...\nEndpoint: ${endpoint}`);
+    
+    try {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+          text: "Test mesajı",
+          voice: "tr-TR-AhmetNeural",
+          rate: "0%",
+          pitch: "0Hz",
+          test: true
+        })
       });
 
       const status = response.status;
-      const contentType = response.headers.get("Content-Type") || "";
       let bodyText = "";
-      let blobInfo = "";
       
       try {
         const json = await response.json();
@@ -152,47 +185,57 @@ export default function VoiceSelector({
         bodyText = await response.text();
       }
 
-      // Also check if it's a blob
-      if (contentType.includes("audio") || contentType.includes("mpeg")) {
-        const blob = await response.blob();
-        blobInfo = `\nBlob size: ${blob.size} bytes\nBlob type: ${blob.type}`;
-      }
-
-      const debug = `
-═══════════════════════════════════════
-TEST RESPONSE (${mode.toUpperCase()} MODE)
-═══════════════════════════════════════
-URL: ${url}
-Status: ${status}
-Content-Type: ${contentType}
-${blobInfo}
-Body:
-${bodyText.substring(0, 1000)}
-═══════════════════════════════════════`;
+      const debug = `=== TTS TEST ===\nEndpoint: ${endpoint}\nStatus: ${status}\n\nResponse:\n${bodyText.substring(0, 1000)}\n\n${status === 200 ? "✓ TTS endpoint çalışıyor!" : "✗ TTS hatası"}`;
 
       console.log(debug);
       setDebugInfo(debug);
-
-      if (status === 200) {
-        if (mode === "test" && bodyText.includes("ok")) {
-          setDebugInfo(debug + "\n\n✓ TEST MODE başarılı! Endpoint çalışıyor.");
-        } else if (mode === "fake" && blobInfo) {
-          setDebugInfo(debug + "\n\n✓ FAKE AUDIO başarılı! Frontend blob parsing çalışıyor.");
-        } else if (mode === "normal") {
-          setDebugInfo(debug + "\n\n✓ NORMAL endpoint başarılı!");
-        } else {
-          setDebugInfo(debug + "\n\n⚠ Beklenmeyen yanıt formatı");
-        }
-      } else {
-        setDebugInfo(debug + "\n\n✗ Test başarısız! HTTP " + status);
-      }
     } catch (err) {
-      const debug = `═══════════════════════════════════════
-TEST ERROR (${mode.toUpperCase()} MODE)
-═══════════════════════════════════════
-${err instanceof Error ? err.message : String(err)}
-${err instanceof Error ? err.stack : ""}
-═══════════════════════════════════════`;
+      const debug = `=== TTS TEST ERROR ===\nEndpoint: ${endpoint}\n\n${err instanceof Error ? err.message : String(err)}`;
+      console.error(debug);
+      setDebugInfo(debug);
+    }
+  };
+
+  // Full TTS generation test
+  const testFullGeneration = async () => {
+    const endpoint = getTTSEndpoint();
+    
+    console.log("═══════════════════════════════════════");
+    console.log("=== FULL TTS GENERATION TEST ===");
+    console.log("═══════════════════════════════════════");
+    console.log("Endpoint:", endpoint);
+    console.log("═══════════════════════════════════════");
+    
+    setDebugInfo(`Tam TTS testi başlatılıyor...\nEndpoint: ${endpoint}\n\nLütfen bekleyin...`);
+    
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Merhaba, bu bir test seslendirmesidir.",
+          voice: voiceSettings.edgeVoice || "tr-TR-AhmetNeural",
+          rate: voiceSettings.rate || "0%",
+          pitch: voiceSettings.pitch || "0Hz"
+        })
+      });
+
+      const status = response.status;
+      let bodyText = "";
+      
+      try {
+        const json = await response.json();
+        bodyText = JSON.stringify(json, null, 2);
+      } catch {
+        bodyText = await response.text();
+      }
+
+      const debug = `=== FULL TTS TEST ===\nEndpoint: ${endpoint}\nStatus: ${status}\nVoice: ${voiceSettings.edgeVoice}\n\nResponse:\n${bodyText.substring(0, 2000)}\n\n${status === 200 ? "✓ Ses oluşturma başarılı!" : "✗ Ses oluşturma hatası"}`;
+
+      console.log(debug);
+      setDebugInfo(debug);
+    } catch (err) {
+      const debug = `=== FULL TTS TEST ERROR ===\nEndpoint: ${endpoint}\nVoice: ${voiceSettings.edgeVoice}\n\n${err instanceof Error ? err.message : String(err)}`;
       console.error(debug);
       setDebugInfo(debug);
     }
@@ -209,6 +252,7 @@ ${err instanceof Error ? err.stack : ""}
     
     try {
       console.log("[VoiceSelector] Starting TTS generation...");
+      console.log("[VoiceSelector] Endpoint:", getTTSEndpoint());
       
       const result = await generateTTS({
         text: narrationText,
@@ -231,7 +275,18 @@ ${err instanceof Error ? err.stack : ""}
       const errorMessage = err instanceof Error ? err.message : String(err);
       const debugDetails = errObj?.details || errorMessage;
       
-      const fullDebug = `=== DEBUG BILGI ===\n${debugDetails}\n\nSes ayarları:\n- Voice: ${voiceSettings.edgeVoice}\n- Rate: ${voiceSettings.rate}\n- Pitch: ${voiceSettings.pitch}\n=================`;
+      const fullDebug = `=== DEBUG BILGI ===
+Endpoint: ${getTTSEndpoint()}
+
+HTTP: Hata oluştu
+
+Voice: ${voiceSettings.edgeVoice}
+Rate: ${voiceSettings.rate}
+Pitch: ${voiceSettings.pitch}
+
+Hata Detayı:
+${debugDetails}
+=================`;
       
       console.error(fullDebug);
       setDebugInfo(fullDebug);
@@ -332,9 +387,8 @@ ${err instanceof Error ? err.stack : ""}
                     {formatTime(currentTime)} / {formatTime(voiceSettings.audioDuration || duration)}
                   </span>
                 </div>
-                {/* Progress bar */}
                 <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-primary rounded-full transition-all duration-100"
                     style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
                   />
@@ -394,33 +448,32 @@ ${err instanceof Error ? err.stack : ""}
         {/* Debug Test Buttons */}
         <div className="flex gap-2">
           <button
-            onClick={() => testEndpoint("test")}
+            onClick={testHealth}
             className="flex-1 py-2 rounded-xl border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/5 transition-colors text-xs font-medium"
           >
-            🔧 Test Mode
+            🟢 Health
           </button>
           <button
-            onClick={() => testEndpoint("fake")}
+            onClick={testTTS}
             className="flex-1 py-2 rounded-xl border border-blue-500/30 text-blue-400 hover:bg-blue-500/5 transition-colors text-xs font-medium"
           >
-            🔵 Fake Audio
+            🔵 Test TTS
           </button>
           <button
-            onClick={() => testEndpoint("normal")}
+            onClick={testFullGeneration}
             className="flex-1 py-2 rounded-xl border border-green-500/30 text-green-400 hover:bg-green-500/5 transition-colors text-xs font-medium"
           >
-            🟢 Normal
+            🔧 Full Test
           </button>
         </div>
         <p className="text-muted text-xs text-center">
-          Test modları: Test (JSON), Fake (MP3 blob), Normal (test endpoint)
+          Backend: {TTS_API_URL || "localhost (VITE_TTS_API_URL ayarlanmamış)"}
         </p>
       </div>
     </div>
   );
 }
 
-// Simple hash function for narration text
 function hashText(text: string): string {
   let hash = 0;
   for (let i = 0; i < text.length; i++) {

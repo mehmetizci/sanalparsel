@@ -4,15 +4,35 @@
  * Endpoint: /api/generate-tts
  * 
  * Generates speech using Edge TTS.
- * Returns MP3 audio on success, JSON error on failure.
+ * Returns JSON with audioUrl on success, JSON error on failure.
  */
 
-const edgeTtsService = require("../../server/edgeTtsService");
+// Use dynamic import for ES module edge-tts
+let edgeTts = null;
+
+async function initEdgeTts() {
+  if (!edgeTts) {
+    edgeTts = await import("edge-tts");
+  }
+  return edgeTts;
+}
 
 // Max text length to prevent serverless timeout
 const MAX_TEXT_LENGTH = 5000;
 // Test mode max text length
 const TEST_MAX_TEXT_LENGTH = 1200;
+
+// Voice mapping
+const VOICE_MAP = {
+  female: "tr-TR-EmelNeural",
+  male: "tr-TR-AhmetNeural",
+  corporate: "tr-TR-AhmetNeural",
+  "tr-TR-EmelNeural": "tr-TR-EmelNeural",
+  "tr-TR-AhmetNeural": "tr-TR-AhmetNeural",
+  "tr-TR-ZeynepNeural": "tr-TR-ZeynepNeural",
+};
+
+const DEFAULT_VOICE = "tr-TR-AhmetNeural";
 
 module.exports = async function handler(req, res) {
   // Only accept POST
@@ -23,6 +43,7 @@ module.exports = async function handler(req, res) {
     console.log("=================");
     
     return res.status(405).json({
+      success: false,
       error: "Method not allowed",
       details: "Only POST method is supported",
     });
@@ -37,8 +58,8 @@ module.exports = async function handler(req, res) {
     console.log("Text length:", text?.length || 0);
     console.log("Text preview:", (text?.substring(0, 100) || "N/A") + (text?.length > 100 ? "..." : ""));
     console.log("Voice:", voice || "default");
-    console.log("Rate:", rate || "0%");
-    console.log("Pitch:", pitch || "0Hz");
+    console.log("Rate:", rate || "+0%");
+    console.log("Pitch:", pitch || "+0Hz");
     console.log("=================");
 
     // TEST MODE: Return success response without actually generating TTS
@@ -50,19 +71,21 @@ module.exports = async function handler(req, res) {
       // Limit text length for test mode
       if (text && text.length > TEST_MAX_TEXT_LENGTH) {
         return res.status(400).json({
+          success: false,
           error: "Text too long for serverless TTS test. Please shorten narration.",
           details: `Text is ${text.length} chars, max is ${TEST_MAX_TEXT_LENGTH} chars for test mode.`,
         });
       }
       
       return res.status(200).json({
+        success: true,
         ok: true,
         message: "POST endpoint works",
         received: {
           textLength: text?.length || 0,
-          voice: voice || "default",
-          rate: rate || "0%",
-          pitch: pitch || "0Hz",
+          voice: voice || DEFAULT_VOICE,
+          rate: rate || "+0%",
+          pitch: pitch || "+0Hz",
         },
       });
     }
@@ -74,7 +97,8 @@ module.exports = async function handler(req, res) {
       console.log("======================");
       
       return res.status(400).json({
-        error: "Missing text or voice",
+        success: false,
+        error: "Missing text",
         details: "text is required",
       });
     }
@@ -85,41 +109,54 @@ module.exports = async function handler(req, res) {
       console.log("======================");
       
       return res.status(400).json({
-        error: "Missing text or voice",
+        success: false,
+        error: "Text too long",
         details: `text exceeds maximum length of ${MAX_TEXT_LENGTH} characters`,
       });
     }
 
+    // Get voice
+    let selectedVoice = DEFAULT_VOICE;
+    if (voice) {
+      selectedVoice = VOICE_MAP[voice] || (voice.startsWith("tr-TR") ? voice : DEFAULT_VOICE);
+    }
+
     console.log("=== EDGE TTS START ===");
     console.log("Generating speech...");
+    console.log("Voice:", selectedVoice);
     console.log("=====================");
 
-    // Generate speech
-    const result = await edgeTtsService.generateSpeech({
-      text,
-      voice: voice || edgeTtsService.DEFAULT_VOICE,
+    // Generate speech - dynamic import
+    const edgeTtsModule = await initEdgeTts();
+    const tts = edgeTtsModule.default || edgeTtsModule.tts || edgeTtsModule;
+    
+    const audioBuffer = await tts(text, {
+      voice: selectedVoice,
       rate: rate || "+0%",
       pitch: pitch || "+0Hz",
+      format: "audio-24khz-96kbitrate-mono-mp3"
     });
 
     console.log("=== EDGE TTS SUCCESS ===");
-    console.log("Audio buffer size:", result.audio.length, "bytes");
-    console.log("Voice used:", result.voice);
-    console.log("Duration:", result.duration, "seconds");
+    console.log("Audio buffer size:", audioBuffer.length, "bytes");
+    console.log("Voice used:", selectedVoice);
     console.log("========================");
 
-    // Convert Buffer to Uint8Array for response
-    const uint8Array = new Uint8Array(
-      result.audio.buffer,
-      result.audio.byteOffset,
-      result.audio.byteLength
-    );
+    // Calculate duration estimate
+    const duration = Math.ceil(text.length / 150);
 
-    // Set response headers
-    res.setHeader("Content-Type", "audio/mpeg");
-    res.setHeader("Cache-Control", "no-store");
+    // Return JSON with audio data
+    const audioBase64 = audioBuffer.toString("base64");
 
-    return res.send(uint8Array);
+    return res.status(200).json({
+      success: true,
+      audioUrl: `data:audio/mpeg;base64,${audioBase64}`,
+      audioData: audioBase64,
+      duration: duration,
+      voice: selectedVoice,
+      textLength: text.length
+    });
+
   } catch (error) {
     console.log("=== EDGE TTS ERROR ===");
     console.log("Error message:", error.message);
@@ -127,6 +164,7 @@ module.exports = async function handler(req, res) {
     console.log("====================");
 
     return res.status(500).json({
+      success: false,
       error: "TTS generation failed",
       details: error.message,
       stack: process.env.NODE_ENV === "development" ? error.stack : undefined,

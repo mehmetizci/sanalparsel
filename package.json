@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "server": "node --experimental-strip-types server/index.js",
+    "dev:server": "node --experimental-strip-types server/index.js"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
@@ -15,6 +17,8 @@
     "@supabase/supabase-js": "^2.106.1",
     "autoprefixer": "^10.4.21",
     "edge-tts": "^1.0.1",
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
     "mapbox-gl": "^3.24.0",
     "maplibre-gl": "^4.1.0",
     "next": "14.2.35",

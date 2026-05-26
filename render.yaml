@@ -1,0 +1,33 @@
+# Render Blueprint - TTS Backend
+# Deploy with: render-blueprint https://github.com/your-org/sanalparsel
+
+services:
+  - type: web
+    name: sanalparsel-tts-backend
+    env: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+
+  # Optional: Main frontend (if deploying to Render)
+  # - type: web
+  #   name: sanalparsel-frontend
+  #   env: node
+  #   region: frankfurt
+  #   plan: free
+  #   buildCommand: npm run build
+  #   startCommand: npm start
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: VITE_TTS_API_URL
+  #       fromService:
+  #         name: sanalparsel-tts-backend
+  #         envVarKey: RENDER_EXTERNAL_URL
