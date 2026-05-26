@@ -22,6 +22,7 @@ import StepHeader from "@/components/StepHeader";
 import PoiSelectionCard from "@/components/PoiSelectionCard";
 import PrimaryButton from "@/components/PrimaryButton";
 import GlassCard from "@/components/GlassCard";
+import LoadingRenderState from "@/components/LoadingRenderState";
 
 type ErrorType = "MISSING_COORDS" | "TIMEOUT" | "OVERPASS_ERROR" | "NETWORK_ERROR" | "UNKNOWN";
 
@@ -72,6 +73,9 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
   const projectId = (urlParams?.id as string) || params.id;
   const isDemo = searchParams.get("demo") === "true";
   
+  // Mounted guard to prevent SSR/hydration issues
+  const [mounted, setMounted] = useState(false);
+  
   // Project config
   const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
   const [nearbyConfig, setNearbyConfig] = useState<NearbyPlacesConfig>({
@@ -80,7 +84,7 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
     parcelKey: null,
   });
   
-  // Global store for POI
+  // Global store for POI - only access after mounted
   const parcelCenter = useParcelStore((state) => state.parcelCenter);
   const globalPois = useParcelStore((state) => state.pois);
   const nearbyParcelKey = useParcelStore((state) => state.nearbyParcelKey);
@@ -96,8 +100,15 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
   const [error, setError] = useState<ErrorInfo | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Load config from localStorage
+  // Set mounted guard
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Load config from localStorage (only after mounted)
+  useEffect(() => {
+    if (!mounted) return;
+    
     const loadConfig = () => {
       const stored = loadProjectConfig(projectId);
       if (stored) {
@@ -113,7 +124,7 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
       }
     };
     loadConfig();
-  }, [projectId]);
+  }, [projectId, mounted]);
 
   // Fetch project from Supabase
   useEffect(() => {
@@ -412,12 +423,10 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
     }
   };
 
-  if (loading) {
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Sayfa hazırlanıyor..." />
       </AppShell>
     );
   }

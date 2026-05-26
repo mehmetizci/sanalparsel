@@ -1,10 +1,17 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
 import type { VoiceType } from "./project-config";
 import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from "./project-config";
+
+// Mounted guard to prevent SSR/localStorage conflicts
+let isMounted = false;
+if (typeof window !== "undefined") {
+  isMounted = true;
+}
 
 export interface ParcelMetadata {
   Il?: string;
@@ -420,6 +427,12 @@ export const useParcelStore = create<ParcelState>()(
     }),
     {
       name: "sanalparsel-parcel", // localStorage key
+      // Only persist when mounted to prevent SSR conflicts
+      skipHydration: true,
+      onRehydrateStorage: () => () => {
+        // Mark as mounted after rehydration
+        isMounted = true;
+      },
       partialize: (state) => ({
         uploadedGeoJson: state.uploadedGeoJson,
         parcelMetadata: state.parcelMetadata,
@@ -448,3 +461,19 @@ export const useParcelStore = create<ParcelState>()(
     }
   )
 );
+
+// Export helper to check if store is ready
+export function isParcelStoreMounted(): boolean {
+  return isMounted;
+}
+
+// Custom hook to safely use parcel store
+export function useParcelStoreReady() {
+  const [mounted, setMounted] = useState(false);
+  
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  
+  return mounted;
+}

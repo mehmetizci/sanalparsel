@@ -21,6 +21,7 @@ import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import VideoSettingToggle from "@/components/VideoSettingToggle";
 import PrimaryButton from "@/components/PrimaryButton";
+import LoadingRenderState from "@/components/LoadingRenderState";
 
 interface VideoSettingsPageProps {
   params: { id: string };
@@ -29,6 +30,9 @@ interface VideoSettingsPageProps {
 export default function VideoSettingsPage({ params }: VideoSettingsPageProps) {
   const { id: projectId } = params;
   const router = useRouter();
+  
+  // Mounted guard to prevent SSR/hydration issues
+  const [mounted, setMounted] = useState(false);
   
   const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
   const [videoSettings, setVideoSettings] = useState<VideoConfig>({
@@ -49,8 +53,15 @@ export default function VideoSettingsPage({ params }: VideoSettingsPageProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Load config from localStorage or create new
+  // Set mounted guard
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Load config from localStorage or create new (only after mounted)
+  useEffect(() => {
+    if (!mounted) return;
+    
     const loadConfig = () => {
       const stored = loadProjectConfig(projectId);
       if (stored) {
@@ -62,7 +73,7 @@ export default function VideoSettingsPage({ params }: VideoSettingsPageProps) {
       }
     };
     loadConfig();
-  }, [projectId]);
+  }, [projectId, mounted]);
 
   // Fetch project from Supabase
   useEffect(() => {
@@ -163,12 +174,10 @@ export default function VideoSettingsPage({ params }: VideoSettingsPageProps) {
     }
   };
 
-  if (loading) {
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Sayfa hazırlanıyor..." />
       </AppShell>
     );
   }

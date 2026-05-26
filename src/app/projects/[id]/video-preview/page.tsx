@@ -27,6 +27,9 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const { id: projectId } = params;
   const router = useRouter();
   
+  // Mounted guard to prevent SSR/hydration issues
+  const [mounted, setMounted] = useState(false);
+  
   // Voice settings from parcel store - with safe defaults
   const voiceSettings = useParcelStore((state) => state.voiceSettings) || {
     selectedVoice: "male",
@@ -55,8 +58,15 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
-  // Load project config from localStorage
+  // Set mounted guard
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Load project config from localStorage (only after mounted)
+  useEffect(() => {
+    if (!mounted) return;
+    
     const loadConfig = () => {
       try {
         const stored = loadProjectConfig(projectId);
@@ -76,7 +86,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       setProjectConfigLoaded(true);
     };
     loadConfig();
-  }, [projectId]);
+  }, [projectId, mounted]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -230,12 +240,10 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     }
   };
 
-  if (loading) {
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Sayfa hazırlanıyor..." />
       </AppShell>
     );
   }
@@ -255,7 +263,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
               </svg>
               <h3 className="text-yellow-400 font-bold text-lg mb-2">Proje Verisi Bulunamadı</h3>
               <p className="text-yellow-200/80 text-sm mb-6">
-                Lütfen proje adımlarına geri dönün ve tekrar deneyin.
+                Proje verisi bulunamadı. Lütfen proje adımlarına geri dönün.
               </p>
               <button
                 onClick={() => router.push("/dashboard")}

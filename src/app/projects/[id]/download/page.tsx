@@ -9,6 +9,7 @@ import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
+import LoadingRenderState from "@/components/LoadingRenderState";
 
 interface DownloadPageProps {
   params: { id: string };
@@ -19,6 +20,9 @@ export default function DownloadPage({ params }: DownloadPageProps) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   
+  // Mounted guard to prevent SSR/hydration issues
+  const [mounted, setMounted] = useState(false);
+  
   const [project, setProject] = useState<Project | null>(null);
   const [video, setVideo] = useState<Video | null>(null);
   const [credits, setCredits] = useState(0);
@@ -26,6 +30,11 @@ export default function DownloadPage({ params }: DownloadPageProps) {
   const [downloading, setDownloading] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // Set mounted guard
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -86,14 +95,16 @@ export default function DownloadPage({ params }: DownloadPageProps) {
     };
   }, [videoUrl]);
 
-  // Load video from project data or localStorage
+  // Load video from project data or localStorage (only after mounted)
   useEffect(() => {
+    if (!mounted) return;
+    
     // Check localStorage for rendered video
     const localVideoUrl = localStorage.getItem(`video_${id}`);
     if (localVideoUrl) {
       setVideoUrl(localVideoUrl);
     }
-  }, [id]);
+  }, [id, mounted]);
 
   const handleDownload = async () => {
     if (credits < 1 && video?.status !== "completed") {
@@ -151,12 +162,10 @@ export default function DownloadPage({ params }: DownloadPageProps) {
     }
   };
 
-  if (loading) {
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Sayfa hazırlanıyor..." />
       </AppShell>
     );
   }

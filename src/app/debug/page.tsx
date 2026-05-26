@@ -11,11 +11,14 @@ export default function DebugPage() {
   let currentUrl = "Unknown";
   let userAgent = "Unknown";
   let allKeys: string[] = [];
+  let sentryEventId = "No Sentry event stored";
+  let appVersion = "Unknown";
 
   if (typeof window !== "undefined") {
     currentUrl = window.location.href;
     userAgent = navigator.userAgent;
     allKeys = Object.keys(localStorage);
+    appVersion = window.__NEXT_DATA__?.buildId?.substring(0, 8) || "dev";
 
     try {
       const errorData = localStorage.getItem("sanalparsel_last_error");
@@ -55,6 +58,16 @@ export default function DebugPage() {
     } catch {
       parcelState = "Error reading parcel state";
     }
+
+    // Get Sentry event ID
+    try {
+      const sentryId = localStorage.getItem("sanalparsel_last_sentry_event");
+      if (sentryId) {
+        sentryEventId = sentryId;
+      }
+    } catch {
+      sentryEventId = "Error reading Sentry event ID";
+    }
   }
 
   return (
@@ -76,8 +89,23 @@ export default function DebugPage() {
         <div style={{ background: "#111827", padding: "10px", borderRadius: "8px" }}>
           <p><strong style={{ color: "#9ca3af" }}>URL:</strong> {currentUrl}</p>
           <p><strong style={{ color: "#9ca3af" }}>User Agent:</strong> {userAgent}</p>
+          <p><strong style={{ color: "#9ca3af" }}>Build ID:</strong> {appVersion}</p>
         </div>
       </div>
+
+      {sentryEventId !== "No Sentry event stored" && (
+        <div style={{ marginBottom: "20px" }}>
+          <h2 style={{ fontSize: "16px", color: "#a855f7", marginBottom: "10px" }}>
+            Sentry Event ID
+          </h2>
+          <div style={{ background: "#111827", padding: "10px", borderRadius: "8px" }}>
+            <code style={{ color: "#a855f7", fontSize: "14px" }}>{sentryEventId}</code>
+            <p style={{ color: "#9ca3af", fontSize: "12px", marginTop: "8px" }}>
+              Bu ID ile Sentry dashboard&apos;da hata detaylarini gorebilirsiniz.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div style={{ marginBottom: "20px" }}>
         <h2 style={{ fontSize: "16px", color: "#ef4444", marginBottom: "10px" }}>

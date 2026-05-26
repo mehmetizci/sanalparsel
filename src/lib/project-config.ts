@@ -604,6 +604,291 @@ export function hasAnyProjectConfig(): boolean {
   }
 }
 
+// ─── Smart Config Loading ────────────────────────────────────────────────────
+
+/**
+ * Get the wizard step for a project based on what data exists
+ */
+export function getProjectWizardStep(projectId: string): string {
+  if (typeof window === "undefined") return `/projects/${projectId}/parcel-info`;
+  
+  try {
+    const configs = getAllProjectConfigs();
+    const config = configs[projectId];
+    
+    if (!config) {
+      return `/projects/${projectId}/parcel-info`;
+    }
+    
+    // Check what data exists and return appropriate step
+    if (config.nearbyPlaces?.places && config.nearbyPlaces.places.length > 0) {
+      return `/projects/${projectId}/narration`;
+    }
+    
+    if (config.droneSettings) {
+      return `/projects/${projectId}/video-settings`;
+    }
+    
+    return `/projects/${projectId}/parcel-info`;
+  } catch {
+    return `/projects/${projectId}/parcel-info`;
+  }
+}
+
+/**
+ * Load and normalize project config from localStorage.
+ * Handles various data formats:
+ * - Array of projects
+ * - Object map of projects  
+ * - Single project object
+ * 
+ * Returns the most recently updated project if multiple exist,
+ * or the only project if there's just one.
+ */
+export function loadCurrentProjectConfig(): ProjectConfig | null {
+  if (typeof window === "undefined") return null;
+  
+  try {
+    const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
+    if (!raw) return null;
+    
+    // Handle different data formats
+    const parsed = JSON.parse(raw);
+    
+    // Case 1: Array of projects
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) return null;
+      
+      // Find most recently updated
+      let mostRecent = parsed[0];
+      let mostRecentTime = mostRecent?.updatedAt || 0;
+      
+      for (const item of parsed) {
+        const updatedTime = item?.updatedAt || 0;
+        if (updatedTime > mostRecentTime) {
+          mostRecent = item;
+          mostRecentTime = updatedTime;
+        }
+      }
+      
+      return normalizeProjectConfig(mostRecent);
+    }
+    
+    // Case 2: Object map (normal case)
+    if (typeof parsed === "object" && parsed !== null) {
+      const keys = Object.keys(parsed);
+      
+      if (keys.length === 0) return null;
+      
+      // Find most recently updated
+      let mostRecentId = keys[0];
+      let mostRecentTime = parsed[mostRecentId]?.updatedAt || 0;
+      
+      for (const key of keys) {
+        const updatedTime = parsed[key]?.updatedAt || 0;
+        if (updatedTime > mostRecentTime) {
+          mostRecentId = key;
+          mostRecentTime = updatedTime;
+        }
+      }
+      
+      return normalizeProjectConfig(parsed[mostRecentId]);
+    }
+    
+    // Case 3: Single object (legacy format)
+    if (typeof parsed === "object" && parsed !== null && parsed.projectId) {
+      return normalizeProjectConfig(parsed);
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Failed to load current project config:", error);
+    return null;
+  }
+}
+
+/**
+ * Normalize and validate a project config, filling safe defaults for missing fields.
+ */
+export function normalizeProjectConfig(config: unknown): ProjectConfig | null {
+  if (!config || typeof config !== "object") return null;
+  
+  const c = config as Record<string, unknown>;
+  
+  // Must have projectId
+  if (!c.projectId || typeof c.projectId !== "string") {
+    return null;
+  }
+  
+  // Check for required settings
+  const hasDroneSettings = c.droneSettings && typeof c.droneSettings === "object";
+  const hasVideoSettings = c.videoSettings && typeof c.videoSettings === "object";
+  
+  // If critical data is missing, return null
+  if (!hasDroneSettings && !hasVideoSettings) {
+    // This is probably an incomplete config, return null
+    return null;
+  }
+  
+  // Build normalized config with safe defaults
+  return {
+    projectId: c.projectId as string,
+    droneSettings: normalizeDroneConfig(c.droneSettings),
+    videoSettings: normalizeVideoConfig(c.videoSettings),
+    nearbyPlaces: normalizeNearbyPlacesConfig(c.nearbyPlaces),
+    aiNarration: normalizeAiNarrationConfig(c.aiNarration),
+    voiceSettings: normalizeVoiceSettings(c.voiceSettings),
+    createdAt: typeof c.createdAt === "number" ? c.createdAt : Date.now(),
+    updatedAt: typeof c.updatedAt === "number" ? c.updatedAt : Date.now(),
+  };
+}
+
+/**
+ * Normalize drone config with safe defaults
+ */
+function normalizeDroneConfig(config: unknown): DroneConfig {
+  if (!config || typeof config !== "object") {
+    return { ...DEFAULT_DRONE_CONFIG };
+  }
+  
+  const c = config as Record<string, unknown>;
+  
+  return {
+    duration: [30, 45, 60].includes(c.duration as number) 
+      ? c.duration as 30 | 45 | 60 
+      : DEFAULT_DRONE_CONFIG.duration,
+    startHeight: [100, 200, 300, 400].includes(c.startHeight as number) 
+      ? c.startHeight as 100 | 200 | 300 | 400 
+      : DEFAULT_DRONE_CONFIG.startHeight,
+    cameraFeel: ["smooth", "cinematic", "dynamic"].includes(c.cameraFeel as string) 
+      ? c.cameraFeel as "smooth" | "cinematic" | "dynamic" 
+      : DEFAULT_DRONE_CONFIG.cameraFeel,
+    cameraModes: Array.isArray(c.cameraModes) && c.cameraModes.length > 0
+      ? c.cameraModes as CameraMode[]
+      : DEFAULT_DRONE_CONFIG.cameraModes,
+  };
+}
+
+/**
+ * Normalize video config with safe defaults
+ */
+function normalizeVideoConfig(config: unknown): VideoConfig {
+  if (!config || typeof config !== "object") {
+    return { ...DEFAULT_VIDEO_CONFIG };
+  }
+  
+  const c = config as Record<string, unknown>;
+  
+  return {
+    format: ["reels", "landscape"].includes(c.format as string) 
+      ? c.format as "reels" | "landscape" 
+      : DEFAULT_VIDEO_CONFIG.format,
+    resolution: normalizeResolution(c.resolution),
+    overlays: normalizeOverlayConfig(c.overlays),
+  };
+}
+
+/**
+ * Normalize resolution with safe defaults
+ */
+function normalizeResolution(config: unknown): Resolution {
+  if (!config || typeof config !== "object") {
+    return FORMAT_RESOLUTIONS.reels;
+  }
+  
+  const c = config as Record<string, unknown>;
+  const width = typeof c.width === "number" && c.width > 0 ? c.width : FORMAT_RESOLUTIONS.reels.width;
+  const height = typeof c.height === "number" && c.height > 0 ? c.height : FORMAT_RESOLUTIONS.reels.height;
+  
+  return { width, height };
+}
+
+/**
+ * Normalize overlay config with safe defaults
+ */
+function normalizeOverlayConfig(config: unknown): OverlayConfig {
+  if (!config || typeof config !== "object") {
+    return { ...DEFAULT_OVERLAY_CONFIG };
+  }
+  
+  const c = config as Record<string, unknown>;
+  
+  return {
+    consultantName: typeof c.consultantName === "boolean" ? c.consultantName : DEFAULT_OVERLAY_CONFIG.consultantName,
+    phone: typeof c.phone === "boolean" ? c.phone : DEFAULT_OVERLAY_CONFIG.phone,
+    logo: typeof c.logo === "boolean" ? c.logo : DEFAULT_OVERLAY_CONFIG.logo,
+    profilePhoto: typeof c.profilePhoto === "boolean" ? c.profilePhoto : DEFAULT_OVERLAY_CONFIG.profilePhoto,
+    parcelInfo: typeof c.parcelInfo === "boolean" ? c.parcelInfo : DEFAULT_OVERLAY_CONFIG.parcelInfo,
+    nearbyPlaces: typeof c.nearbyPlaces === "boolean" ? c.nearbyPlaces : DEFAULT_OVERLAY_CONFIG.nearbyPlaces,
+    subtitles: typeof c.subtitles === "boolean" ? c.subtitles : DEFAULT_OVERLAY_CONFIG.subtitles,
+    finalContactCard: typeof c.finalContactCard === "boolean" ? c.finalContactCard : DEFAULT_OVERLAY_CONFIG.finalContactCard,
+  };
+}
+
+/**
+ * Normalize nearby places config with safe defaults
+ */
+function normalizeNearbyPlacesConfig(config: unknown): NearbyPlacesConfig {
+  if (!config || typeof config !== "object") {
+    return { ...DEFAULT_NEARBY_PLACES_CONFIG };
+  }
+  
+  const c = config as Record<string, unknown>;
+  
+  return {
+    places: Array.isArray(c.places) ? c.places : [],
+    lastFetchedAt: typeof c.lastFetchedAt === "number" ? c.lastFetchedAt : null,
+    parcelKey: typeof c.parcelKey === "string" ? c.parcelKey : null,
+  };
+}
+
+/**
+ * Normalize AI narration config with safe defaults
+ */
+function normalizeAiNarrationConfig(config: unknown): AiNarrationConfig {
+  if (!config || typeof config !== "object") {
+    return { ...DEFAULT_NARRATION_CONFIG };
+  }
+  
+  const c = config as Record<string, unknown>;
+  const validModes: NarrationMode[] = ["corporate", "investment", "social", "short", "premium"];
+  
+  return {
+    mode: validModes.includes(c.mode as NarrationMode) 
+      ? c.mode as NarrationMode 
+      : DEFAULT_NARRATION_CONFIG.mode,
+    text: typeof c.text === "string" ? c.text : "",
+    lastGeneratedAt: typeof c.lastGeneratedAt === "number" ? c.lastGeneratedAt : null,
+  };
+}
+
+/**
+ * Normalize voice settings with safe defaults
+ */
+function normalizeVoiceSettings(config: unknown): VoiceSettings {
+  if (!config || typeof config !== "object") {
+    return { ...DEFAULT_VOICE_SETTINGS };
+  }
+  
+  const c = config as Record<string, unknown>;
+  const validVoiceTypes: VoiceType[] = ["female", "male", "corporate"];
+  
+  return {
+    selectedVoice: validVoiceTypes.includes(c.selectedVoice as VoiceType) 
+      ? c.selectedVoice as VoiceType 
+      : DEFAULT_VOICE_SETTINGS.selectedVoice,
+    provider: "edge-tts",
+    edgeVoice: typeof c.edgeVoice === "string" ? c.edgeVoice : DEFAULT_VOICE_SETTINGS.edgeVoice,
+    rate: typeof c.rate === "string" ? c.rate : DEFAULT_VOICE_SETTINGS.rate,
+    pitch: typeof c.pitch === "string" ? c.pitch : DEFAULT_VOICE_SETTINGS.pitch,
+    generatedAudioUrl: c.generatedAudioUrl === null || typeof c.generatedAudioUrl === "string" 
+      ? c.generatedAudioUrl 
+      : null,
+    generatedAudioBlob: null, // Blobs can't be serialized
+    audioDuration: typeof c.audioDuration === "number" ? c.audioDuration : 0,
+  };
+}
+
 /**
  * Migrate legacy settings to new config format
  */

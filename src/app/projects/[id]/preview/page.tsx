@@ -9,6 +9,7 @@ import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PrimaryButton from "@/components/PrimaryButton";
 import { useParcelStore } from "@/lib/parcel-store";
+import LoadingRenderState from "@/components/LoadingRenderState";
 
 // Lazy-load MapboxMap so this route stays light, mobile-fast and SSR-safe.
 const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
@@ -28,12 +29,20 @@ function PreviewPageInner() {
   const isDemo = searchParams.get("demo") === "true";
   const demoTitle = searchParams.get("title") || "Yeni Proje";
 
+  // Mounted guard
+  const [mounted, setMounted] = useState(false);
+
   // Zustand store
   const uploadedGeoJson = useParcelStore((state) => state.uploadedGeoJson);
   const setParcelData = useParcelStore((state) => state.setParcelData);
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Set mounted guard
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (isDemo) {
@@ -139,12 +148,10 @@ function PreviewPageInner() {
     });
   }, [id, router, isDemo, demoTitle, uploadedGeoJson, setParcelData]);
 
-  if (loading) {
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Sayfa hazırlanıyor..." />
       </AppShell>
     );
   }
