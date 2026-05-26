@@ -178,7 +178,7 @@ export default function PoiSelectionCard({ items, onToggleItem, maxSelections = 
             Bu bölgede uygun çevre bilgisi bulunamadı.
           </p>
           <p className="text-muted/60 text-xs mt-1">
-            "Çevre Bilgilerini Getir" butonuna tıklayın.
+            &ldquo;Çevre Bilgilerini Getir&rdquo; butonuna tıklayın.
           </p>
         </div>
       ) : (
