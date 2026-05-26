@@ -161,7 +161,7 @@ function ParcelInfoPageInner() {
         `/projects/${id}/parcel-info?demo=true&title=${encodeURIComponent(demoTitle)}`
       );
     });
-  }, [id, router, isDemo, demoTitle]);
+  }, [id, router, isDemo, demoTitle, setParcelData]);
 
   const handleSaveAndContinue = () => {
     if (!project) return;

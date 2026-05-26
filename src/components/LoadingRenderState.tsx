@@ -2,10 +2,6 @@
 
 import { useAppLoadingStore, shouldShowVideoOverlay } from "@/lib/loading-states";
 
-interface VideoPreparingOverlayProps {
-  videoRenderState: "idle" | "preparing" | "recording" | "uploading" | "generating_audio" | "merging" | "completed" | "error";
-}
-
 const statusLabels: Record<string, { label: string; description: string }> = {
   preparing: { label: "Video Hazırlanıyor", description: "Video oluşturuluyor, lütfen bekleyin..." },
   map_init: { label: "Harita Hazırlanıyor", description: "Uydu görüntüsü yükleniyor..." },
