@@ -6,6 +6,32 @@
  * otherwise falls back to /api/generate-tts (for local/Vercel).
  */
 
+// Safe environment variable access - handles undefined gracefully
+function getEnvVar(key: string, fallback: string = ""): string {
+  try {
+    // Use optional chaining to safely access env
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = import.meta.env as any;
+    const value = env?.[key];
+    return typeof value === "string" ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// Environment variable for Render backend URL
+const TTS_API_URL = getEnvVar("VITE_TTS_API_URL", "");
+
+// Build endpoint URL - uses env var if set, otherwise relative path
+function getEndpoint(): string {
+  if (TTS_API_URL) {
+    const baseUrl = TTS_API_URL.replace(/\/$/, ""); // Remove trailing slash
+    return `${baseUrl}/generate-tts`;
+  }
+  return "/api/generate-tts";
+}
+
+// Types
 export interface TTSRequest {
   text: string;
   voice?: string;
@@ -22,18 +48,6 @@ export interface TTSResponse {
 export interface TTSError {
   error: string;
   details?: string;
-}
-
-// Environment variable for Render backend URL
-const TTS_API_URL = import.meta.env.VITE_TTS_API_URL || "";
-
-// Build endpoint URL - uses env var if set, otherwise relative path
-function getEndpoint(): string {
-  if (TTS_API_URL) {
-    const baseUrl = TTS_API_URL.replace(/\/$/, ""); // Remove trailing slash
-    return `${baseUrl}/generate-tts`;
-  }
-  return "/api/generate-tts";
 }
 
 /**

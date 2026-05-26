@@ -11,6 +11,7 @@ import GlassCard from "@/components/GlassCard";
 import VoiceSelector from "@/components/VoiceSelector";
 import LoadingRenderState from "@/components/LoadingRenderState";
 import PrimaryButton from "@/components/PrimaryButton";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 interface ValidationError {
   field: string;
@@ -21,9 +22,18 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const { id: projectId } = params;
   const router = useRouter();
   
-  // Voice settings from parcel store
-  const voiceSettings = useParcelStore((state) => state.voiceSettings);
-  const cachedAudioUrl = useParcelStore((state) => state.cachedAudioUrl);
+  // Voice settings from parcel store - with safe defaults
+  const voiceSettings = useParcelStore((state) => state.voiceSettings) || {
+    selectedVoice: "male",
+    provider: "edge-tts" as const,
+    edgeVoice: "tr-TR-AhmetNeural",
+    rate: "0%",
+    pitch: "0Hz",
+    generatedAudioUrl: null,
+    generatedAudioBlob: null,
+    audioDuration: 0,
+  };
+  const cachedAudioUrl = useParcelStore((state) => state.cachedAudioUrl) || null;
   
   const [project, setProject] = useState<Project | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
@@ -271,16 +281,34 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           <LoadingRenderState status={videoStatus as "preparing" | "audio_creating" | "rendering" | "finalizing" | "completed"} progress={videoStatus === "rendering" ? 50 : 20} />
         ) : (
           <>
-            <GlassCard className="mb-4">
-              <VoiceSelector
-                narrationText={narrationText}
-                disabled={generatingVoice}
-                isGenerating={generatingVoice}
-                onGenerateStart={handleGenerateVoiceStart}
-                onGenerateComplete={handleGenerateVoiceComplete}
-                onGenerateError={handleGenerateVoiceError}
-              />
-            </GlassCard>
+            <ErrorBoundary
+              fallback={
+                <GlassCard className="mb-4 border-red-500/30 bg-red-500/5">
+                  <div className="flex items-start gap-3">
+                    <svg className="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="flex-1">
+                      <h3 className="text-red-400 font-medium">Seslendirme ekranı yüklenirken hata oluştu</h3>
+                      <p className="text-red-300 text-sm mt-1">
+                        Ses oluşturma özelliği şu anda kullanılamıyor. Lütfen sayfayı yenileyin.
+                      </p>
+                    </div>
+                  </div>
+                </GlassCard>
+              }
+            >
+              <GlassCard className="mb-4">
+                <VoiceSelector
+                  narrationText={narrationText}
+                  disabled={generatingVoice}
+                  isGenerating={generatingVoice}
+                  onGenerateStart={handleGenerateVoiceStart}
+                  onGenerateComplete={handleGenerateVoiceComplete}
+                  onGenerateError={handleGenerateVoiceError}
+                />
+              </GlassCard>
+            </ErrorBoundary>
 
             {hasGeneratedAudio && (
               <GlassCard className="mb-4">
