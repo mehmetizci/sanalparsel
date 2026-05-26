@@ -175,7 +175,7 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
 
   return (
     <AppShell>
-      <div className="px-4 py-5 max-w-2xl mx-auto pb-32">
+      <div className="px-4 py-5 max-w-2xl mx-auto">
         <StepHeader
           step={6}
           totalSteps={10}
@@ -319,44 +319,40 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
         </AnimatePresence>
 
         {/* Navigation Buttons */}
-        <div className="mt-4 flex gap-3">
+        <div className="mt-6 flex gap-3">
           <button
             onClick={() => router.push(`/projects/${id}/environment`)}
-            className="px-5 py-2.5 rounded-xl border border-white/[0.1] text-white/60 text-sm hover:bg-white/[0.05] hover:text-white transition-all"
+            className="flex-1 py-3 rounded-xl border border-white/[0.1] text-white/70 text-sm hover:bg-white/[0.05] transition-all font-medium"
           >
-            ← Geri
+            Geri
+          </button>
+          <button
+            onClick={handleSaveAndContinue}
+            disabled={!narration.text}
+            className={`
+              flex-1 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all
+              ${narration.text 
+                ? "bg-gradient-to-r from-primary to-blue-500 text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30" 
+                : "bg-white/[0.05] text-white/30 border border-white/[0.05]"
+              }
+            `}
+          >
+            {saving ? (
+              <>
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Kaydediliyor...
+              </>
+            ) : (
+              <>
+                <span>🎙</span>
+                <span>Seslendirmeye Geç</span>
+              </>
+            )}
           </button>
         </div>
-      </div>
-
-      {/* Sticky Bottom CTA */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#07182F]/95 backdrop-blur-xl border-t border-white/[0.05]">
-        <button
-          onClick={handleSaveAndContinue}
-          disabled={!narration.text}
-          className={`
-            w-full py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98]
-            ${narration.text 
-              ? "bg-gradient-to-r from-primary to-blue-500 text-white shadow-lg shadow-primary/30" 
-              : "bg-white/[0.05] text-white/30"
-            }
-          `}
-        >
-          {saving ? (
-            <>
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Kaydediliyor...
-            </>
-          ) : (
-            <>
-              <span>🎙</span>
-              <span>Seslendirmeye Geç</span>
-            </>
-          )}
-        </button>
       </div>
     </AppShell>
   );
