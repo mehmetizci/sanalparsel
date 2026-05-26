@@ -31,6 +31,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   // Refs for cleanup
   const mountedRef = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const renderStateRef = useRef<RenderState>("idle");
 
   // Cleanup on unmount
   useEffect(() => {
@@ -156,10 +157,12 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
 
   // Video creation with cancellation support
   const handleCreateVideo = useCallback(async () => {
-    if (!mountedRef.current || renderState === "generating") return;
+    if (!mountedRef.current) return;
+    if (renderStateRef.current === "generating") return;
 
     abortControllerRef.current = new AbortController();
     setRenderState("generating");
+    renderStateRef.current = "generating";
     setRenderProgress(0);
     
     try {
@@ -230,7 +233,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         setRenderState("error");
       }
     }
-  }, [id, project?.user_id, router, renderState]);
+  }, [id, project?.user_id, router]);
 
   // Cancel render
   const handleCancelRender = () => {
