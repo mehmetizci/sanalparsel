@@ -11,6 +11,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.1",
+    "framer-motion": "^12.40.0",
     "mapbox-gl": "^3.24.0",
     "maplibre-gl": "^4.1.0",
     "next": "14.2.35",

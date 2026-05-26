@@ -79,14 +79,6 @@ function formatDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)} km mesafede`;
 }
 
-// Format distance for sorting (numeric value)
-function getDistanceValue(distanceText: string): number {
-  const kmMatch = distanceText.match(/([\d.]+)\s*km/);
-  const mMatch = distanceText.match(/(\d+)\s*m/);
-  if (kmMatch) return parseFloat(kmMatch[1]) * 1000;
-  if (mMatch) return parseInt(mMatch[1]);
-  return 9999;
-}
 
 // Category labels for fallback
 const CATEGORY_LABELS: Record<string, { label: string; fallbackName: string; priority: number }> = {

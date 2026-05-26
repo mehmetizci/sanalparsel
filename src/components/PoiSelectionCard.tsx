@@ -125,10 +125,6 @@ function sortItems(items: EnvironmentItem[]): EnvironmentItem[] {
   });
 }
 
-// Parse distance text for display (remove suffix)
-function getDistanceLabel(distanceText: string): string {
-  return distanceText;
-}
 
 // Animated check icon component - softer premium style
 function AnimatedCheck({ isSelected }: { isSelected: boolean }) {
