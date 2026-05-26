@@ -17,10 +17,12 @@ const CATEGORY_PRIORITY: Record<string, number> = {
   school: 4,
   restaurant: 5,
   cafe: 6,
-  university: 7,
-  pharmacy: 8,
-  highway: 9,
-  marketplace: 10,
+  pharmacy: 7,
+  university: 8,
+  bank: 9,
+  atm: 10,
+  highway: 11,
+  marketplace: 12,
 };
 
 const typeLabels: Record<string, string> = {
@@ -34,6 +36,8 @@ const typeLabels: Record<string, string> = {
   marketplace: "Pazar Yeri",
   cafe: "Kafe",
   restaurant: "Restoran",
+  bank: "Banka",
+  atm: "ATM",
 };
 
 const typeIcons: Record<string, React.ReactNode> = {
@@ -89,6 +93,16 @@ const typeIcons: Record<string, React.ReactNode> = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18M3 6h18" />
     </svg>
   ),
+  bank: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+    </svg>
+  ),
+  atm: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+    </svg>
+  ),
 };
 
 // Sort items by category priority, then by distance
@@ -99,7 +113,7 @@ function sortItems(items: EnvironmentItem[]): EnvironmentItem[] {
     if (priorityA !== priorityB) {
       return priorityA - priorityB;
     }
-    // Parse distance for sorting (e.g., "450 m" -> 450, "1.2 km" -> 1200)
+    // Parse distance for sorting (e.g., "450 m yakınında" -> 450, "1.2 km mesafede" -> 1200)
     const parseDistance = (d: string) => {
       const kmMatch = d.match(/([\d.]+)\s*km/);
       const mMatch = d.match(/(\d+)\s*m/);
@@ -111,14 +125,19 @@ function sortItems(items: EnvironmentItem[]): EnvironmentItem[] {
   });
 }
 
-// Animated check icon component
+// Parse distance text for display (remove suffix)
+function getDistanceLabel(distanceText: string): string {
+  return distanceText;
+}
+
+// Animated check icon component - softer premium style
 function AnimatedCheck({ isSelected }: { isSelected: boolean }) {
   return (
     <div
-      className={`relative w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-300 ${
+      className={`relative w-5 h-5 rounded-full border flex items-center justify-center transition-all duration-300 ${
         isSelected
-          ? "border-blue-500 bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)] scale-100"
-          : "border-white/30 scale-95"
+          ? "border-blue-400/60 bg-blue-500/30 scale-100"
+          : "border-white/20 scale-90"
       }`}
     >
       <div
@@ -126,7 +145,7 @@ function AnimatedCheck({ isSelected }: { isSelected: boolean }) {
           isSelected ? "opacity-100 scale-100" : "opacity-0 scale-0"
         }`}
       >
-        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-3 h-3 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
         </svg>
       </div>
@@ -151,34 +170,34 @@ export default function PoiSelectionCard({ items, onToggleItem, maxSelections = 
       <div className="flex items-center justify-between">
         <label className="text-white font-semibold">Yakın Çevre Bilgileri</label>
         {selectedCount > 0 ? (
-          <div className="flex items-center gap-1.5">
-            <span className="px-2.5 py-1 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-400 text-xs font-medium shadow-[0_0_10px_rgba(59,130,246,0.2)]">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-medium">
               {selectedCount}
             </span>
-            <span className="text-sm text-blue-400/80 font-medium">
-              Lokasyon Videoda Gösterilecek
+            <span className="text-xs text-white/60">
+              Videoda Gösterilecek
             </span>
           </div>
         ) : (
-          <span className="text-sm text-muted">
+          <span className="text-xs text-white/40">
             Seçim yapın
           </span>
         )}
       </div>
       
       {sortedItems.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
-            <svg className="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+          <div className="w-20 h-20 rounded-full bg-white/[0.03] flex items-center justify-center mb-5">
+            <svg className="w-10 h-10 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-          <p className="text-muted text-sm">
-            Bu bölgede uygun çevre bilgisi bulunamadı.
+          <p className="text-white/70 text-sm font-medium mb-2">
+            Bu bölgede uygun çevre bilgisi bulunamadı
           </p>
-          <p className="text-muted/60 text-xs mt-1">
-            &ldquo;Çevre Bilgilerini Getir&rdquo; butonuna tıklayın.
+          <p className="text-white/40 text-xs">
+            Yakındaki lokasyonları görmek için çevre taramasını başlatın.
           </p>
         </div>
       ) : (
@@ -192,16 +211,16 @@ export default function PoiSelectionCard({ items, onToggleItem, maxSelections = 
                 relative w-full rounded-xl p-4 flex items-center gap-4 
                 transition-all duration-300 ease-out
                 ${item.selected
-                  ? "bg-blue-500/10 border-2 border-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)] hover:shadow-[0_0_25px_rgba(59,130,246,0.2)] hover:bg-blue-500/15"
-                  : "bg-white/[0.02] border-2 border-white/10 hover:border-white/20 hover:bg-white/[0.04]"
+                  ? "bg-blue-500/[0.06] border border-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.08)] hover:bg-blue-500/[0.08] hover:shadow-[0_0_16px_rgba(59,130,246,0.1)]"
+                  : "bg-white/[0.02] border border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.03]"
                 }
-                ${!item.selected && !canSelectMore ? "opacity-40 cursor-not-allowed" : "cursor-pointer active:scale-[0.98]"}
-                ${lastSelectedId === item.id ? "scale-[1.02]" : ""}
+                ${!item.selected && !canSelectMore ? "opacity-30 cursor-not-allowed" : "cursor-pointer active:scale-[0.99]"}
+                ${lastSelectedId === item.id ? "scale-[1.01]" : ""}
               `}
             >
               {/* Category Icon */}
               <div className={`flex-shrink-0 transition-colors duration-300 ${
-                item.selected ? "text-blue-400" : "text-muted"
+                item.selected ? "text-blue-400/80" : "text-white/30"
               }`}>
                 {typeIcons[item.type] || typeIcons.market}
               </div>
@@ -209,13 +228,13 @@ export default function PoiSelectionCard({ items, onToggleItem, maxSelections = 
               {/* Content */}
               <div className="flex-1 text-left min-w-0">
                 <p className={`font-medium transition-colors duration-300 ${
-                  item.selected ? "text-white" : "text-white/80"
+                  item.selected ? "text-white/90" : "text-white/60"
                 }`}>
                   {item.name}
                 </p>
-                <p className="text-muted text-sm flex items-center gap-1.5">
+                <p className="text-white/40 text-xs flex items-center gap-1.5">
                   <span>{typeLabels[item.type] || item.type}</span>
-                  <span className="text-white/30">·</span>
+                  <span className="text-white/20">·</span>
                   <span>{item.distance}</span>
                 </p>
               </div>

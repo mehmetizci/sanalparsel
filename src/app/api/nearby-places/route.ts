@@ -73,18 +73,32 @@ function toRadians(degrees: number): number {
 }
 
 function formatDistance(meters: number): string {
-  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
+  if (meters < 1000) {
+    return `${Math.round(meters)} m yakınında`;
+  }
+  return `${(meters / 1000).toFixed(1)} km mesafede`;
+}
+
+// Format distance for sorting (numeric value)
+function getDistanceValue(distanceText: string): number {
+  const kmMatch = distanceText.match(/([\d.]+)\s*km/);
+  const mMatch = distanceText.match(/(\d+)\s*m/);
+  if (kmMatch) return parseFloat(kmMatch[1]) * 1000;
+  if (mMatch) return parseInt(mMatch[1]);
+  return 9999;
 }
 
 // Category labels for fallback
 const CATEGORY_LABELS: Record<string, { label: string; fallbackName: string; priority: number }> = {
-  hospital: { label: "Hastane", fallbackName: "Yakındaki Hastane", priority: 1 },
-  school: { label: "Okul", fallbackName: "Yakındaki Okul", priority: 2 },
-  pharmacy: { label: "Eczane", fallbackName: "Yakındaki Eczane", priority: 3 },
-  market: { label: "Market", fallbackName: "Yakındaki Market", priority: 4 },
-  cafe: { label: "Kafe", fallbackName: "Yakındaki Kafe", priority: 5 },
-  restaurant: { label: "Restoran", fallbackName: "Yakındaki Restoran", priority: 6 },
-  transport: { label: "Toplu Taşıma", fallbackName: "Yakındaki İstasyon", priority: 7 },
+  hospital: { label: "Hastane", fallbackName: "Hastane", priority: 1 },
+  transport: { label: "Toplu Taşıma", fallbackName: "İstasyon", priority: 2 },
+  market: { label: "Market", fallbackName: "Market", priority: 3 },
+  school: { label: "Okul", fallbackName: "Okul", priority: 4 },
+  restaurant: { label: "Restoran", fallbackName: "Restoran", priority: 5 },
+  cafe: { label: "Kafe", fallbackName: "Kafe", priority: 6 },
+  pharmacy: { label: "Eczane", fallbackName: "Eczane", priority: 7 },
+  university: { label: "Üniversite", fallbackName: "Üniversite", priority: 8 },
+  bank: { label: "Banka", fallbackName: "Banka", priority: 9 },
 };
 
 // Fetch from Overpass
@@ -451,8 +465,12 @@ out body 50;`;
           if (!existing || distance < existing.distanceMeters) {
             poisByCategory.set("market", poi);
           }
-        } else if (tags.railway === "station" || tags.highway === "bus_stop") {
-          const name = getBestName(tags, "Yakındaki İstasyon");
+        } else if (tags.railway === "station" || tags.railway === "tram_stop" || 
+                   tags.public_transport === "platform" || 
+                   tags.highway === "bus_stop" || 
+                   tags.amenity === "bus_station" ||
+                   tags.station === "subway") {
+          const name = getBestName(tags, "İstasyon");
           const poi: POI = {
             id: `node_${el.id}`,
             osmId: el.id,
@@ -470,6 +488,27 @@ out body 50;`;
           const existing = poisByCategory.get("transport");
           if (!existing || distance < existing.distanceMeters) {
             poisByCategory.set("transport", poi);
+          }
+        } else if (tags.amenity === "bank" || tags.amenity === "atm") {
+          const name = getBestName(tags, "Banka");
+          const category = tags.amenity === "atm" ? "atm" : "bank";
+          const poi: POI = {
+            id: `node_${el.id}`,
+            osmId: el.id,
+            osmType: el.type,
+            category,
+            label: tags.amenity === "atm" ? "ATM" : "Banka",
+            name,
+            distanceMeters: Math.round(distance),
+            distanceText: formatDistance(distance),
+            lat: el.lat,
+            lng: el.lon,
+            selected: false,
+            source: "overpass",
+          };
+          const existing = poisByCategory.get(category);
+          if (!existing || distance < existing.distanceMeters) {
+            poisByCategory.set(category, poi);
           }
         }
       }
@@ -520,8 +559,12 @@ out body 50;`;
     school: 4,
     restaurant: 5,
     cafe: 6,
-    university: 7,
-    pharmacy: 8,
+    pharmacy: 7,
+    university: 8,
+    bank: 9,
+    atm: 10,
+    highway: 11,
+    marketplace: 12,
   };
 
   allPois.sort((a, b) => {
