@@ -9,6 +9,7 @@ import AppShell from "@/components/AppShell";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
 import EmptyState from "@/components/EmptyState";
+import { useParcelStore } from "@/lib/parcel-store";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -16,6 +17,11 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [credits, setCredits] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [openProjectError, setOpenProjectError] = useState<string | null>(null);
+
+  // Wizard store for loading project data into state
+  const initFromProject = useParcelStore((state) => state.initFromProject);
+  const clearParcelData = useParcelStore((state) => state.clearParcelData);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -57,6 +63,33 @@ export default function DashboardPage() {
     
     checkUser();
   }, [router]);
+
+  const handleProjectClick = async (project: Project) => {
+    try {
+      // Clear any existing parcel data first
+      clearParcelData();
+      
+      // Initialize parcel store from project data
+      if (project.geojson || project.properties || project.center_lat || project.center_lon) {
+        initFromProject({
+          geojson: project.geojson ?? undefined,
+          properties: project.properties ?? undefined,
+          center_lat: project.center_lat ?? undefined,
+          center_lon: project.center_lon ?? undefined,
+        });
+      } else {
+        // Project has no data - show error
+        setOpenProjectError("Proje verisi bulunamadı.");
+        return;
+      }
+      
+      // Navigate directly to parcel-info page (step 2/10)
+      router.push(`/projects/${project.id}/parcel-info`);
+    } catch (error) {
+      console.error("[Dashboard] handleProjectClick error:", error);
+      setOpenProjectError("Proje verisi bulunamadı.");
+    }
+  };
 
   if (loading) {
     return (
@@ -130,6 +163,29 @@ export default function DashboardPage() {
             </Link>
           </div>
 
+          {openProjectError && (
+            <div className="bg-warning/10 border border-warning/20 rounded-xl p-4 mb-4">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-warning mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div>
+                  <p className="text-warning font-medium">Hata</p>
+                  <p className="text-warning/80 text-sm">{openProjectError}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOpenProjectError(null)}
+                className="mt-3 text-sm text-warning hover:text-warning/80 flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Kapat
+              </button>
+            </div>
+          )}
+
           {projects.length === 0 ? (
             <EmptyState
               icon={
@@ -148,7 +204,11 @@ export default function DashboardPage() {
           ) : (
             <div className="space-y-3">
               {projects.map((project) => (
-                <Link key={project.id} href={`/projects/${project.id}/upload`}>
+                <button
+                  key={project.id}
+                  onClick={() => handleProjectClick(project)}
+                  className="w-full text-left"
+                >
                   <GlassCard hover className="flex items-center gap-4 p-4">
                     <div className="w-12 h-12 rounded-xl bg-card flex items-center justify-center">
                       <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -178,7 +238,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
                   </GlassCard>
-                </Link>
+                </button>
               ))}
             </div>
           )}
