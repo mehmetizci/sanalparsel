@@ -129,5 +129,31 @@ export interface CreditPackage {
 }
 
 export type CameraMode = "orbit_360" | "spiral_descent" | "top_view" | "low_fly" | "four_corners";
+export type CameraFeel = "soft" | "cinematic" | "dynamic";
+export type CameraSequenceMode = "orbit360" | "spiralDescend" | "topView" | "lowPass" | "fourCorners";
+
 export type VideoTone = "corporate" | "investment" | "social" | "short" | "premium";
 export type VoiceType = "female" | "male" | "corporate";
+
+export interface DroneSettings {
+  duration: 30 | 45 | 60;
+  startHeight: 100 | 200 | 300 | 400;
+  cameraFeel: CameraFeel;
+  cameraModes: CameraSequenceMode[];
+}
+
+export interface CameraSequenceStep {
+  mode: CameraSequenceMode;
+  duration: number;
+  startHeight: number;
+  endHeight: number;
+  pitch: number;
+  bearingFrom: number;
+  bearingTo: number;
+  easing: "soft" | "cinematic" | "dynamic";
+}
+
+export interface CameraSequence {
+  steps: CameraSequenceStep[];
+  totalDuration: number;
+}

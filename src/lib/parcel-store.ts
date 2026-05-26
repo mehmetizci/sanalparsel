@@ -32,6 +32,33 @@ export interface ParcelCoordinates {
   coordinates: number[][][] | number[][][][];
 }
 
+// Drone settings types
+export type CameraSequenceMode = "orbit360" | "spiralDescend" | "topView" | "lowPass" | "fourCorners";
+export type CameraFeel = "soft" | "cinematic" | "dynamic";
+
+export interface DroneSettingsState {
+  duration: 30 | 45 | 60;
+  startHeight: 100 | 200 | 300 | 400;
+  cameraFeel: CameraFeel;
+  cameraModes: CameraSequenceMode[];
+}
+
+export interface CameraSequenceStep {
+  mode: CameraSequenceMode;
+  duration: number;
+  startHeight: number;
+  endHeight: number;
+  pitch: number;
+  bearingFrom: number;
+  bearingTo: number;
+  easing: CameraFeel;
+}
+
+export interface CameraSequence {
+  steps: CameraSequenceStep[];
+  totalDuration: number;
+}
+
 // Enhanced POI types with OSM metadata
 export interface POI {
   id: string;
@@ -170,6 +197,10 @@ export interface ParcelState {
   nearbyLastFetchedAt: number | null;
   selectedNearbyPlaceIds: string[];
   
+  // Drone settings state
+  droneSettings: DroneSettingsState;
+  cameraSequence: CameraSequence | null;
+  
   // Actions
   setParcelData: (data: {
     geoJson?: Feature<Polygon | MultiPolygon>;
@@ -205,6 +236,11 @@ export interface ParcelState {
   
   // Persist selected POIs
   setSelectedPoiIds: (ids: string[]) => void;
+  
+  // Drone settings actions
+  setDroneSettings: (settings: Partial<DroneSettingsState>) => void;
+  setCameraSequence: (sequence: CameraSequence | null) => void;
+  clearDroneSettings: () => void;
 }
 
 export const useParcelStore = create<ParcelState>()(
@@ -221,6 +257,14 @@ export const useParcelStore = create<ParcelState>()(
       nearbyParcelKey: null,
       nearbyLastFetchedAt: null,
       selectedNearbyPlaceIds: [],
+      // Drone settings
+      droneSettings: {
+        duration: 30,
+        startHeight: 300,
+        cameraFeel: "cinematic",
+        cameraModes: ["orbit360", "spiralDescend"],
+      },
+      cameraSequence: null,
 
       setParcelData: (data) => set((state) => {
         const updates: Partial<ParcelState> = {
@@ -333,6 +377,21 @@ export const useParcelStore = create<ParcelState>()(
       
       // Set selected POI IDs
       setSelectedPoiIds: (ids) => set({ selectedNearbyPlaceIds: ids }),
+      
+      // Drone settings actions
+      setDroneSettings: (settings) => set((state) => ({
+        droneSettings: { ...state.droneSettings, ...settings },
+      })),
+      setCameraSequence: (sequence) => set({ cameraSequence: sequence }),
+      clearDroneSettings: () => set({
+        droneSettings: {
+          duration: 30,
+          startHeight: 300,
+          cameraFeel: "cinematic",
+          cameraModes: ["orbit360", "spiralDescend"],
+        },
+        cameraSequence: null,
+      }),
     }),
     {
       name: "sanalparsel-parcel", // localStorage key
@@ -348,6 +407,9 @@ export const useParcelStore = create<ParcelState>()(
         nearbyParcelKey: state.nearbyParcelKey,
         nearbyLastFetchedAt: state.nearbyLastFetchedAt,
         selectedNearbyPlaceIds: state.selectedNearbyPlaceIds,
+        // Persist drone settings
+        droneSettings: state.droneSettings,
+        cameraSequence: state.cameraSequence,
       }),
     }
   )
