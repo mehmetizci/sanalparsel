@@ -141,11 +141,11 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           setNarration((prev) => prev ? { ...prev, audio_url: data.audio_url } : null);
         }
       }
-    } catch (error) {
-      if (error.name === "AbortError") {
+    } catch (err) {
+      if ((err as Error).name === "AbortError") {
         // Cancelled - do nothing
       } else if (mountedRef.current) {
-        console.error("Voice generation error:", error);
+        console.error("Voice generation error:", err);
       }
     } finally {
       if (mountedRef.current) {
@@ -222,11 +222,11 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           router.push(`/projects/${id}/download`);
         }
       }
-    } catch (error) {
-      if (error.name === "AbortError") {
+    } catch (err) {
+      if ((err as Error).name === "AbortError") {
         if (mountedRef.current) setRenderState("cancelled");
       } else if (mountedRef.current) {
-        console.error("Video creation error:", error);
+        console.error("Video creation error:", err);
         setRenderState("error");
       }
     }
