@@ -221,7 +221,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         }
 
         // Navigate to download if completed
-        if (mountedRef.current && renderState === "completed") {
+        if (mountedRef.current && renderStateRef.current === "completed") {
           router.push(`/projects/${id}/download`);
         }
       }
