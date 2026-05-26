@@ -77,11 +77,14 @@ function formatDistance(meters: number): string {
 }
 
 // Category labels for fallback
-const CATEGORY_LABELS: Record<string, { label: string; fallbackName: string }> = {
-  hospital: { label: "Hastane", fallbackName: "Yakındaki Hastane" },
-  school: { label: "Okul", fallbackName: "Yakındaki Okul" },
-  pharmacy: { label: "Eczane", fallbackName: "Yakındaki Eczane" },
-  market: { label: "Market", fallbackName: "Yakındaki Market" },
+const CATEGORY_LABELS: Record<string, { label: string; fallbackName: string; priority: number }> = {
+  hospital: { label: "Hastane", fallbackName: "Yakındaki Hastane", priority: 1 },
+  school: { label: "Okul", fallbackName: "Yakındaki Okul", priority: 2 },
+  pharmacy: { label: "Eczane", fallbackName: "Yakındaki Eczane", priority: 3 },
+  market: { label: "Market", fallbackName: "Yakındaki Market", priority: 4 },
+  cafe: { label: "Kafe", fallbackName: "Yakındaki Kafe", priority: 5 },
+  restaurant: { label: "Restoran", fallbackName: "Yakındaki Restoran", priority: 6 },
+  transport: { label: "Toplu Taşıma", fallbackName: "Yakındaki İstasyon", priority: 7 },
 };
 
 // Fetch from Overpass
@@ -140,6 +143,9 @@ async function fetchFromNominatim(lat: number, lng: number, radius: number): Pro
     { q: "school", category: "school" },
     { q: "pharmacy", category: "pharmacy" },
     { q: "supermarket", category: "market" },
+    { q: "cafe", category: "cafe" },
+    { q: "restaurant", category: "restaurant" },
+    { q: "bus station", category: "transport" },
   ];
 
   for (const search of searches) {
@@ -205,10 +211,13 @@ function generateFallbackPois(lat: number, lng: number): POI[] {
   console.log("[NearbyPlaces] Generating fallback POIs for", lat, lng);
   
   const categories = [
-    { category: "hospital", label: "Hastane", baseDist: 600, angle: 0.5 },
-    { category: "school", label: "Okul", baseDist: 400, angle: 1.5 },
-    { category: "pharmacy", label: "Eczane", baseDist: 300, angle: 2.5 },
-    { category: "market", label: "Market", baseDist: 200, angle: 3.5 },
+    { category: "hospital", label: "Hastane", baseDist: 600, angle: 0.5, priority: 1 },
+    { category: "school", label: "Okul", baseDist: 400, angle: 1.5, priority: 2 },
+    { category: "pharmacy", label: "Eczane", baseDist: 300, angle: 2.5, priority: 3 },
+    { category: "market", label: "Market", baseDist: 200, angle: 3.5, priority: 4 },
+    { category: "cafe", label: "Kafe", baseDist: 350, angle: 4.5, priority: 5 },
+    { category: "restaurant", label: "Restoran", baseDist: 450, angle: 5.5, priority: 6 },
+    { category: "transport", label: "Toplu Taşıma", baseDist: 500, angle: 6.5, priority: 7 },
   ];
 
   return categories.map((cat, i) => {
@@ -229,7 +238,7 @@ function generateFallbackPois(lat: number, lng: number): POI[] {
       distanceText: formatDistance(distance),
       lat: lat + offsetLat,
       lng: lng + offsetLng,
-      selected: i < 3, // Pre-select first 3
+      selected: false, // Will be set after sorting in main handler
       source: "fallback" as const,
     };
   }).sort((a, b) => a.distanceMeters - b.distanceMeters);
@@ -252,7 +261,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Geçersiz koordinat", code: "INVALID_COORDS" }, { status: 400 });
   }
   
-  const radius = 1200;
   const cacheKey = getCacheKey(latNum, lngNum);
   
   // Check cache first (unless force refresh)
@@ -260,6 +268,14 @@ export async function GET(request: NextRequest) {
     const cached = getFromCache(cacheKey);
     if (cached && cached.length > 0) {
       console.log("[NearbyPlaces] Using cached data");
+      console.log("[NearbyPlaces] Cache Debug:", {
+        radius: "from_cache",
+        rawOsmResultCount: cached.length,
+        normalizedPoiCount: cached.length,
+        filteredPoiCount: cached.length,
+        displayedPoiCount: cached.length,
+        selectedPoiCount: cached.filter(p => p.selected).length
+      });
       return NextResponse.json({ 
         success: true, 
         pois: cached, 
@@ -274,163 +290,280 @@ export async function GET(request: NextRequest) {
 
   console.log(`[NearbyPlaces] Fetching for ${latNum}, ${lngNum}`);
 
-  // Step 1: Try Overpass
-  const overpassQuery = `[out:json][timeout:20];
+  // Adaptive radius system: try larger radii if results are too few
+  const radiiToTry = [1500, 3000, 5000];
+  let allPois: POI[] = [];
+  let usedRadius = 1500;
+  
+  for (const radius of radiiToTry) {
+    console.log(`[NearbyPlaces] Trying radius: ${radius}m`);
+    
+    // Build Overpass query for all categories
+    const overpassQuery = `[out:json][timeout:25];
 (
   node(around:${radius},${latNum},${lngNum})["amenity"="hospital"];
+  node(around:${radius},${latNum},${lngNum})["amenity"="clinic"];
   node(around:${radius},${latNum},${lngNum})["amenity"="school"];
+  node(around:${radius},${latNum},${lngNum})["amenity"="university"];
   node(around:${radius},${latNum},${lngNum})["amenity"="pharmacy"];
+  node(around:${radius},${latNum},${lngNum})["amenity"="restaurant"];
+  node(around:${radius},${latNum},${lngNum})["amenity"="cafe"];
   node(around:${radius},${latNum},${lngNum})["shop"="supermarket"];
+  node(around:${radius},${latNum},${lngNum})["shop"="convenience"];
+  node(around:${radius},${latNum},${lngNum})["railway"="station"];
+  node(around:${radius},${latNum},${lngNum})["highway"="bus_stop"];
 );
-out body 20;`;
+out body 50;`;
 
-  const overpassResult = await fetchFromOverpass(overpassQuery);
-  
-  if (overpassResult.elements.length > 0) {
-    // Process Overpass results
-    const poisByCategory = new Map<string, POI>();
+    const overpassResult = await fetchFromOverpass(overpassQuery);
+    console.log(`[NearbyPlaces] Raw Overpass elements: ${overpassResult.elements.length}`);
     
-    for (const el of overpassResult.elements as { id: number; type: string; lat: number; lon: number; tags?: Record<string, string> }[]) {
-      if (!el.lat || !el.lon) continue;
+    if (overpassResult.elements.length > 0) {
+      // Process Overpass results
+      const poisByCategory = new Map<string, POI>();
       
-      const tags = el.tags || {};
-      const distance = haversineDistance(latNum, lngNum, el.lat, el.lon);
-      
-      if (tags.amenity === "hospital" || tags.amenity === "clinic") {
-        const name = getBestName(tags, "Yakındaki Hastane");
-        const poi: POI = {
-          id: `node_${el.id}`,
-          osmId: el.id,
-          osmType: el.type,
-          category: "hospital",
-          label: "Hastane",
-          name,
-          distanceMeters: Math.round(distance),
-          distanceText: formatDistance(distance),
-          lat: el.lat,
-          lng: el.lon,
-          selected: false,
-          source: "overpass",
-        };
-        const existing = poisByCategory.get("hospital");
-        if (!existing || distance < existing.distanceMeters) {
-          poisByCategory.set("hospital", poi);
-        }
-      } else if (tags.amenity === "school" || tags.amenity === "university") {
-        const name = getBestName(tags, "Yakındaki Okul");
-        const poi: POI = {
-          id: `node_${el.id}`,
-          osmId: el.id,
-          osmType: el.type,
-          category: "school",
-          label: "Okul",
-          name,
-          distanceMeters: Math.round(distance),
-          distanceText: formatDistance(distance),
-          lat: el.lat,
-          lng: el.lon,
-          selected: false,
-          source: "overpass",
-        };
-        const existing = poisByCategory.get("school");
-        if (!existing || distance < existing.distanceMeters) {
-          poisByCategory.set("school", poi);
-        }
-      } else if (tags.amenity === "pharmacy") {
-        const name = getBestName(tags, "Yakındaki Eczane");
-        const poi: POI = {
-          id: `node_${el.id}`,
-          osmId: el.id,
-          osmType: el.type,
-          category: "pharmacy",
-          label: "Eczane",
-          name,
-          distanceMeters: Math.round(distance),
-          distanceText: formatDistance(distance),
-          lat: el.lat,
-          lng: el.lon,
-          selected: false,
-          source: "overpass",
-        };
-        const existing = poisByCategory.get("pharmacy");
-        if (!existing || distance < existing.distanceMeters) {
-          poisByCategory.set("pharmacy", poi);
-        }
-      } else if (tags.shop === "supermarket" || tags.shop === "convenience") {
-        const name = getBestName(tags, "Yakındaki Market");
-        const poi: POI = {
-          id: `node_${el.id}`,
-          osmId: el.id,
-          osmType: el.type,
-          category: "market",
-          label: "Market",
-          name,
-          distanceMeters: Math.round(distance),
-          distanceText: formatDistance(distance),
-          lat: el.lat,
-          lng: el.lon,
-          selected: false,
-          source: "overpass",
-        };
-        const existing = poisByCategory.get("market");
-        if (!existing || distance < existing.distanceMeters) {
-          poisByCategory.set("market", poi);
+      for (const el of overpassResult.elements as { id: number; type: string; lat: number; lon: number; tags?: Record<string, string> }[]) {
+        if (!el.lat || !el.lon) continue;
+        
+        const tags = el.tags || {};
+        const distance = haversineDistance(latNum, lngNum, el.lat, el.lon);
+        
+        // Map OSM amenities to our categories
+        if (tags.amenity === "hospital" || tags.amenity === "clinic") {
+          const name = getBestName(tags, "Yakındaki Hastane");
+          const poi: POI = {
+            id: `node_${el.id}`,
+            osmId: el.id,
+            osmType: el.type,
+            category: "hospital",
+            label: "Hastane",
+            name,
+            distanceMeters: Math.round(distance),
+            distanceText: formatDistance(distance),
+            lat: el.lat,
+            lng: el.lon,
+            selected: false,
+            source: "overpass",
+          };
+          const existing = poisByCategory.get("hospital");
+          if (!existing || distance < existing.distanceMeters) {
+            poisByCategory.set("hospital", poi);
+          }
+        } else if (tags.amenity === "school" || tags.amenity === "university") {
+          const category = tags.amenity === "university" ? "university" : "school";
+          const label = tags.amenity === "university" ? "Üniversite" : "Okul";
+          const name = getBestName(tags, "Yakındaki Okul");
+          const poi: POI = {
+            id: `node_${el.id}`,
+            osmId: el.id,
+            osmType: el.type,
+            category,
+            label,
+            name,
+            distanceMeters: Math.round(distance),
+            distanceText: formatDistance(distance),
+            lat: el.lat,
+            lng: el.lon,
+            selected: false,
+            source: "overpass",
+          };
+          const existing = poisByCategory.get(category);
+          if (!existing || distance < existing.distanceMeters) {
+            poisByCategory.set(category, poi);
+          }
+        } else if (tags.amenity === "pharmacy") {
+          const name = getBestName(tags, "Yakındaki Eczane");
+          const poi: POI = {
+            id: `node_${el.id}`,
+            osmId: el.id,
+            osmType: el.type,
+            category: "pharmacy",
+            label: "Eczane",
+            name,
+            distanceMeters: Math.round(distance),
+            distanceText: formatDistance(distance),
+            lat: el.lat,
+            lng: el.lon,
+            selected: false,
+            source: "overpass",
+          };
+          const existing = poisByCategory.get("pharmacy");
+          if (!existing || distance < existing.distanceMeters) {
+            poisByCategory.set("pharmacy", poi);
+          }
+        } else if (tags.amenity === "restaurant") {
+          const name = getBestName(tags, "Yakındaki Restoran");
+          const poi: POI = {
+            id: `node_${el.id}`,
+            osmId: el.id,
+            osmType: el.type,
+            category: "restaurant",
+            label: "Restoran",
+            name,
+            distanceMeters: Math.round(distance),
+            distanceText: formatDistance(distance),
+            lat: el.lat,
+            lng: el.lon,
+            selected: false,
+            source: "overpass",
+          };
+          const existing = poisByCategory.get("restaurant");
+          if (!existing || distance < existing.distanceMeters) {
+            poisByCategory.set("restaurant", poi);
+          }
+        } else if (tags.amenity === "cafe") {
+          const name = getBestName(tags, "Yakındaki Kafe");
+          const poi: POI = {
+            id: `node_${el.id}`,
+            osmId: el.id,
+            osmType: el.type,
+            category: "cafe",
+            label: "Kafe",
+            name,
+            distanceMeters: Math.round(distance),
+            distanceText: formatDistance(distance),
+            lat: el.lat,
+            lng: el.lon,
+            selected: false,
+            source: "overpass",
+          };
+          const existing = poisByCategory.get("cafe");
+          if (!existing || distance < existing.distanceMeters) {
+            poisByCategory.set("cafe", poi);
+          }
+        } else if (tags.shop === "supermarket" || tags.shop === "convenience") {
+          const name = getBestName(tags, "Yakındaki Market");
+          const poi: POI = {
+            id: `node_${el.id}`,
+            osmId: el.id,
+            osmType: el.type,
+            category: "market",
+            label: "Market",
+            name,
+            distanceMeters: Math.round(distance),
+            distanceText: formatDistance(distance),
+            lat: el.lat,
+            lng: el.lon,
+            selected: false,
+            source: "overpass",
+          };
+          const existing = poisByCategory.get("market");
+          if (!existing || distance < existing.distanceMeters) {
+            poisByCategory.set("market", poi);
+          }
+        } else if (tags.railway === "station" || tags.highway === "bus_stop") {
+          const name = getBestName(tags, "Yakındaki İstasyon");
+          const poi: POI = {
+            id: `node_${el.id}`,
+            osmId: el.id,
+            osmType: el.type,
+            category: "transport",
+            label: "Toplu Taşıma",
+            name,
+            distanceMeters: Math.round(distance),
+            distanceText: formatDistance(distance),
+            lat: el.lat,
+            lng: el.lon,
+            selected: false,
+            source: "overpass",
+          };
+          const existing = poisByCategory.get("transport");
+          if (!existing || distance < existing.distanceMeters) {
+            poisByCategory.set("transport", poi);
+          }
         }
       }
-    }
 
-    const pois = Array.from(poisByCategory.values()).sort((a, b) => a.distanceMeters - b.distanceMeters);
-    
-    if (pois.length > 0) {
-      pois.slice(0, 4).forEach(p => p.selected = true);
-      setCache(cacheKey, pois);
+      allPois = Array.from(poisByCategory.values());
+      usedRadius = radius;
+      console.log(`[NearbyPlaces] Normalized POIs: ${allPois.length}`);
       
-      console.log("[NearbyPlaces] Success! POIs:", pois.map(p => p.name).join(", "));
-      
-      return NextResponse.json({
-        success: true,
-        pois,
-        count: pois.length,
-        center: { lat: latNum, lng: lngNum },
-        source: "overpass",
-        parcelKey: cacheKey,
-      });
+      // If we have at least 3 POIs, we can stop
+      if (allPois.length >= 3) {
+        break;
+      }
     }
   }
-
-  // Step 2: Try Nominatim
-  console.log("[NearbyPlaces] Overpass failed, trying Nominatim...");
-  const nominatimPois = await fetchFromNominatim(latNum, lngNum, radius);
   
-  if (nominatimPois.length > 0) {
-    nominatimPois.slice(0, 4).forEach(p => p.selected = true);
-    setCache(cacheKey, nominatimPois);
+  // Log debug info
+  console.log("[NearbyPlaces] POI Debug:", {
+    radius: `${usedRadius}m`,
+    requestedCategories: ["market", "pharmacy", "hospital", "school", "university", "transport", "cafe", "restaurant"],
+    rawOsmResultCount: allPois.length,
+    normalizedPoiCount: allPois.length,
+    filteredPoiCount: allPois.length,
+    displayedPoiCount: Math.min(allPois.length, 7),
+    selectedPoiCount: allPois.filter(p => p.selected).length
+  });
+
+  // If we still have no POIs from Overpass, try Nominatim
+  if (allPois.length === 0) {
+    console.log("[NearbyPlaces] Overpass failed, trying Nominatim...");
+    const nominatimPois = await fetchFromNominatim(latNum, lngNum, 5000);
     
-    console.log("[NearbyPlaces] Nominatim success! POIs:", nominatimPois.map(p => p.name).join(", "));
-    
-    return NextResponse.json({
-      success: true,
-      pois: nominatimPois,
-      count: nominatimPois.length,
-      center: { lat: latNum, lng: lngNum },
-      source: "nominatim",
-      parcelKey: cacheKey,
-      message: "Yakın çevre verileri Nominatim'den alındı",
-    });
+    if (nominatimPois.length > 0) {
+      allPois = nominatimPois;
+    }
   }
 
-  // Step 3: Fallback with smart coordinates
-  console.log("[NearbyPlaces] All sources failed, generating fallback...");
-  const fallbackPois = generateFallbackPois(latNum, lngNum);
-  setCache(cacheKey, fallbackPois);
+  // If still no POIs, generate fallback
+  if (allPois.length === 0) {
+    console.log("[NearbyPlaces] All sources failed, generating fallback...");
+    allPois = generateFallbackPois(latNum, lngNum);
+  }
+
+  // Sort POIs: selected first, then by distance, then by category priority
+  const categoryPriority: Record<string, number> = {
+    hospital: 1,
+    school: 2,
+    university: 3,
+    pharmacy: 4,
+    market: 5,
+    cafe: 6,
+    restaurant: 7,
+    transport: 8,
+  };
+
+  allPois.sort((a, b) => {
+    // Selected items come first
+    if (a.selected !== b.selected) {
+      return a.selected ? -1 : 1;
+    }
+    // Then by distance
+    if (a.distanceMeters !== b.distanceMeters) {
+      return a.distanceMeters - b.distanceMeters;
+    }
+    // Then by category priority
+    const priorityA = categoryPriority[a.category] || 999;
+    const priorityB = categoryPriority[b.category] || 999;
+    return priorityA - priorityB;
+  });
+
+  // Limit to max 7 POIs
+  const displayPois = allPois.slice(0, 7);
+  
+  // Auto-select up to 4 POIs (based on sorted order)
+  displayPois.forEach((poi, index) => {
+    poi.selected = index < 4;
+  });
+
+  setCache(cacheKey, displayPois);
+  
+  const finalSource = displayPois[0]?.source || "fallback";
+  console.log("[NearbyPlaces] Final POIs:", displayPois.map(p => `${p.name} (${p.category})`).join(", "));
   
   return NextResponse.json({
     success: true,
-    pois: fallbackPois,
-    count: fallbackPois.length,
+    pois: displayPois,
+    count: displayPois.length,
     center: { lat: latNum, lng: lngNum },
-    source: "fallback",
+    source: finalSource,
     parcelKey: cacheKey,
-    message: "Çevre bilgileri yaklaşık olarak gösteriliyor. Gerçek veri için daha sonra tekrar deneyin.",
+    debug: {
+      radius: usedRadius,
+      totalFound: allPois.length,
+      displayed: displayPois.length,
+      selected: displayPois.filter(p => p.selected).length
+    }
   });
 }
