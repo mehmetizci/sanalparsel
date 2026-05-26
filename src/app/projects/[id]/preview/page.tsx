@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase";
 import { Project, ParcelGeoJson } from "@/types";
+import { useAppLoadingStore } from "@/lib/loading-states";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import PrimaryButton from "@/components/PrimaryButton";
@@ -29,6 +30,10 @@ function PreviewPageInner() {
   const isDemo = searchParams.get("demo") === "true";
   const demoTitle = searchParams.get("title") || "Yeni Proje";
 
+  // Video state management - reset on page mount
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+
   // Mounted guard
   const [mounted, setMounted] = useState(false);
 
@@ -39,10 +44,12 @@ function PreviewPageInner() {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Set mounted guard
+  // Set mounted guard and reset video state on mount
   useEffect(() => {
     setMounted(true);
-  }, []);
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
 
   useEffect(() => {
     if (isDemo) {

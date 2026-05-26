@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import { Project, Video } from "@/types";
+import { useAppLoadingStore } from "@/lib/loading-states";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
@@ -20,6 +21,10 @@ export default function DownloadPage({ params }: DownloadPageProps) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   
+  // Reset video render state when entering download page
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+  
   // Mounted guard to prevent SSR/hydration issues
   const [mounted, setMounted] = useState(false);
   
@@ -31,10 +36,13 @@ export default function DownloadPage({ params }: DownloadPageProps) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Set mounted guard
+  // Set mounted guard and reset video state
   useEffect(() => {
     setMounted(true);
-  }, []);
+    // Reset video render state on page mount to clear from previous sessions
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
 
   useEffect(() => {
     const fetchData = async () => {

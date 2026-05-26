@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, EnvironmentItem } from "@/types";
+import { useAppLoadingStore } from "@/lib/loading-states";
 import { useParcelStore, POI } from "@/lib/parcel-store";
 import { fetchNearbyPOIs, POIServiceError } from "@/lib/poi-service";
 import {
@@ -73,6 +74,10 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
   const projectId = (urlParams?.id as string) || params.id;
   const isDemo = searchParams.get("demo") === "true";
   
+  // Video state management - reset on page mount
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+  
   // Mounted guard to prevent SSR/hydration issues
   const [mounted, setMounted] = useState(false);
   
@@ -100,10 +105,12 @@ export default function EnvironmentPage({ params }: { params: { id: string } }) 
   const [error, setError] = useState<ErrorInfo | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Set mounted guard
+  // Set mounted guard and reset video state on mount
   useEffect(() => {
     setMounted(true);
-  }, []);
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
 
   // Load config from localStorage (only after mounted)
   useEffect(() => {

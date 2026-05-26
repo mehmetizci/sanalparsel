@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, Narration, VideoTone } from "@/types";
 import { useParcelStore } from "@/lib/parcel-store";
+import { useAppLoadingStore } from "@/lib/loading-states";
 import {
   ProjectConfig,
   AiNarrationConfig,
@@ -25,6 +26,10 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
   const { id: projectId } = params;
   const router = useRouter();
   
+  // Reset video state on page mount (TTS generation should NOT trigger video overlay)
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+  
   // Mounted guard to prevent SSR/hydration issues
   const [mounted, setMounted] = useState(false);
   
@@ -44,10 +49,13 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Set mounted guard
+  // Set mounted guard and reset video state
   useEffect(() => {
     setMounted(true);
-  }, []);
+    // Ensure video render state is idle - TTS generation must NOT show video overlay
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
 
   // Load config from localStorage (only after mounted)
   useEffect(() => {

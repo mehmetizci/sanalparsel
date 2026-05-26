@@ -10,6 +10,7 @@ import {
   loadProjectConfig,
   createDefaultProjectConfig,
 } from "@/lib/project-config";
+import { useAppLoadingStore } from "@/lib/loading-states";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
@@ -26,6 +27,10 @@ interface ValidationError {
 export default function VideoPreviewPage({ params }: { params: { id: string } }) {
   const { id: projectId } = params;
   const router = useRouter();
+  
+  // Video rendering state management
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
   
   // Mounted guard to prevent SSR/hydration issues
   const [mounted, setMounted] = useState(false);
@@ -58,10 +63,13 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
-  // Set mounted guard
+  // Set mounted guard and reset video state on mount
   useEffect(() => {
     setMounted(true);
-  }, []);
+    // Reset video render state on page mount to prevent stale state
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
 
   // Load project config from localStorage (only after mounted)
   useEffect(() => {
@@ -159,6 +167,11 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const handleCreateVideo = async () => {
     setCreatingVideo(true);
     setValidationErrors([]);
+    
+    // IMPORTANT: Set videoRenderStartedByUser to true ONLY when user clicks "Video Oluştur"
+    // This is the ONLY trigger for showing the "Video hazırlanıyor" overlay
+    setVideoRenderStartedByUser(true);
+    setVideoRenderState("preparing");
 
     // Validate all requirements
     const errors: ValidationError[] = [];
@@ -187,10 +200,13 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       });
     }
 
-    // If there are errors, show them and don't proceed
+    // If there are errors, reset and show them
     if (errors.length > 0) {
       setValidationErrors(errors);
       setCreatingVideo(false);
+      // Reset video state on validation failure
+      setVideoRenderState("idle");
+      setVideoRenderStartedByUser(false);
       return;
     }
 
@@ -225,16 +241,37 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         });
         console.log("Narration Text:", localNarrationText || narration?.text);
         console.log("Render State: ready_for_recording");
+        console.log("videoRenderStartedByUser: true");
         console.log("=====================================");
 
-        // Navigate to download page (for now, until render pipeline is ready)
+        // Simulate video rendering progress
+        // In a real implementation, this would be replaced with actual rendering logic
+        setTimeout(() => {
+          setVideoRenderState("recording");
+        }, 2000);
+
+        setTimeout(() => {
+          setVideoRenderState("merging");
+        }, 4000);
+
+        setTimeout(() => {
+          setVideoRenderState("completed");
+        }, 6000);
+
+        // Navigate to download page
         setTimeout(() => {
           router.push(`/projects/${projectId}/download`);
-        }, 2000);
+        }, 6500);
       }
     } catch (error) {
       console.error("Video creation error:", error);
       setErrorMessage("Video oluşturulurken bir hata oluştu.");
+      // Reset video state on error
+      setVideoRenderState("error");
+      setTimeout(() => {
+        setVideoRenderState("idle");
+        setVideoRenderStartedByUser(false);
+      }, 3000);
     } finally {
       setCreatingVideo(false);
     }

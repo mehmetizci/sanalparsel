@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
+import { useAppLoadingStore } from "@/lib/loading-states";
 import { 
   ProjectConfig, 
   VideoConfig,
@@ -31,6 +32,10 @@ export default function VideoSettingsPage({ params }: VideoSettingsPageProps) {
   const { id: projectId } = params;
   const router = useRouter();
   
+  // Video state management - reset on page mount
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+  
   // Mounted guard to prevent SSR/hydration issues
   const [mounted, setMounted] = useState(false);
   
@@ -53,10 +58,12 @@ export default function VideoSettingsPage({ params }: VideoSettingsPageProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Set mounted guard
+  // Set mounted guard and reset video state on mount
   useEffect(() => {
     setMounted(true);
-  }, []);
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
 
   // Load config from localStorage or create new (only after mounted)
   useEffect(() => {
