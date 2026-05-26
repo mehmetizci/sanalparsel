@@ -33,6 +33,10 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const abortControllerRef = useRef<AbortController | null>(null);
   const renderStateRef = useRef<RenderState>("idle");
 
+  // Helper to check render state (uses ref to avoid type narrowing issues)
+  const isRenderActive = () => renderStateRef.current === "generating" || renderStateRef.current === "preparing";
+
+
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
@@ -422,11 +426,11 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 Geri
               </button>
               <button
-                disabled={!hasAudio || renderState === "generating"}
+                disabled={!hasAudio || isRenderActive()}
                 onClick={handleCreateVideo}
                 className={`
                   flex-1 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all
-                  ${hasAudio && renderState !== "generating"
+                  ${hasAudio && !isRenderActive()
                     ? "bg-gradient-to-r from-primary to-blue-500 text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30" 
                     : "bg-white/[0.05] text-white/30 border border-white/[0.05]"
                   }
