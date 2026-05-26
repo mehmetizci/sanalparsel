@@ -200,12 +200,12 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         setVideo(videoData as Video);
         
         // Simulate render progress with cleanup support
-        const progressSteps = [
-          { progress: 10, state: "preparing" as RenderState, delay: 500 },
-          { progress: 30, state: "generating" as RenderState, delay: 1000 },
-          { progress: 60, state: "generating" as RenderState, delay: 1500 },
-          { progress: 85, state: "generating" as RenderState, delay: 2000 },
-          { progress: 100, state: "completed" as RenderState, delay: 2500 },
+        const progressSteps: { progress: number; state: RenderState; delay: number }[] = [
+          { progress: 10, state: "preparing", delay: 500 },
+          { progress: 30, state: "generating", delay: 1000 },
+          { progress: 60, state: "generating", delay: 1500 },
+          { progress: 85, state: "generating", delay: 2000 },
+          { progress: 100, state: "completed", delay: 2500 },
         ];
 
         for (const step of progressSteps) {
@@ -216,12 +216,15 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           await new Promise(resolve => setTimeout(resolve, step.delay));
           if (mountedRef.current) {
             setRenderProgress(step.progress);
-            setRenderState(step.state);
+            const newState = step.state;
+            setRenderState(newState);
+            renderStateRef.current = newState;
           }
         }
 
-        // Navigate to download if completed
-        if (mountedRef.current && renderStateRef.current === "completed") {
+        // Navigate to download if completed - use local variable to avoid narrowing
+        const didComplete = progressSteps[progressSteps.length - 1].progress === 100;
+        if (mountedRef.current && didComplete) {
           router.push(`/projects/${id}/download`);
         }
       }
