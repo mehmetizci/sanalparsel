@@ -1,46 +1,311 @@
 "use client";
 
-import { useState } from "react";
-import { VoiceType } from "@/types";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useParcelStore } from "@/lib/parcel-store";
+import { EDGE_VOICE_CONFIGS, type VoiceType } from "@/lib/project-config";
+import { generateTTS, getTTSEndpoint } from "@/lib/ttsClient";
+
+// Get backend URL from environment
+const TTS_API_URL = import.meta.env.VITE_TTS_API_URL || "";
 
 interface VoiceSelectorProps {
-  voiceType: VoiceType;
-  onChange: (type: VoiceType) => void;
-  onGenerate: () => void;
+  narrationText: string;
+  onTextChange?: (text: string) => void;
   disabled?: boolean;
   isGenerating?: boolean;
-  audioUrl?: string | null;
+  onGenerateStart?: () => void;
+  onGenerateComplete?: (blob: Blob, duration: number) => void;
+  onGenerateError?: (error: string, debug?: string) => void;
 }
 
 export default function VoiceSelector({
-  voiceType,
-  onChange,
-  onGenerate,
+  narrationText,
   disabled,
   isGenerating,
-  audioUrl,
+  onGenerateStart,
+  onGenerateComplete,
+  onGenerateError,
 }: VoiceSelectorProps) {
+  const {
+    voiceSettings,
+    cachedAudioUrl,
+    cachedNarrationHash,
+    setVoiceType,
+    setGeneratedAudio,
+    invalidateAudioCache,
+  } = useParcelStore();
+
   const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = typeof window !== "undefined" ? new Audio() : null;
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const hasGeneratedAudio = !!cachedAudioUrl && !!voiceSettings.audioDuration;
+
+  // Create audio element on mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && !audioRef.current) {
+      audioRef.current = new Audio();
+      audioRef.current.addEventListener("timeupdate", () => {
+        if (audioRef.current) {
+          setCurrentTime(audioRef.current.currentTime);
+        }
+      });
+      audioRef.current.addEventListener("loadedmetadata", () => {
+        if (audioRef.current) {
+          setDuration(audioRef.current.duration);
+        }
+      });
+      audioRef.current.addEventListener("ended", () => {
+        setIsPlaying(false);
+        setCurrentTime(0);
+      });
+    }
+
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  // Set audio source when URL changes
+  useEffect(() => {
+    if (audioRef.current && cachedAudioUrl) {
+      audioRef.current.src = cachedAudioUrl;
+    }
+  }, [cachedAudioUrl]);
+
+  // Check if narration text changed and invalidate cache
+  useEffect(() => {
+    if (narrationText && cachedNarrationHash && cachedNarrationHash !== hashText(narrationText)) {
+      invalidateAudioCache(hashText(narrationText));
+    }
+  }, [narrationText, cachedNarrationHash, invalidateAudioCache]);
+
+  const handleVoiceChange = (type: VoiceType) => {
+    const config = EDGE_VOICE_CONFIGS[type];
+    setVoiceType(type);
+    useParcelStore.setState((state) => ({
+      voiceSettings: {
+        ...state.voiceSettings,
+        selectedVoice: type,
+        edgeVoice: config.voice,
+        rate: config.rate,
+        pitch: config.pitch,
+      },
+    }));
+  };
+
+  const handlePlay = useCallback(() => {
+    if (!audioRef.current || !cachedAudioUrl) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  }, [isPlaying, cachedAudioUrl]);
+
+  // Test HEALTH endpoint
+  const testHealth = async () => {
+    console.log("═══════════════════════════════════════");
+    console.log("=== TEST HEALTH ENDPOINT ===");
+    console.log("═══════════════════════════════════════");
+    console.log("Backend URL:", TTS_API_URL || "(not set - using local)");
+    console.log("═══════════════════════════════════════");
+    
+    setDebugInfo(`Sağlık kontrolü yapılıyor...\nBackend: ${TTS_API_URL || "localhost"}`);
+    
+    try {
+      if (TTS_API_URL) {
+        const response = await fetch(`${TTS_API_URL}/health`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        });
+        
+        const status = response.status;
+        let body = "";
+        
+        try {
+          body = JSON.stringify(await response.json(), null, 2);
+        } catch {
+          body = await response.text();
+        }
+        
+        const debug = `=== HEALTH CHECK (Render) ===\nURL: ${TTS_API_URL}/health\nStatus: ${status}\n\nResponse:\n${body}\n\n${status === 200 ? "✓ Backend çalışıyor!" : "✗ Backend hatası"}`;
+        
+        console.log(debug);
+        setDebugInfo(debug);
+      } else {
+        setDebugInfo(`Sağlık kontrolü: VITE_TTS_API_URL ayarlanmamış\n\nBackend URL'i .env dosyasına ekleyin:\nVITE_TTS_API_URL=https://sanalparsel.onrender.com`);
+      }
+    } catch (err) {
+      const debug = `=== HEALTH CHECK ERROR ===\n${err instanceof Error ? err.message : String(err)}\n\nBackend: ${TTS_API_URL || "localhost"}\n\nBağlantı başarısız. Backend'in çalıştığından emin olun.`;
+      console.error(debug);
+      setDebugInfo(debug);
+    }
+  };
+
+  // Test TTS endpoint
+  const testTTS = async () => {
+    const endpoint = getTTSEndpoint();
+    
+    console.log("═══════════════════════════════════════");
+    console.log("=== TEST TTS ENDPOINT ===");
+    console.log("═══════════════════════════════════════");
+    console.log("Endpoint:", endpoint);
+    console.log("═══════════════════════════════════════");
+    
+    setDebugInfo(`TTS test başlatılıyor...\nEndpoint: ${endpoint}`);
+    
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Test mesajı",
+          voice: "tr-TR-AhmetNeural",
+          rate: "0%",
+          pitch: "0Hz",
+          test: true
+        })
+      });
+
+      const status = response.status;
+      let bodyText = "";
+      
+      try {
+        const json = await response.json();
+        bodyText = JSON.stringify(json, null, 2);
+      } catch {
+        bodyText = await response.text();
+      }
+
+      const debug = `=== TTS TEST ===\nEndpoint: ${endpoint}\nStatus: ${status}\n\nResponse:\n${bodyText.substring(0, 1000)}\n\n${status === 200 ? "✓ TTS endpoint çalışıyor!" : "✗ TTS hatası"}`;
+
+      console.log(debug);
+      setDebugInfo(debug);
+    } catch (err) {
+      const debug = `=== TTS TEST ERROR ===\nEndpoint: ${endpoint}\n\n${err instanceof Error ? err.message : String(err)}`;
+      console.error(debug);
+      setDebugInfo(debug);
+    }
+  };
+
+  // Full TTS generation test
+  const testFullGeneration = async () => {
+    const endpoint = getTTSEndpoint();
+    
+    console.log("═══════════════════════════════════════");
+    console.log("=== FULL TTS GENERATION TEST ===");
+    console.log("═══════════════════════════════════════");
+    console.log("Endpoint:", endpoint);
+    console.log("═══════════════════════════════════════");
+    
+    setDebugInfo(`Tam TTS testi başlatılıyor...\nEndpoint: ${endpoint}\n\nLütfen bekleyin...`);
+    
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Merhaba, bu bir test seslendirmesidir.",
+          voice: voiceSettings.edgeVoice || "tr-TR-AhmetNeural",
+          rate: voiceSettings.rate || "0%",
+          pitch: voiceSettings.pitch || "0Hz"
+        })
+      });
+
+      const status = response.status;
+      let bodyText = "";
+      
+      try {
+        const json = await response.json();
+        bodyText = JSON.stringify(json, null, 2);
+      } catch {
+        bodyText = await response.text();
+      }
+
+      const debug = `=== FULL TTS TEST ===\nEndpoint: ${endpoint}\nStatus: ${status}\nVoice: ${voiceSettings.edgeVoice}\n\nResponse:\n${bodyText.substring(0, 2000)}\n\n${status === 200 ? "✓ Ses oluşturma başarılı!" : "✗ Ses oluşturma hatası"}`;
+
+      console.log(debug);
+      setDebugInfo(debug);
+    } catch (err) {
+      const debug = `=== FULL TTS TEST ERROR ===\nEndpoint: ${endpoint}\nVoice: ${voiceSettings.edgeVoice}\n\n${err instanceof Error ? err.message : String(err)}`;
+      console.error(debug);
+      setDebugInfo(debug);
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!narrationText || narrationText.trim().length === 0) {
+      onGenerateError?.("Önce AI tanıtım metni oluşturmalısınız.");
+      return;
+    }
+
+    onGenerateStart?.();
+    setDebugInfo("Ses oluşturuluyor...");
+    
+    try {
+      console.log("[VoiceSelector] Starting TTS generation...");
+      console.log("[VoiceSelector] Endpoint:", getTTSEndpoint());
+      
+      const result = await generateTTS({
+        text: narrationText,
+        voice: voiceSettings.edgeVoice,
+        rate: voiceSettings.rate,
+        pitch: voiceSettings.pitch,
+      });
+      
+      console.log("[VoiceSelector] TTS generation successful, duration:", result.duration);
+      setDebugInfo(null);
+      
+      setGeneratedAudio(result.audioBlob, result.duration);
+      invalidateAudioCache(hashText(narrationText));
+      onGenerateComplete?.(result.audioBlob, result.duration);
+    } catch (err: unknown) {
+      console.error("[VoiceSelector] TTS generation failed:", err);
+      
+      const errObj = err as { error?: string; details?: string };
+      const userMessage = errObj?.error || "Ses oluşturulurken bir hata oluştu.";
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const debugDetails = errObj?.details || errorMessage;
+      
+      const fullDebug = `=== DEBUG BILGI ===
+Endpoint: ${getTTSEndpoint()}
+
+HTTP: Hata oluştu
+
+Voice: ${voiceSettings.edgeVoice}
+Rate: ${voiceSettings.rate}
+Pitch: ${voiceSettings.pitch}
+
+Hata Detayı:
+${debugDetails}
+=================`;
+      
+      console.error(fullDebug);
+      setDebugInfo(fullDebug);
+      
+      onGenerateError?.(userMessage, debugDetails);
+    }
+  };
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
 
   const voiceOptions: { type: VoiceType; label: string; description: string }[] = [
     { type: "female", label: "Kadın", description: "Sıcak ve profesyonel" },
     { type: "male", label: "Erkek", description: "Güvenilir ve dinamik" },
     { type: "corporate", label: "Kurumsal", description: "Formal ve ciddi" },
   ];
-
-  const handlePlay = () => {
-    if (!audioUrl || !audioRef) return;
-    
-    audioRef.src = audioUrl;
-    if (isPlaying) {
-      audioRef.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.play();
-      setIsPlaying(true);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -50,16 +315,20 @@ export default function VoiceSelector({
           {voiceOptions.map((option) => (
             <button
               key={option.type}
-              onClick={() => onChange(option.type)}
+              onClick={() => handleVoiceChange(option.type)}
               disabled={disabled}
               className={`glass rounded-xl p-4 text-center transition-all duration-200 ${
-                voiceType === option.type
-                  ? "border-primary bg-primary/10"
+                voiceSettings.selectedVoice === option.type
+                  ? "border-primary bg-primary/10 ring-2 ring-primary/50"
                   : "border-white/10 hover:border-white/20"
               } ${disabled ? "opacity-50" : ""}`}
             >
-              <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-primary/10 flex items-center justify-center">
-                <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className={`w-12 h-12 mx-auto mb-2 rounded-full flex items-center justify-center ${
+                voiceSettings.selectedVoice === option.type
+                  ? "bg-primary/20"
+                  : "bg-primary/10"
+              }`}>
+                <svg className={`w-6 h-6 ${voiceSettings.selectedVoice === option.type ? "text-primary" : "text-primary/70"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                 </svg>
               </div>
@@ -72,7 +341,7 @@ export default function VoiceSelector({
 
       <div className="space-y-3">
         <button
-          onClick={onGenerate}
+          onClick={handleGenerate}
           disabled={disabled || isGenerating}
           className="w-full bg-gradient-to-r from-primary to-blue-600 text-white font-semibold py-4 rounded-xl flex items-center justify-center gap-3 disabled:opacity-50 hover:from-blue-600 hover:to-primary transition-all"
         >
@@ -94,31 +363,41 @@ export default function VoiceSelector({
           )}
         </button>
 
-        {audioUrl && (
-          <div className="glass rounded-xl p-4 flex items-center gap-4">
-            <button
-              onClick={handlePlay}
-              className="w-12 h-12 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors"
-            >
-              {isPlaying ? (
-                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                </svg>
-              ) : (
-                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              )}
-            </button>
-            <div className="flex-1">
-              <p className="text-white font-medium">Seslendirme Hazır</p>
-              <p className="text-muted text-sm">Dinlemek için tıkla</p>
-            </div>
-            <div className="flex gap-2">
+        {hasGeneratedAudio && (
+          <div className="glass rounded-xl p-4">
+            <div className="flex items-center gap-4">
               <button
-                onClick={onGenerate}
+                onClick={handlePlay}
+                className="w-12 h-12 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors flex-shrink-0"
+              >
+                {isPlaying ? (
+                  <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                  </svg>
+                ) : (
+                  <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                )}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-medium">Seslendirme Hazır</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-muted text-sm">
+                    {formatTime(currentTime)} / {formatTime(voiceSettings.audioDuration || duration)}
+                  </span>
+                </div>
+                <div className="w-full h-1 bg-white/10 rounded-full mt-2 overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-100"
+                    style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handleGenerate}
                 disabled={disabled || isGenerating}
-                className="p-2 text-muted hover:text-white transition-colors"
+                className="p-2 text-muted hover:text-white transition-colors flex-shrink-0"
                 title="Tekrar oluştur"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -128,7 +407,79 @@ export default function VoiceSelector({
             </div>
           </div>
         )}
+
+        {cachedNarrationHash && narrationText && narrationText !== cachedNarrationHash && !hasGeneratedAudio && (
+          <div className="glass rounded-xl p-4 border-yellow-500/30 bg-yellow-500/5">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <p className="text-yellow-200 text-sm">Metin değişti, seslendirmeyi yeniden oluşturmalısınız.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Debug Info Display */}
+        {debugInfo && (
+          <div className="glass rounded-xl p-4 border-red-500/30 bg-red-500/5">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-red-200 font-medium text-sm mb-1">Debug Bilgi:</p>
+                <pre className="text-red-300 text-xs whitespace-pre-wrap font-mono bg-black/20 rounded p-2 max-h-48 overflow-auto">
+                  {debugInfo}
+                </pre>
+              </div>
+              <button
+                onClick={() => setDebugInfo(null)}
+                className="text-red-400 hover:text-red-300 p-1"
+                title="Kapat"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Debug Test Buttons */}
+        <div className="flex gap-2">
+          <button
+            onClick={testHealth}
+            className="flex-1 py-2 rounded-xl border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/5 transition-colors text-xs font-medium"
+          >
+            🟢 Health
+          </button>
+          <button
+            onClick={testTTS}
+            className="flex-1 py-2 rounded-xl border border-blue-500/30 text-blue-400 hover:bg-blue-500/5 transition-colors text-xs font-medium"
+          >
+            🔵 Test TTS
+          </button>
+          <button
+            onClick={testFullGeneration}
+            className="flex-1 py-2 rounded-xl border border-green-500/30 text-green-400 hover:bg-green-500/5 transition-colors text-xs font-medium"
+          >
+            🔧 Full Test
+          </button>
+        </div>
+        <p className="text-muted text-xs text-center">
+          Backend: {TTS_API_URL || "localhost (VITE_TTS_API_URL ayarlanmamış)"}
+        </p>
       </div>
     </div>
   );
+}
+
+function hashText(text: string): string {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString();
 }

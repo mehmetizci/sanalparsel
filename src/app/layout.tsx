@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import GlobalErrorBoundary from "@/components/GlobalErrorBoundary";
+import SentryErrorBoundary from "@/components/SentryErrorBoundary";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -23,7 +25,11 @@ export default function RootLayout({
   return (
     <html lang="tr">
       <body className={`${inter.className} antialiased`}>
-        {children}
+        <SentryErrorBoundary>
+          <GlobalErrorBoundary>
+            {children}
+          </GlobalErrorBoundary>
+        </SentryErrorBoundary>
       </body>
     </html>
   );

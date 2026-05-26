@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project } from "@/types";
+import { hasAnyProjectConfig, getMostRecentProjectId, getProjectWizardStep } from "@/lib/project-config";
 import AppShell from "@/components/AppShell";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
 import EmptyState from "@/components/EmptyState";
+import LoadingRenderState from "@/components/LoadingRenderState";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -16,8 +18,18 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [credits, setCredits] = useState(0);
   const [loading, setLoading] = useState(true);
+  
+  // Mounted guard to prevent SSR/hydration issues
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    // Don't do localStorage operations until mounted
+    if (!mounted) return;
+    
     const checkUser = async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -29,13 +41,24 @@ export default function DashboardPage() {
       
       setUser(user);
       
-      // Fetch projects
+      // Check if user has any saved project in localStorage (only after mounted)
+      const hasSavedProject = hasAnyProjectConfig();
+      const mostRecentId = getMostRecentProjectId();
+      
+      // If no projects in DB but has saved localStorage config, redirect to continue
       const { data: projectsData } = await supabase
         .from("projects")
         .select("*")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(5);
+      
+      if (projectsData && projectsData.length === 0 && hasSavedProject && mostRecentId) {
+        // User has localStorage project but no DB records - redirect to correct wizard step
+        const wizardStep = getProjectWizardStep(mostRecentId);
+        router.push(wizardStep);
+        return;
+      }
       
       if (projectsData) {
         setProjects(projectsData as Project[]);
@@ -56,14 +79,13 @@ export default function DashboardPage() {
     };
     
     checkUser();
-  }, [router]);
+  }, [router, mounted]);
 
-  if (loading) {
+  // Show stable loading state before mounted
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Yükleniyor..." />
       </AppShell>
     );
   }

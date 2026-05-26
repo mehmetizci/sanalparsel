@@ -1,12 +1,13 @@
 "use client";
 
 import type { Polygon, MultiPolygon } from "geojson";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { parseParcelGeoJson, generateProjectName, generateShortProjectName, getParcelCenter } from "@/lib/geojson";
 import { ParcelGeoJson, ParcelProperties } from "@/types";
 import { useParcelStore, ParcelMetadata } from "@/lib/parcel-store";
+import { useAppLoadingStore } from "@/lib/loading-states";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import UploadCard from "@/components/UploadCard";
@@ -20,6 +21,11 @@ type NewProjectMode = "upload" | "adaparsel";
 export default function NewProjectPage() {
   const router = useRouter();
   const setFromParsed = useParcelStore((state) => state.setFromParsed);
+  
+  // Video state management - reset on page mount (GeoJSON upload must NOT trigger video overlay)
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+  
   const [mode, setMode] = useState<NewProjectMode>("upload");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +36,12 @@ export default function NewProjectPage() {
     shortTitle: string;
     center: { lat: number; lon: number } | null;
   } | null>(null);
+
+  // Reset video state on page mount - GeoJSON upload must NEVER trigger video overlay
+  useEffect(() => {
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
 
   const handleFileSelect = async (file: File) => {
     setLoading(true);

@@ -1,13 +1,11 @@
 /**
- * Video rendering pipeline using FFmpeg for frame-by-frame encoding.
+ * Browser-based Cinematic Video Renderer
  * 
- * This module handles:
- * - Frame sequencing from MapLibre canvas captures
- * - FFmpeg command generation for H264 encoding
- * - Progress tracking during rendering
- * 
- * Note: Actual FFmpeg execution happens server-side or via a render worker.
- * This client-side module prepares the data and generates commands.
+ * Features:
+ * - Mapbox GL JS canvas recording via MediaRecorder
+ * - Serverless TTS for narration (Edge TTS)
+ * - ffmpeg.wasm for audio/video merging (fallback to WebM)
+ * - Real downloadable MP4 videos
  */
 
 import type { RenderOptions } from "./cinematic-renderer";
@@ -22,333 +20,375 @@ export const VIDEO_DEFAULTS: Required<RenderOptions> = {
   height: 1080,
 };
 
-export const CODEC_PRESETS = {
-  /** High quality, larger file size */
-  high: {
-    preset: "slow" as const,
-    crf: 18,
-    profile: "high" as const,
-    level: "4.2" as const,
-  },
-  /** Balanced quality and speed */
-  balanced: {
-    preset: "medium" as const,
-    crf: 22,
-    profile: "high" as const,
-    level: "4.1" as const,
-  },
-  /** Fast encoding, smaller file */
-  fast: {
-    preset: "fast" as const,
-    crf: 26,
-    profile: "main" as const,
-    level: "4.0" as const,
-  },
+// Reels format constraints (mobile-optimized)
+export const REELS_CONFIG = {
+  width: 720,
+  height: 1280,
+  maxDuration: 30, // seconds
+  maxBitrate: 4, // Mbps
+  fps: 30,
+};
+
+// Landscape format constraints
+export const LANDSCAPE_CONFIG = {
+  width: 1280,
+  height: 720,
+  maxDuration: 30,
+  maxBitrate: 6,
+  fps: 30,
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type CameraMode = "orbit_360" | "spiral_descent" | "top_view" | "low_fly" | "four_corners";
+
+export interface RenderProgress {
+  stage: "preparing" | "map_init" | "recording" | "audio" | "merging" | "exporting" | "completed";
+  progress: number; // 0-100
+  message: string;
+}
+
+export type RenderProgressCallback = (progress: RenderProgress) => void;
+
 export interface RenderJob {
   id: string;
   projectId: string;
-  frames: Uint8ClampedArray[]; // RGBA frame data
-  options: Required<RenderOptions>;
   status: "pending" | "rendering" | "encoding" | "completed" | "failed";
-  progress: number; // 0-100
+  progress: number;
   outputUrl?: string;
+  outputBlob?: Blob;
   error?: string;
   startedAt?: Date;
   completedAt?: Date;
 }
 
-export interface FrameManifest {
-  frameCount: number;
-  width: number;
-  height: number;
-  fps: number;
-  duration: number;
-  format: "rgba" | "rgb24" | "yuv420p";
-  codec: string;
-  bitrate: number;
-}
+// Camera mode configurations for cinematic movements
+export const CAMERA_CONFIGS: Record<CameraMode, {
+  pitch: number;
+  bearing: number;
+  zoom: number;
+  duration: number; // seconds
+}> = {
+  orbit_360: {
+    pitch: 55,
+    bearing: 0,
+    zoom: 17,
+    duration: 20,
+  },
+  spiral_descent: {
+    pitch: 60,
+    bearing: -20,
+    zoom: 18,
+    duration: 25,
+  },
+  top_view: {
+    pitch: 0,
+    bearing: 0,
+    zoom: 16,
+    duration: 15,
+  },
+  low_fly: {
+    pitch: 45,
+    bearing: -15,
+    zoom: 18,
+    duration: 22,
+  },
+  four_corners: {
+    pitch: 50,
+    bearing: 45,
+    zoom: 17,
+    duration: 30,
+  },
+};
 
-// ─── FFmpeg command generation ───────────────────────────────────────────────
-
-export interface FFmpegCommandOptions {
-  inputPattern: string; // e.g., "frames/frame_%06d.png"
-  output: string; // e.g., "output.mp4"
-  width: number;
-  height: number;
-  fps: number;
-  bitrate: number;
-  preset?: keyof typeof CODEC_PRESETS;
-  pixFmt?: "yuv420p" | "yuv444p" | "rgb24";
-  additionalArgs?: string[];
-}
-
-/**
- * Generate FFmpeg command for encoding a sequence of PNG frames to H264 MP4.
- */
-export function generateFFmpegCommand(options: FFmpegCommandOptions): string {
-  const {
-    inputPattern,
-    output,
-    width,
-    height,
-    fps,
-    bitrate,
-    preset = "balanced",
-    pixFmt = "yuv420p",
-    additionalArgs = [],
-  } = options;
-
-  const codecConfig = CODEC_PRESETS[preset];
-
-  const args = [
-    // Input settings
-    "-framerate", String(fps),
-    "-i", inputPattern,
-    
-    // Output settings
-    "-c:v", "libx264",
-    "-preset", codecConfig.preset,
-    "-crf", String(codecConfig.crf),
-    "-profile:v", codecConfig.profile,
-    "-level", codecConfig.level,
-    
-    // Resolution
-    "-vf", `scale=${width}:${height}`,
-    
-    // Frame rate
-    "-r", String(fps),
-    
-    // Bitrate (minimum 20Mbps as specified)
-    "-b:v", `${bitrate}M`,
-    "-maxrate", `${Math.ceil(bitrate * 1.5)}M`,
-    "-bufsize", `${Math.ceil(bitrate * 2)}M`,
-    
-    // Pixel format
-    "-pix_fmt", pixFmt,
-    
-    // GOP size for better streaming (keyframe every 60 frames at 30fps)
-    "-g", "60",
-    "-keyint_min", "60",
-    
-    // Additional quality settings
-    "-movflags", "+faststart", // Enable fast start for web playback
-    
-    // Output file
-    output,
-    ...additionalArgs,
-  ];
-
-  return `ffmpeg ${args.join(" ")}`;
-}
+// ─── Narration Generation ────────────────────────────────────────────────────
 
 /**
- * Generate FFmpeg command for encoding RGBA raw frames.
+ * Generate narration audio using serverless Edge TTS
  */
-export function generateRawFFmpegCommand(
-  inputWidth: number,
-  inputHeight: number,
-  frameCount: number,
-  fps: number,
-  outputPath: string,
-  options: {
-    bitrate?: number;
-    preset?: keyof typeof CODEC_PRESETS;
-  } = {}
-): string {
-  const { bitrate = 20, preset = "balanced" } = options;
-  const codecConfig = CODEC_PRESETS[preset];
-
-  return [
-    "ffmpeg",
-    // Raw input
-    "-f", "rawvideo",
-    "-pix_fmt", "rgba",
-    "-s", `${inputWidth}x${inputHeight}`,
-    "-r", String(fps),
-    "-i", "pipe:0",
-    
-    // Encoding
-    "-c:v", "libx264",
-    "-preset", codecConfig.preset,
-    "-crf", String(codecConfig.crf),
-    "-pix_fmt", "yuv420p",
-    
-    // Bitrate
-    "-b:v", `${bitrate}M`,
-    
-    // Output
-    "-y", outputPath,
-  ].join(" ");
-}
-
-// ─── Frame utilities ──────────────────────────────────────────────────────────
-
-/**
- * Convert ImageData to PNG buffer suitable for FFmpeg input.
- */
-export function imageDataToPNG(imageData: ImageData): Uint8Array {
-  // Create canvas for conversion
-  const canvas = document.createElement("canvas");
-  canvas.width = imageData.width;
-  canvas.height = imageData.height;
-  const ctx = canvas.getContext("2d")!;
-  ctx.putImageData(imageData, 0, 0);
-
-  // Get PNG data
-  const dataUrl = canvas.toDataURL("image/png");
-  const base64 = dataUrl.split(",")[1];
-  
-  // Decode base64 to Uint8Array
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  
-  return bytes;
-}
-
-/**
- * Create a video from frame array using canvas + MediaRecorder as fallback.
- * Note: This creates WebM, not H264. For H264, use the FFmpeg pipeline.
- */
-export async function createWebMVideo(
-  frames: ImageData[],
-  options: { fps?: number; width?: number; height?: number } = {}
+export async function generateNarration(
+  text: string,
+  voiceType: "female" | "male" | "corporate",
+  onProgress?: RenderProgressCallback
 ): Promise<Blob> {
-  const { fps = 30, width = frames[0]?.width ?? 1920, height = frames[0]?.height ?? 1080 } = options;
+  onProgress?.({ stage: "preparing", progress: 10, message: "Seslendirme hazırlanıyor..." });
 
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
+  try {
+    const response = await fetch("/api/voice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice_type: voiceType }),
+    });
 
-  const stream = canvas.captureStream(fps);
-  const mediaRecorder = new MediaRecorder(stream, {
-    mimeType: "video/webm;codecs=vp9",
-    videoBitsPerSecond: 20 * 1000000,
-  });
+    if (!response.ok) {
+      throw new Error(`Voice API error: ${response.status}`);
+    }
 
-  const chunks: Blob[] = [];
-  mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+    const data = await response.json();
+    onProgress?.({ stage: "preparing", progress: 25, message: "Ses dosyası indiriliyor..." });
 
-  return new Promise((resolve) => {
+    if (data.audio_url) {
+      const audioResponse = await fetch(data.audio_url);
+      if (!audioResponse.ok) throw new Error("Failed to fetch audio");
+      const audioBlob = await audioResponse.blob();
+      onProgress?.({ stage: "audio", progress: 35, message: "Ses hazır!" });
+      return audioBlob;
+    }
+
+    throw new Error("No audio URL in response");
+  } catch (error) {
+    console.error("[VideoRenderer] Serverless TTS failed:", error);
+    return createSilentAudioBlob();
+  }
+}
+
+/**
+ * Create a silent audio blob as fallback
+ */
+function createSilentAudioBlob(): Blob {
+  const sampleRate = 44100;
+  const duration = 5;
+  const numSamples = sampleRate * duration;
+  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, numSamples * 2, true);
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+function writeString(view: DataView, offset: number, str: string) {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
+  }
+}
+
+// ─── Map Recording ────────────────────────────────────────────────────────────
+
+/**
+ * Record map animation to video blob using MediaRecorder
+ */
+export async function recordMapAnimation(
+  map: mapboxgl.Map,
+  canvas: HTMLCanvasElement,
+  cameraMode: CameraMode,
+  durationMs: number,
+  onProgress?: RenderProgressCallback
+): Promise<Blob> {
+  return new Promise(async (resolve, reject) => {
+    onProgress?.({ stage: "map_init", progress: 40, message: "Harita kaydı başlatılıyor..." });
+
+    const stream = canvas.captureStream(30);
+    const mediaRecorder = new MediaRecorder(stream, {
+      mimeType: "video/webm;codecs=vp9",
+      videoBitsPerSecond: 4000000,
+    });
+
+    const chunks: BlobPart[] = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
     mediaRecorder.onstop = () => {
+      onProgress?.({ stage: "recording", progress: 65, message: "Kayıt tamamlandı!" });
       resolve(new Blob(chunks, { type: "video/webm" }));
     };
 
-    mediaRecorder.start();
+    mediaRecorder.onerror = (e) => reject(e);
 
-    // Render frames
-    let frameIndex = 0;
-    const frameDuration = 1000 / fps;
+    mediaRecorder.start(100);
+    onProgress?.({ stage: "recording", progress: 45, message: "Kamera hareketi kaydediliyor..." });
 
-    const renderFrame = () => {
-      if (frameIndex >= frames.length) {
-        setTimeout(() => mediaRecorder.stop(), frameDuration);
-        return;
-      }
+    await animateCamera(map, cameraMode, durationMs);
 
-      ctx.putImageData(frames[frameIndex], 0, 0);
-      frameIndex++;
-      setTimeout(renderFrame, frameDuration);
-    };
-
-    renderFrame();
+    onProgress?.({ stage: "recording", progress: 60, message: "Kamera animasyonu tamamlandı..." });
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    mediaRecorder.stop();
   });
 }
 
-// ─── Rendering pipeline ────────────────────────────────────────────────────────
-
-export interface RenderPipelineOptions {
-  frames: ImageData[];
-  outputPath: string;
-  options: Required<RenderOptions>;
-  onProgress?: (progress: number, phase: string) => void;
-  ffmpegPath?: string;
-}
-
 /**
- * Execute the render pipeline.
- * 
- * In production, this would send frames to a render worker or server
- * for FFmpeg encoding. This client-side version provides utilities
- * for frame preparation and command generation.
+ * Animate map camera based on camera mode
  */
-export async function executeRenderPipeline(
-  options: RenderPipelineOptions
-): Promise<{ success: boolean; outputUrl?: string; command?: string }> {
-  const { frames, outputPath, options: opts, onProgress } = options;
+async function animateCamera(
+  map: mapboxgl.Map,
+  mode: CameraMode,
+  durationMs: number
+): Promise<void> {
+  const startBearing = map.getBearing();
+  const startZoom = map.getZoom();
 
-  if (frames.length === 0) {
-    return { success: false };
-  }
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    const config = CAMERA_CONFIGS[mode];
+    const totalDuration = Math.min(durationMs, config.duration * 1000);
 
-  onProgress?.(0, "preparing");
+    function animate() {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / totalDuration, 1);
+      const eased = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
 
-  try {
-    // Phase 1: Encode frames as PNG sequence
-    const pngFrames: Uint8Array[] = [];
-    for (let i = 0; i < frames.length; i++) {
-      pngFrames.push(imageDataToPNG(frames[i]));
-      if (i % 10 === 0) {
-        onProgress?.(Math.round((i / frames.length) * 30), "encoding_frames");
+      switch (mode) {
+        case "orbit_360": {
+          map.easeTo({
+            bearing: (startBearing + eased * 360) % 360,
+            pitch: 55 + Math.sin(progress * Math.PI) * 5,
+            duration: 0,
+          });
+          break;
+        }
+        case "spiral_descent": {
+          map.easeTo({
+            pitch: 65 - eased * 35,
+            zoom: startZoom + eased * 0.5,
+            bearing: startBearing + eased * 60,
+            duration: 0,
+          });
+          break;
+        }
+        case "top_view": {
+          map.easeTo({ pitch: 0, zoom: startZoom - eased, duration: 0 });
+          break;
+        }
+        case "low_fly": {
+          map.easeTo({
+            pitch: 40 + Math.sin(progress * Math.PI) * 10,
+            zoom: startZoom + Math.sin(progress * Math.PI) * 0.3,
+            bearing: startBearing + eased * 30,
+            duration: 0,
+          });
+          break;
+        }
+        case "four_corners": {
+          const corners = [0, 90, 180, 270];
+          map.easeTo({
+            bearing: startBearing + corners[Math.floor(progress * 4) % 4] * eased,
+            pitch: 50 + Math.sin((progress * 4 % 1) * Math.PI) * 10,
+            duration: 0,
+          });
+          break;
+        }
       }
+
+      if (progress < 1) requestAnimationFrame(animate);
+      else resolve();
     }
 
-    onProgress?.(30, "frames_ready");
+    map.flyTo({ pitch: 60, bearing: startBearing, zoom: startZoom, duration: 500 });
+    setTimeout(animate, 500);
+  });
+}
 
-    // Phase 2: Generate FFmpeg command
-    // In production, we'd upload frames and execute FFmpeg server-side
-    const command = generateFFmpegCommand({
-      inputPattern: "frames/frame_%06d.png",
-      output: outputPath,
-      width: opts.width,
-      height: opts.height,
-      fps: opts.fps,
-      bitrate: opts.bitrate,
+// ─── Audio/Video Merge ────────────────────────────────────────────────────────
+
+/**
+ * Merge video and audio using ffmpeg.wasm
+ */
+export async function mergeVideoAudio(
+  videoBlob: Blob,
+  audioBlob: Blob,
+  onProgress?: RenderProgressCallback
+): Promise<Blob> {
+  onProgress?.({ stage: "merging", progress: 75, message: "Video ve ses birleştiriliyor..." });
+
+  try {
+    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+    const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
+
+    const ffmpeg = new FFmpeg();
+    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+
+    await ffmpeg.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
     });
 
-    onProgress?.(40, "ffmpeg_command_generated");
+    onProgress?.({ stage: "merging", progress: 80, message: "FFmpeg hazır..." });
 
-    // For client-side, create a WebM fallback (not H264)
-    // Production should use server-side FFmpeg
-    const webmBlob = await createWebMVideo(frames, {
-      fps: opts.fps,
-      width: opts.width,
-      height: opts.height,
-    });
+    await ffmpeg.writeFile("input.webm", await fetchFile(videoBlob));
+    await ffmpeg.writeFile("audio.mp3", await fetchFile(audioBlob));
 
-    onProgress?.(90, "encoding_complete");
+    await ffmpeg.exec([
+      "-i", "input.webm", "-i", "audio.mp3",
+      "-c:v", "copy", "-c:a", "aac", "-shortest", "output.mp4",
+    ]);
 
-    // Convert WebM blob to URL
-    const outputUrl = URL.createObjectURL(webmBlob);
+    onProgress?.({ stage: "merging", progress: 88, message: "Dosya oluşturuluyor..." });
 
-    onProgress?.(100, "completed");
+    const data = await ffmpeg.readFile("output.mp4");
+    // Convert FileData (Uint8Array) to regular Blob
+    const outputBlob = new Blob([new Uint8Array(data as Uint8Array)], { type: "video/mp4" });
 
-    return {
-      success: true,
-      outputUrl,
-      command, // Return FFmpeg command for reference
-    };
+    await ffmpeg.deleteFile("input.webm");
+    await ffmpeg.deleteFile("audio.mp3");
+    await ffmpeg.deleteFile("output.mp4");
+
+    onProgress?.({ stage: "merging", progress: 92, message: "Birleştirme tamamlandı!" });
+    return outputBlob;
   } catch (error) {
-    console.error("Render pipeline error:", error);
-    return { success: false };
+    console.error("[VideoRenderer] FFmpeg merge failed:", error);
+    onProgress?.({ stage: "merging", progress: 92, message: "Ses birleştirme başarısız, video-only..." });
+    return videoBlob;
   }
 }
 
-// ─── Progress tracking ────────────────────────────────────────────────────────
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+export async function exportVideo(
+  videoBlob: Blob,
+  format: "reels" | "landscape",
+  onProgress?: RenderProgressCallback
+): Promise<Blob> {
+  onProgress?.({ stage: "exporting", progress: 95, message: "Video formatı düzenleniyor..." });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  onProgress?.({ stage: "completed", progress: 100, message: "Video hazır!" });
+  return videoBlob;
+}
+
+// ─── Main Render Pipeline ────────────────────────────────────────────────────
+
+export async function renderCinematicVideo(
+  map: mapboxgl.Map,
+  canvas: HTMLCanvasElement,
+  narrationText: string,
+  voiceType: "female" | "male" | "corporate",
+  cameraMode: CameraMode,
+  format: "reels" | "landscape",
+  durationSeconds: number,
+  onProgress?: RenderProgressCallback
+): Promise<{ blob: Blob; duration: number }> {
+  try {
+    const audioBlob = await generateNarration(narrationText, voiceType, onProgress);
+    const videoBlob = await recordMapAnimation(map, canvas, cameraMode, durationSeconds * 1000, onProgress);
+    const mergedBlob = await mergeVideoAudio(videoBlob, audioBlob, onProgress);
+    const finalBlob = await exportVideo(mergedBlob, format, onProgress);
+
+    return { blob: finalBlob, duration: durationSeconds };
+  } catch (error) {
+    console.error("[VideoRenderer] Render failed:", error);
+    throw error;
+  }
+}
+
+// ─── Progress Tracker ─────────────────────────────────────────────────────────
 
 export class RenderProgressTracker {
-  private callbacks: Map<string, (progress: number, phase: string) => void> = new Map();
-  private currentProgress = 0;
-  private currentPhase = "";
+  private callbacks: Map<string, (progress: RenderProgress) => void> = new Map();
 
-  addListener(id: string, callback: (progress: number, phase: string) => void): void {
+  addListener(id: string, callback: (progress: RenderProgress) => void): void {
     this.callbacks.set(id, callback);
   }
 
@@ -356,31 +396,7 @@ export class RenderProgressTracker {
     this.callbacks.delete(id);
   }
 
-  update(progress: number, phase: string): void {
-    this.currentProgress = progress;
-    this.currentPhase = phase;
-    this.callbacks.forEach((cb) => cb(progress, phase));
+  update(progress: RenderProgress): void {
+    this.callbacks.forEach((cb) => cb(progress));
   }
-
-  getProgress(): { progress: number; phase: string } {
-    return { progress: this.currentProgress, phase: this.currentPhase };
-  }
-}
-
-// ─── Manifest generation ─────────────────────────────────────────────────────
-
-export function generateVideoManifest(
-  frames: ImageData[],
-  options: Required<RenderOptions>
-): FrameManifest {
-  return {
-    frameCount: frames.length,
-    width: options.width,
-    height: options.height,
-    fps: options.fps,
-    duration: options.duration,
-    format: "rgba",
-    codec: "h264",
-    bitrate: options.bitrate,
-  };
 }

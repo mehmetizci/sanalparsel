@@ -1,41 +1,88 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { Project, ProjectSettings } from "@/types";
+import { useAppLoadingStore } from "@/lib/loading-states";
+import { 
+  ProjectConfig, 
+  VideoConfig,
+  OverlayConfig,
+  createDefaultProjectConfig,
+  loadProjectConfig,
+  saveProjectConfig,
+  migrateLegacySettings,
+  configToSettings,
+  buildOverlaySequence,
+  FORMAT_RESOLUTIONS,
+  FORMAT_ASPECT_RATIOS,
+} from "@/lib/project-config";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import VideoSettingToggle from "@/components/VideoSettingToggle";
 import PrimaryButton from "@/components/PrimaryButton";
+import LoadingRenderState from "@/components/LoadingRenderState";
 
-export default function VideoSettingsPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+interface VideoSettingsPageProps {
+  params: { id: string };
+}
+
+export default function VideoSettingsPage({ params }: VideoSettingsPageProps) {
+  const { id: projectId } = params;
   const router = useRouter();
-  const [, setProject] = useState<Project | null>(null);
-  const [settings, setSettings] = useState<ProjectSettings>({
-    id: "",
-    project_id: id,
-    duration: 30,
-    height: 300,
-    camera_modes: [],
-    camera_style: "cinematic",
-    video_format: "reels",
-    show_logo: true,
-    show_name: true,
-    show_phone: true,
-    show_avatar: false,
-    show_office: false,
-    show_license: false,
-    show_parcel_info: true,
-    show_environment: true,
-    show_subtitles: true,
-    show_final_card: true,
+  
+  // Video state management - reset on page mount
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+  
+  // Mounted guard to prevent SSR/hydration issues
+  const [mounted, setMounted] = useState(false);
+  
+  const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
+  const [videoSettings, setVideoSettings] = useState<VideoConfig>({
+    format: "reels",
+    resolution: FORMAT_RESOLUTIONS.reels,
+    overlays: {
+      consultantName: true,
+      phone: true,
+      logo: true,
+      profilePhoto: false,
+      parcelInfo: true,
+      nearbyPlaces: true,
+      subtitles: true,
+      finalContactCard: true,
+    },
   });
+  
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Set mounted guard and reset video state on mount
+  useEffect(() => {
+    setMounted(true);
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
+
+  // Load config from localStorage or create new (only after mounted)
+  useEffect(() => {
+    if (!mounted) return;
+    
+    const loadConfig = () => {
+      const stored = loadProjectConfig(projectId);
+      if (stored) {
+        setProjectConfig(stored);
+        setVideoSettings(stored.videoSettings);
+      } else {
+        const newConfig = createDefaultProjectConfig(projectId);
+        setProjectConfig(newConfig);
+      }
+    };
+    loadConfig();
+  }, [projectId, mounted]);
+
+  // Fetch project from Supabase
   useEffect(() => {
     const fetchProject = async () => {
       const supabase = createClient();
@@ -49,7 +96,7 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
       const { data } = await supabase
         .from("projects")
         .select("*")
-        .eq("id", id)
+        .eq("id", projectId)
         .eq("user_id", user.id)
         .single();
 
@@ -58,37 +105,75 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
         return;
       }
 
+      // Fetch existing settings
       const { data: settingsData } = await supabase
         .from("project_settings")
         .select("*")
-        .eq("project_id", id)
+        .eq("project_id", projectId)
         .single();
 
       if (settingsData) {
-        setSettings(settingsData as ProjectSettings);
+        // Migrate legacy settings to new config
+        const migrated = migrateLegacySettings(projectId, settingsData as Record<string, unknown>);
+        setProjectConfig(migrated);
+        setVideoSettings(migrated.videoSettings);
+        saveProjectConfig(migrated);
       }
 
-      setProject(data as Project);
       setLoading(false);
     };
 
     fetchProject();
-  }, [id, router]);
+  }, [projectId, router]);
 
-  const toggleSetting = (key: keyof ProjectSettings) => {
-    if (typeof settings[key] === "boolean") {
-      setSettings({ ...settings, [key]: !settings[key] });
+  // Update video settings and save to localStorage
+  const updateVideoSettings = useCallback((updates: Partial<VideoConfig>) => {
+    const newVideoSettings = { ...videoSettings, ...updates };
+    setVideoSettings(newVideoSettings);
+    
+    if (projectConfig) {
+      const updatedConfig = {
+        ...projectConfig,
+        videoSettings: newVideoSettings,
+        updatedAt: Date.now(),
+      };
+      setProjectConfig(updatedConfig);
+      saveProjectConfig(updatedConfig);
     }
+  }, [videoSettings, projectConfig]);
+
+  // Update overlays and save to localStorage
+  const updateOverlays = useCallback((updates: Partial<OverlayConfig>) => {
+    const newOverlays = { ...videoSettings.overlays, ...updates };
+    updateVideoSettings({ overlays: newOverlays });
+  }, [videoSettings.overlays, updateVideoSettings]);
+
+  // Toggle specific overlay
+  const toggleOverlay = (key: keyof OverlayConfig) => {
+    updateOverlays({ [key]: !videoSettings.overlays[key] });
+  };
+
+  // Preview overlay sequence (for UI feedback)
+  const previewOverlaySequence = () => {
+    if (!projectConfig) return null;
+    return buildOverlaySequence(videoSettings, projectConfig.droneSettings.duration);
   };
 
   const handleSaveAndContinue = async () => {
     setSaving(true);
     try {
       const supabase = createClient();
+
+      // Get settings from config
+      const settings = configToSettings(projectConfig!);
+
+      // Upsert to Supabase
       await supabase.from("project_settings").upsert(settings, {
         onConflict: "project_id",
       });
-      router.push(`/projects/${id}/environment`);
+
+      // Navigate to environment
+      router.push(`/projects/${projectId}/environment`);
     } catch (error) {
       console.error("Save error:", error);
     } finally {
@@ -96,15 +181,15 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
     }
   };
 
-  if (loading) {
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Sayfa hazırlanıyor..." />
       </AppShell>
     );
   }
+
+  const overlaySequence = previewOverlaySequence();
 
   return (
     <AppShell>
@@ -122,36 +207,42 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
             <label className="text-white font-semibold mb-3 block">Video Formatı</label>
             <div className="grid grid-cols-2 gap-3">
               <button
-                onClick={() => setSettings({ ...settings, video_format: "reels" })}
+                onClick={() => updateVideoSettings({ 
+                  format: "reels", 
+                  resolution: FORMAT_RESOLUTIONS.reels 
+                })}
                 className={`glass rounded-xl p-4 text-center transition-all ${
-                  settings.video_format === "reels"
+                  videoSettings.format === "reels"
                     ? "border-primary bg-primary/10"
                     : "border-white/10"
                 }`}
               >
                 <div className="mb-2">
                   <div className="w-12 h-20 mx-auto bg-primary/20 rounded-lg flex items-center justify-center">
-                    <span className="text-primary text-xs">9:16</span>
+                    <span className="text-primary text-xs">{FORMAT_ASPECT_RATIOS.reels}</span>
                   </div>
                 </div>
                 <p className="text-white font-medium">Reels</p>
-                <p className="text-muted text-xs">1080x1920</p>
+                <p className="text-muted text-xs">{videoSettings.resolution.width}x{videoSettings.resolution.height}</p>
               </button>
               <button
-                onClick={() => setSettings({ ...settings, video_format: "landscape" })}
+                onClick={() => updateVideoSettings({ 
+                  format: "landscape", 
+                  resolution: FORMAT_RESOLUTIONS.landscape 
+                })}
                 className={`glass rounded-xl p-4 text-center transition-all ${
-                  settings.video_format === "landscape"
+                  videoSettings.format === "landscape"
                     ? "border-primary bg-primary/10"
                     : "border-white/10"
                 }`}
               >
                 <div className="mb-2">
                   <div className="w-20 h-12 mx-auto bg-primary/20 rounded-lg flex items-center justify-center">
-                    <span className="text-primary text-xs">16:9</span>
+                    <span className="text-primary text-xs">{FORMAT_ASPECT_RATIOS.landscape}</span>
                   </div>
                 </div>
                 <p className="text-white font-medium">Yatay</p>
-                <p className="text-muted text-xs">1920x1080</p>
+                <p className="text-muted text-xs">{videoSettings.resolution.width}x{videoSettings.resolution.height}</p>
               </button>
             </div>
           </GlassCard>
@@ -162,51 +253,90 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
             <div className="space-y-3">
               <VideoSettingToggle
                 label="Danışman Adı"
-                enabled={settings.show_name}
-                onChange={() => toggleSetting("show_name")}
+                enabled={videoSettings.overlays.consultantName}
+                onChange={() => toggleOverlay("consultantName")}
               />
               <VideoSettingToggle
                 label="Telefon"
-                enabled={settings.show_phone}
-                onChange={() => toggleSetting("show_phone")}
+                enabled={videoSettings.overlays.phone}
+                onChange={() => toggleOverlay("phone")}
               />
               <VideoSettingToggle
                 label="Logo"
-                enabled={settings.show_logo}
-                onChange={() => toggleSetting("show_logo")}
+                enabled={videoSettings.overlays.logo}
+                onChange={() => toggleOverlay("logo")}
               />
               <VideoSettingToggle
                 label="Profil Fotoğrafı"
-                enabled={settings.show_avatar}
-                onChange={() => toggleSetting("show_avatar")}
+                enabled={videoSettings.overlays.profilePhoto}
+                onChange={() => toggleOverlay("profilePhoto")}
               />
               <VideoSettingToggle
                 label="Ada/Parsel Bilgisi"
-                enabled={settings.show_parcel_info}
-                onChange={() => toggleSetting("show_parcel_info")}
+                enabled={videoSettings.overlays.parcelInfo}
+                onChange={() => toggleOverlay("parcelInfo")}
               />
               <VideoSettingToggle
                 label="Yakın Çevre Bilgileri"
-                enabled={settings.show_environment}
-                onChange={() => toggleSetting("show_environment")}
+                enabled={videoSettings.overlays.nearbyPlaces}
+                onChange={() => toggleOverlay("nearbyPlaces")}
               />
               <VideoSettingToggle
                 label="Altyazı"
-                enabled={settings.show_subtitles}
-                onChange={() => toggleSetting("show_subtitles")}
+                enabled={videoSettings.overlays.subtitles}
+                onChange={() => toggleOverlay("subtitles")}
               />
               <VideoSettingToggle
                 label="Final İletişim Kartı"
-                enabled={settings.show_final_card}
-                onChange={() => toggleSetting("show_final_card")}
+                enabled={videoSettings.overlays.finalContactCard}
+                onChange={() => toggleOverlay("finalContactCard")}
               />
             </div>
           </GlassCard>
+
+          {/* Overlay Sequence Preview */}
+          {overlaySequence && overlaySequence.keyframes.length > 0 && (
+            <GlassCard className="bg-gradient-to-r from-primary/5 to-transparent">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-white font-semibold">Overlay Sırası</span>
+                <span className="text-muted text-sm">Önizleme</span>
+              </div>
+              <div className="space-y-2">
+                {overlaySequence.keyframes.map((kf, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between py-2 px-3 rounded-lg bg-card/50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-primary text-xs font-mono w-16">
+                        {kf.startTime.toFixed(1)}s - {kf.endTime.toFixed(1)}s
+                      </span>
+                      <span className="text-white text-sm">
+                        {kf.type === "parcelInfo" && "Parsel Bilgisi"}
+                        {kf.type === "nearbyPlaces" && "Yakın Çevre"}
+                        {kf.type === "consultantCard" && "Danışman Kartı"}
+                        {kf.type === "subtitles" && "Altyazı"}
+                        {kf.type === "finalContact" && "İletişim Kartı"}
+                      </span>
+                    </div>
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      kf.position === "top" ? "bg-blue-500/20 text-blue-400" :
+                      kf.position === "bottom" ? "bg-green-500/20 text-green-400" :
+                      kf.position === "center" ? "bg-yellow-500/20 text-yellow-400" :
+                      "bg-gray-500/20 text-gray-400"
+                    }`}>
+                      {kf.position}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </GlassCard>
+          )}
         </div>
 
         <div className="mt-8 flex gap-3">
           <button
-            onClick={() => router.push(`/projects/${id}/drone-settings`)}
+            onClick={() => router.push(`/projects/${projectId}/drone-settings`)}
             className="flex-1 py-3 rounded-xl border border-white/10 text-white hover:bg-white/5 transition-colors font-medium"
           >
             Geri

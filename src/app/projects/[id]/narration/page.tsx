@@ -1,32 +1,82 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, Narration, VideoTone } from "@/types";
+import { useParcelStore } from "@/lib/parcel-store";
+import { useAppLoadingStore } from "@/lib/loading-states";
+import {
+  ProjectConfig,
+  AiNarrationConfig,
+  NarrationMode,
+  NARRATION_MODES,
+  createDefaultProjectConfig,
+  loadProjectConfig,
+  saveProjectConfig,
+} from "@/lib/project-config";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import NarrationEditor from "@/components/NarrationEditor";
 import PrimaryButton from "@/components/PrimaryButton";
+import LoadingRenderState from "@/components/LoadingRenderState";
 
 export default function NarrationPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+  const { id: projectId } = params;
   const router = useRouter();
+  
+  // Reset video state on page mount (TTS generation should NOT trigger video overlay)
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+  
+  // Mounted guard to prevent SSR/hydration issues
+  const [mounted, setMounted] = useState(false);
+  
+  // Global parcel store for POIs
+  const globalPois = useParcelStore((state) => state.pois);
+  
   const [project, setProject] = useState<Project | null>(null);
-  const [narration, setNarration] = useState<Narration>({
-    id: "",
-    project_id: id,
+  const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
+  const [narrationConfig, setNarrationConfig] = useState<AiNarrationConfig>({
+    mode: "corporate",
     text: "",
-    tone: "corporate",
-    voice_type: "female",
-    audio_url: null,
-    duration: null,
+    lastGeneratedAt: null,
   });
+  const [voiceType, setVoiceType] = useState<"female" | "male" | "corporate">("female");
+  
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Set mounted guard and reset video state
+  useEffect(() => {
+    setMounted(true);
+    // Ensure video render state is idle - TTS generation must NOT show video overlay
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
+
+  // Load config from localStorage (only after mounted)
+  useEffect(() => {
+    if (!mounted) return;
+    
+    const loadConfig = () => {
+      const stored = loadProjectConfig(projectId);
+      if (stored) {
+        setProjectConfig(stored);
+        if (stored.aiNarration) {
+          setNarrationConfig(stored.aiNarration);
+        }
+      } else {
+        const newConfig = createDefaultProjectConfig(projectId);
+        setProjectConfig(newConfig);
+      }
+    };
+    loadConfig();
+  }, [projectId, mounted]);
+
+  // Fetch project from Supabase
   useEffect(() => {
     const fetchProject = async () => {
       const supabase = createClient();
@@ -40,7 +90,7 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
       const { data } = await supabase
         .from("projects")
         .select("*")
-        .eq("id", id)
+        .eq("id", projectId)
         .eq("user_id", user.id)
         .single();
 
@@ -55,21 +105,50 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
       const { data: narData } = await supabase
         .from("narrations")
         .select("*")
-        .eq("project_id", id)
+        .eq("project_id", projectId)
         .single();
 
       if (narData) {
-        setNarration(narData as Narration);
+        const nar = narData as Narration;
+        // Load existing narration text into config
+        if (nar.text && !narrationConfig.text) {
+          setNarrationConfig(prev => ({ ...prev, text: nar.text }));
+        }
+        if (nar.voice_type) {
+          setVoiceType(nar.voice_type);
+        }
       }
 
       setLoading(false);
     };
 
     fetchProject();
-  }, [id, router]);
+  }, [projectId, router, narrationConfig.text]);
 
+  // Update narration config and save to localStorage
+  const updateNarrationConfig = useCallback((updates: Partial<AiNarrationConfig>) => {
+    const newConfig = { ...narrationConfig, ...updates };
+    setNarrationConfig(newConfig);
+    
+    if (projectConfig) {
+      const updatedProjectConfig = {
+        ...projectConfig,
+        aiNarration: newConfig,
+        updatedAt: Date.now(),
+      };
+      setProjectConfig(updatedProjectConfig);
+      saveProjectConfig(updatedProjectConfig);
+    }
+  }, [narrationConfig, projectConfig]);
+
+  // Handle mode change - don't clear existing text
+  const handleModeChange = (mode: NarrationMode) => {
+    updateNarrationConfig({ mode });
+  };
+
+  // Handle AI generation
   const handleGenerateWithAI = async () => {
-    if (!project) return;
+    if (!project || !projectConfig) return;
 
     setGenerating(true);
     try {
@@ -77,26 +156,35 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          project_id: id,
-          tone: narration.tone,
+          project_id: projectId,
+          tone: narrationConfig.mode,
           city: project.city,
           district: project.district,
           neighborhood: project.neighborhood,
           area: project.area,
           property_type: project.property_type,
           custom_note: project.custom_note,
+          // Include POIs from both local config and global store
+          nearbyPlaces: narrationConfig.mode === narrationConfig.mode 
+            ? (projectConfig.nearbyPlaces?.places || globalPois)
+            : [],
+          videoDuration: projectConfig.droneSettings?.duration || 30,
+          cameraModes: projectConfig.droneSettings?.cameraModes || [],
         }),
       });
 
       const data = await response.json();
       if (data.text) {
-        setNarration((prev) => ({ ...prev, text: data.text }));
+        updateNarrationConfig({
+          text: data.text,
+          lastGeneratedAt: Date.now(),
+        });
       }
     } catch (error) {
       console.error("AI generation error:", error);
       // Fallback to default text
       const defaultText = `${project.neighborhood || project.district || "Bölge"}'de yer alan bu parsel, modern şehir yaşamına yakın konumuyla dikkat çekmektedir. ${project.area || "Geniş"} metrekarelik alanıyla çeşitli yatırım fırsatları sunmaktadır. Profesyonel emlak danışmanlarımız detaylı bilgi için sizinle iletişime geçecektir.`;
-      setNarration((prev) => ({ ...prev, text: defaultText }));
+      updateNarrationConfig({ text: defaultText });
     } finally {
       setGenerating(false);
     }
@@ -108,15 +196,15 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
       const supabase = createClient();
 
       await supabase.from("narrations").upsert({
-        project_id: id,
-        text: narration.text,
-        tone: narration.tone,
-        voice_type: narration.voice_type,
+        project_id: projectId,
+        text: narrationConfig.text,
+        tone: narrationConfig.mode as VideoTone,
+        voice_type: voiceType,
       }, {
         onConflict: "project_id",
       });
 
-      router.push(`/projects/${id}/video-preview`);
+      router.push(`/projects/${projectId}/video-preview`);
     } catch (error) {
       console.error("Save error:", error);
     } finally {
@@ -124,15 +212,34 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
     }
   };
 
-  if (loading) {
+  // Calculate text statistics
+  const textStats = useMemo(() => {
+    const text = narrationConfig.text || "";
+    const charCount = text.length;
+    const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+    const currentMode = NARRATION_MODES.find(m => m.value === narrationConfig.mode);
+    const estimatedDuration = currentMode 
+      ? Math.round(wordCount * currentMode.avgSpeechDuration)
+      : Math.round(wordCount * 0.35);
+    
+    return {
+      charCount,
+      wordCount,
+      estimatedDuration,
+      maxWords: currentMode?.maxWords || 150,
+      isOverLimit: wordCount > (currentMode?.maxWords || 150),
+    };
+  }, [narrationConfig.text, narrationConfig.mode]);
+
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Sayfa hazırlanıyor..." />
       </AppShell>
     );
   }
+
+  const currentModeInfo = NARRATION_MODES.find(m => m.value === narrationConfig.mode);
 
   return (
     <AppShell>
@@ -144,6 +251,30 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
           description="Video içeriği için tanıtım metnini oluşturun"
         />
 
+        {/* Mode Selection */}
+        <GlassCard className="mb-4">
+          <label className="text-white font-semibold mb-3 block">Metin Modu</label>
+          <div className="grid grid-cols-5 gap-2">
+            {NARRATION_MODES.map((mode) => (
+              <button
+                key={mode.value}
+                onClick={() => handleModeChange(mode.value)}
+                className={`p-3 rounded-xl text-center transition-all ${
+                  narrationConfig.mode === mode.value
+                    ? "bg-primary/20 border-2 border-primary"
+                    : "bg-card/50 border border-white/10 hover:border-white/20"
+                }`}
+              >
+                <div className="text-white text-xs font-medium">{mode.label}</div>
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 text-muted text-xs">
+            {currentModeInfo?.description} • Max {currentModeInfo?.maxWords} kelime
+          </div>
+        </GlassCard>
+
+        {/* Generate Button */}
         <GlassCard className="mb-4">
           <button
             onClick={handleGenerateWithAI}
@@ -163,24 +294,44 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                 </svg>
-                <span>AI ile Metin Oluştur</span>
+                <span>AI ile Metin Oluştur ({currentModeInfo?.label})</span>
               </>
             )}
           </button>
         </GlassCard>
 
+        {/* Text Editor */}
         <GlassCard>
           <NarrationEditor
-            text={narration.text}
-            onChange={(text) => setNarration((prev) => ({ ...prev, text }))}
-            tone={narration.tone}
-            onToneChange={(tone) => setNarration((prev) => ({ ...prev, tone: tone as VideoTone }))}
+            text={narrationConfig.text}
+            onChange={(text) => updateNarrationConfig({ text })}
+            tone={narrationConfig.mode as VideoTone}
+            onToneChange={(tone) => updateNarrationConfig({ mode: tone as NarrationMode })}
           />
         </GlassCard>
 
+        {/* Text Statistics */}
+        {narrationConfig.text && (
+          <GlassCard className="mt-4 bg-card/50">
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex gap-4">
+                <span className="text-muted">
+                  {textStats.charCount} karakter
+                </span>
+                <span className={`${textStats.isOverLimit ? "text-warning" : "text-success"}`}>
+                  {textStats.wordCount} / {textStats.maxWords} kelime
+                </span>
+              </div>
+              <span className="text-muted">
+                ~{textStats.estimatedDuration} sn seslendirme
+              </span>
+            </div>
+          </GlassCard>
+        )}
+
         <div className="mt-8 flex gap-3">
           <button
-            onClick={() => router.push(`/projects/${id}/environment`)}
+            onClick={() => router.push(`/projects/${projectId}/environment`)}
             className="flex-1 py-3 rounded-xl border border-white/10 text-white hover:bg-white/5 transition-colors font-medium"
           >
             Geri
@@ -188,7 +339,7 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
           <PrimaryButton
             onClick={handleSaveAndContinue}
             loading={saving}
-            disabled={!narration.text}
+            disabled={!narrationConfig.text || textStats.isOverLimit}
             className="flex-1"
           >
             Seslendirmeye Geç

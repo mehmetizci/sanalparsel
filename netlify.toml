@@ -1,0 +1,22 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+  functions = "netlify/functions"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "zisi"
+
+[[redirects]]
+  from = "/api/generate-tts"
+  to = "/.netlify/functions/generate-tts"
+  status = 200
+  force = true
+
+# Handle CORS preflight
+[[headers]]
+  for = "/api/generate-tts"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "POST, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type"

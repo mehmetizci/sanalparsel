@@ -1,21 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { Project, ProjectSettings, CameraMode } from "@/types";
+import { CameraMode } from "@/types";
+import { useAppLoadingStore } from "@/lib/loading-states";
+import { 
+  ProjectConfig, 
+  DroneConfig,
+  createDefaultProjectConfig,
+  loadProjectConfig,
+  saveProjectConfig,
+  migrateLegacySettings,
+  configToSettings,
+  CAMERA_MODE_LABELS,
+  buildCameraSequence,
+} from "@/lib/project-config";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import DroneModeCard from "@/components/DroneModeCard";
 import PrimaryButton from "@/components/PrimaryButton";
 import GlassCard from "@/components/GlassCard";
+import LoadingRenderState from "@/components/LoadingRenderState";
 
-const CAMERA_MODES: { mode: CameraMode; label: string; selected: boolean }[] = [
-  { mode: "orbit_360", label: "Orbit 360", selected: true },
-  { mode: "spiral_descent", label: "Spiral Alçalış", selected: true },
-  { mode: "top_view", label: "Tepe Görünüm", selected: false },
-  { mode: "low_fly", label: "Alçak Geçiş", selected: false },
-  { mode: "four_corners", label: "4 Köşe", selected: false },
+const CAMERA_MODES: { mode: CameraMode; label: string }[] = [
+  { mode: "orbit_360", label: "Orbit 360" },
+  { mode: "spiral_descent", label: "Spiral Alçalış" },
+  { mode: "top_view", label: "Tepe Görünüm" },
+  { mode: "low_fly", label: "Alçak Geçiş" },
+  { mode: "four_corners", label: "4 Köşe" },
 ];
 
 const DURATIONS = [30, 45, 60] as const;
@@ -26,33 +39,67 @@ const CAMERA_STYLES = [
   { value: "dynamic", label: "Dinamik", description: "Hızlı geçişler" },
 ] as const;
 
-export default function DroneSettingsPage({ params }: { params: { id: string } }) {
-  const { id } = params;
+interface DroneSettingsPageProps {
+  params: { id: string };
+}
+
+export default function DroneSettingsPage({ params }: DroneSettingsPageProps) {
+  const { id: projectId } = params;
   const router = useRouter();
-  const [, setProject] = useState<Project | null>(null);
-  const [settings, setSettings] = useState<ProjectSettings>({
-    id: "",
-    project_id: id,
+  
+  // Video state management - reset on page mount
+  const setVideoRenderState = useAppLoadingStore((state) => state.setVideoRenderState);
+  const setVideoRenderStartedByUser = useAppLoadingStore((state) => state.setVideoRenderStartedByUser);
+  
+  // Mounted guard to prevent SSR/hydration issues
+  const [mounted, setMounted] = useState(false);
+  
+  const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
+  const [droneSettings, setDroneSettings] = useState<DroneConfig>({
     duration: 30,
-    height: 300,
-    camera_modes: ["orbit_360", "spiral_descent"],
-    camera_style: "cinematic",
-    video_format: "reels",
-    show_logo: true,
-    show_name: true,
-    show_phone: true,
-    show_avatar: false,
-    show_office: false,
-    show_license: false,
-    show_parcel_info: true,
-    show_environment: true,
-    show_subtitles: true,
-    show_final_card: true,
+    startHeight: 300,
+    cameraFeel: "cinematic",
+    cameraModes: ["orbit_360", "spiral_descent"],
   });
-  const [cameraModes, setCameraModes] = useState(CAMERA_MODES);
+  
+  const [cameraModes, setCameraModes] = useState(
+    CAMERA_MODES.map((cm) => ({ ...cm, selected: droneSettings.cameraModes.includes(cm.mode) }))
+  );
+  
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Set mounted guard and reset video state on mount
+  useEffect(() => {
+    setMounted(true);
+    setVideoRenderState("idle");
+    setVideoRenderStartedByUser(false);
+  }, [setVideoRenderState, setVideoRenderStartedByUser]);
+
+  // Load config from localStorage or create new (only after mounted)
+  useEffect(() => {
+    if (!mounted) return;
+    
+    const loadConfig = () => {
+      const stored = loadProjectConfig(projectId);
+      if (stored) {
+        setProjectConfig(stored);
+        setDroneSettings(stored.droneSettings);
+        setCameraModes(
+          CAMERA_MODES.map((cm) => ({
+            ...cm,
+            selected: stored.droneSettings.cameraModes.includes(cm.mode),
+          }))
+        );
+      } else {
+        const newConfig = createDefaultProjectConfig(projectId);
+        setProjectConfig(newConfig);
+      }
+    };
+    loadConfig();
+  }, [projectId, mounted]);
+
+  // Fetch project from Supabase
   useEffect(() => {
     const fetchProject = async () => {
       const supabase = createClient();
@@ -66,7 +113,7 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
       const { data } = await supabase
         .from("projects")
         .select("*")
-        .eq("id", id)
+        .eq("id", projectId)
         .eq("user_id", user.id)
         .single();
 
@@ -79,52 +126,87 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
       const { data: settingsData } = await supabase
         .from("project_settings")
         .select("*")
-        .eq("project_id", id)
+        .eq("project_id", projectId)
         .single();
 
       if (settingsData) {
-        setSettings(settingsData as ProjectSettings);
+        // Migrate legacy settings to new config
+        const migrated = migrateLegacySettings(projectId, settingsData as Record<string, unknown>);
+        setProjectConfig(migrated);
+        setDroneSettings(migrated.droneSettings);
         setCameraModes(
           CAMERA_MODES.map((cm) => ({
             ...cm,
-            selected: (settingsData as ProjectSettings).camera_modes.includes(cm.mode),
+            selected: migrated.droneSettings.cameraModes.includes(cm.mode),
           }))
         );
+        saveProjectConfig(migrated);
       }
 
-      setProject(data as Project);
       setLoading(false);
     };
 
     fetchProject();
-  }, [id, router]);
+  }, [projectId, router]);
 
+  // Update drone settings and save to localStorage
+  const updateDroneSettings = useCallback((updates: Partial<DroneConfig>) => {
+    const newDroneSettings = { ...droneSettings, ...updates };
+    setDroneSettings(newDroneSettings);
+    
+    if (projectConfig) {
+      const updatedConfig = {
+        ...projectConfig,
+        droneSettings: newDroneSettings,
+        updatedAt: Date.now(),
+      };
+      setProjectConfig(updatedConfig);
+      saveProjectConfig(updatedConfig);
+    }
+  }, [droneSettings, projectConfig]);
+
+  // Handle camera mode toggle - prevent last mode from being deselected
   const handleToggleCameraMode = (mode: CameraMode) => {
-    setCameraModes((prev) =>
-      prev.map((cm) =>
-        cm.mode === mode ? { ...cm, selected: !cm.selected } : cm
-      )
+    const selectedCount = cameraModes.filter((cm) => cm.selected).length;
+    const isCurrentlySelected = cameraModes.find((cm) => cm.mode === mode)?.selected;
+
+    // Prevent deselecting the last selected mode
+    if (isCurrentlySelected && selectedCount === 1) {
+      return;
+    }
+
+    const newModes = cameraModes.map((cm) =>
+      cm.mode === mode ? { ...cm, selected: !cm.selected } : cm
     );
+    setCameraModes(newModes);
+
+    // Update drone settings with new camera modes
+    const selectedCameraModes = newModes
+      .filter((cm) => cm.selected)
+      .map((cm) => cm.mode);
+    updateDroneSettings({ cameraModes: selectedCameraModes });
+  };
+
+  // Preview camera sequence (for UI feedback)
+  const previewCameraSequence = () => {
+    return buildCameraSequence(droneSettings);
   };
 
   const handleSaveAndContinue = async () => {
     setSaving(true);
     try {
       const supabase = createClient();
-      const selectedModes = cameraModes
-        .filter((cm) => cm.selected)
-        .map((cm) => cm.mode);
 
-      // Upsert settings
-      await supabase.from("project_settings").upsert({
-        ...settings,
-        project_id: id,
-        camera_modes: selectedModes,
-      }, {
+      // Get settings from config
+      const settings = configToSettings(projectConfig!);
+
+      // Upsert to Supabase
+      await supabase.from("project_settings").upsert(settings, {
         onConflict: "project_id",
       });
 
-      router.push(`/projects/${id}/video-settings`);
+      // Navigate to video settings
+      router.push(`/projects/${projectId}/video-settings`);
     } catch (error) {
       console.error("Save error:", error);
     } finally {
@@ -132,15 +214,15 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
     }
   };
 
-  if (loading) {
+  if (loading || !mounted) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
+        <LoadingRenderState status="preparing" progress={10} customMessage="Sayfa hazırlanıyor..." />
       </AppShell>
     );
   }
+
+  const sequence = previewCameraSequence();
 
   return (
     <AppShell>
@@ -152,6 +234,28 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
           description="Video drone hareketini özelleştirin"
         />
 
+        {/* Camera Sequence Preview */}
+        {sequence.keyframes.length > 0 && (
+          <GlassCard className="mb-6 bg-gradient-to-r from-primary/5 to-transparent">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-muted text-sm">Kamera Sırası</span>
+              <span className="text-white text-sm font-medium">{droneSettings.duration} sn</span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              {sequence.keyframes.map((kf, i) => (
+                <div
+                  key={i}
+                  className="shrink-0 px-3 py-1.5 rounded-full bg-primary/20 border border-primary/30"
+                >
+                  <span className="text-primary text-xs font-medium">
+                    {CAMERA_MODE_LABELS[kf.mode]}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </GlassCard>
+        )}
+
         <div className="space-y-6">
           {/* Duration */}
           <GlassCard>
@@ -160,9 +264,9 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
               {DURATIONS.map((duration) => (
                 <button
                   key={duration}
-                  onClick={() => setSettings({ ...settings, duration })}
+                  onClick={() => updateDroneSettings({ duration })}
                   className={`py-3 rounded-xl font-semibold transition-all ${
-                    settings.duration === duration
+                    droneSettings.duration === duration
                       ? "bg-primary text-white"
                       : "bg-card/50 text-muted hover:bg-card"
                   }`}
@@ -180,9 +284,9 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
               {HEIGHTS.map((height) => (
                 <button
                   key={height}
-                  onClick={() => setSettings({ ...settings, height })}
+                  onClick={() => updateDroneSettings({ startHeight: height })}
                   className={`py-3 rounded-xl font-semibold transition-all ${
-                    settings.height === height
+                    droneSettings.startHeight === height
                       ? "bg-primary text-white"
                       : "bg-card/50 text-muted hover:bg-card"
                   }`}
@@ -200,9 +304,9 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
               {CAMERA_STYLES.map((style) => (
                 <button
                   key={style.value}
-                  onClick={() => setSettings({ ...settings, camera_style: style.value as "smooth" | "cinematic" | "dynamic" })}
+                  onClick={() => updateDroneSettings({ cameraFeel: style.value as "smooth" | "cinematic" | "dynamic" })}
                   className={`glass rounded-xl p-4 text-center transition-all ${
-                    settings.camera_style === style.value
+                    droneSettings.cameraFeel === style.value
                       ? "border-primary bg-primary/10"
                       : "border-white/10 hover:border-white/20"
                   }`}
@@ -223,7 +327,7 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
 
         <div className="mt-8 flex gap-3">
           <button
-            onClick={() => router.push(`/projects/${id}/preview`)}
+            onClick={() => router.push(`/projects/${projectId}/preview`)}
             className="flex-1 py-3 rounded-xl border border-white/10 text-white hover:bg-white/5 transition-colors font-medium"
           >
             Geri
