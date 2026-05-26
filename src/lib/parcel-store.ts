@@ -59,6 +59,28 @@ export interface CameraSequence {
   totalDuration: number;
 }
 
+// Video settings types
+export type VideoResolution = "1080x1920" | "720x1280";
+export type ListingType = "sale" | "investment";
+
+export interface VideoOverlaySettings {
+  consultantName: boolean;
+  phone: boolean;
+  logo: boolean;
+  profilePhoto: boolean;
+  parcelInfo: boolean;
+  nearbyPlaces: boolean;
+  subtitles: boolean;
+}
+
+export interface VideoSettingsState {
+  resolution: VideoResolution;
+  width: number;
+  height: number;
+  listingType: ListingType;
+  overlays: VideoOverlaySettings;
+}
+
 // Enhanced POI types with OSM metadata
 export interface POI {
   id: string;
@@ -201,6 +223,9 @@ export interface ParcelState {
   droneSettings: DroneSettingsState;
   cameraSequence: CameraSequence | null;
   
+  // Video settings state
+  videoSettings: VideoSettingsState;
+  
   // Actions
   setParcelData: (data: {
     geoJson?: Feature<Polygon | MultiPolygon>;
@@ -240,6 +265,7 @@ export interface ParcelState {
   // Drone settings actions
   setDroneSettings: (settings: Partial<DroneSettingsState>) => void;
   setCameraSequence: (sequence: CameraSequence | null) => void;
+  setVideoSettings: (settings: Partial<VideoSettingsState> | ((prev: VideoSettingsState) => VideoSettingsState)) => void;
   clearDroneSettings: () => void;
 }
 
@@ -265,6 +291,22 @@ export const useParcelStore = create<ParcelState>()(
         cameraModes: ["orbit360", "spiralDescend"],
       },
       cameraSequence: null,
+      // Video settings
+      videoSettings: {
+        resolution: "1080x1920",
+        width: 1080,
+        height: 1920,
+        listingType: "sale",
+        overlays: {
+          consultantName: true,
+          phone: true,
+          logo: true,
+          profilePhoto: false,
+          parcelInfo: true,
+          nearbyPlaces: true,
+          subtitles: true,
+        },
+      },
 
       setParcelData: (data) => set((state) => {
         const updates: Partial<ParcelState> = {
@@ -383,6 +425,13 @@ export const useParcelStore = create<ParcelState>()(
         droneSettings: { ...state.droneSettings, ...settings },
       })),
       setCameraSequence: (sequence) => set({ cameraSequence: sequence }),
+      // Set video settings (supports both direct value and updater function)
+      setVideoSettings: (settings) => set((state) => {
+        if (typeof settings === 'function') {
+          return { videoSettings: settings(state.videoSettings) };
+        }
+        return { videoSettings: { ...state.videoSettings, ...settings } };
+      }),
       clearDroneSettings: () => set({
         droneSettings: {
           duration: 30,
@@ -410,6 +459,8 @@ export const useParcelStore = create<ParcelState>()(
         // Persist drone settings
         droneSettings: state.droneSettings,
         cameraSequence: state.cameraSequence,
+        // Persist video settings
+        videoSettings: state.videoSettings,
       }),
     }
   )

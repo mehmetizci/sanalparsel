@@ -3,38 +3,32 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { Project, ProjectSettings } from "@/types";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import VideoSettingToggle from "@/components/VideoSettingToggle";
 import PrimaryButton from "@/components/PrimaryButton";
+import { useParcelStore, VideoResolution, ListingType } from "@/lib/parcel-store";
+
+const VIDEO_RESOLUTIONS: { value: VideoResolution; label: string; sublabel: string }[] = [
+  { value: "1080x1920", label: "Premium HD", sublabel: "1080x1920 • Yüksek kalite" },
+  { value: "720x1280", label: "Hızlı Render", sublabel: "720x1280 • Daha hızlı export" },
+];
+
+const LISTING_TYPES: { value: ListingType; label: string }[] = [
+  { value: "sale", label: "Satılık" },
+  { value: "investment", label: "Yatırımlık" },
+];
 
 export default function VideoSettingsPage({ params }: { params: { id: string } }) {
   const { id } = params;
   const router = useRouter();
-  const [, setProject] = useState<Project | null>(null);
-  const [settings, setSettings] = useState<ProjectSettings>({
-    id: "",
-    project_id: id,
-    duration: 30,
-    height: 300,
-    camera_modes: [],
-    camera_style: "cinematic",
-    video_format: "reels",
-    show_logo: true,
-    show_name: true,
-    show_phone: true,
-    show_avatar: false,
-    show_office: false,
-    show_license: false,
-    show_parcel_info: true,
-    show_environment: true,
-    show_subtitles: true,
-    show_final_card: true,
-  });
+  
+  // Store state
+  const videoSettings = useParcelStore((state) => state.videoSettings);
+  const setVideoSettings = useParcelStore((state) => state.setVideoSettings);
+  
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const fetchProject = async () => {
@@ -58,42 +52,30 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
         return;
       }
 
-      const { data: settingsData } = await supabase
-        .from("project_settings")
-        .select("*")
-        .eq("project_id", id)
-        .single();
-
-      if (settingsData) {
-        setSettings(settingsData as ProjectSettings);
-      }
-
-      setProject(data as Project);
       setLoading(false);
     };
 
     fetchProject();
   }, [id, router]);
 
-  const toggleSetting = (key: keyof ProjectSettings) => {
-    if (typeof settings[key] === "boolean") {
-      setSettings({ ...settings, [key]: !settings[key] });
-    }
+  const handleResolutionChange = (resolution: VideoResolution) => {
+    const [width, height] = resolution.split("x").map(Number);
+    setVideoSettings({ resolution, width, height });
   };
 
-  const handleSaveAndContinue = async () => {
-    setSaving(true);
-    try {
-      const supabase = createClient();
-      await supabase.from("project_settings").upsert(settings, {
-        onConflict: "project_id",
-      });
-      router.push(`/projects/${id}/environment`);
-    } catch (error) {
-      console.error("Save error:", error);
-    } finally {
-      setSaving(false);
-    }
+  const handleOverlayToggle = (key: keyof typeof videoSettings.overlays) => {
+    setVideoSettings((state) => ({
+      ...state,
+      overlays: {
+        ...state.overlays,
+        [key]: !state.overlays[key],
+      },
+    }));
+  };
+
+  const handleSaveAndContinue = () => {
+    console.log("[VideoSettings] Saved:", JSON.stringify(videoSettings, null, 2));
+    router.push(`/projects/${id}/environment`);
   };
 
   if (loading) {
@@ -117,42 +99,81 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
         />
 
         <div className="space-y-4">
-          {/* Video Format */}
+          {/* Video Resolution */}
           <GlassCard>
             <label className="text-white font-semibold mb-3 block">Video Formatı</label>
             <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setSettings({ ...settings, video_format: "reels" })}
-                className={`glass rounded-xl p-4 text-center transition-all ${
-                  settings.video_format === "reels"
-                    ? "border-primary bg-primary/10"
-                    : "border-white/10"
-                }`}
-              >
-                <div className="mb-2">
-                  <div className="w-12 h-20 mx-auto bg-primary/20 rounded-lg flex items-center justify-center">
-                    <span className="text-primary text-xs">9:16</span>
-                  </div>
-                </div>
-                <p className="text-white font-medium">Reels</p>
-                <p className="text-muted text-xs">1080x1920</p>
-              </button>
-              <button
-                onClick={() => setSettings({ ...settings, video_format: "landscape" })}
-                className={`glass rounded-xl p-4 text-center transition-all ${
-                  settings.video_format === "landscape"
-                    ? "border-primary bg-primary/10"
-                    : "border-white/10"
-                }`}
-              >
-                <div className="mb-2">
-                  <div className="w-20 h-12 mx-auto bg-primary/20 rounded-lg flex items-center justify-center">
-                    <span className="text-primary text-xs">16:9</span>
-                  </div>
-                </div>
-                <p className="text-white font-medium">Yatay</p>
-                <p className="text-muted text-xs">1920x1080</p>
-              </button>
+              {VIDEO_RESOLUTIONS.map((opt) => {
+                const isSelected = videoSettings.resolution === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => handleResolutionChange(opt.value)}
+                    className={`
+                      relative rounded-xl p-4 text-center transition-all duration-200
+                      ${isSelected 
+                        ? "border-2 border-blue-500 bg-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.5)]" 
+                        : "border border-white/20 bg-card/50 hover:bg-card hover:border-white/30"
+                      }
+                    `}
+                  >
+                    {isSelected && (
+                      <div className="absolute -top-2 -right-2 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    )}
+                    <div className="mb-2">
+                      <div className={`w-12 h-20 mx-auto rounded-lg flex items-center justify-center ${
+                        isSelected ? "bg-blue-500/30" : "bg-blue-500/10"
+                      }`}>
+                        <span className={`text-xs ${isSelected ? "text-blue-400" : "text-blue-300"}`}>9:16</span>
+                      </div>
+                    </div>
+                    <p className={`font-medium ${isSelected ? "text-blue-400" : "text-white"}`}>
+                      {opt.label}
+                    </p>
+                    <p className={`text-xs mt-1 ${isSelected ? "text-blue-300/70" : "text-gray-400"}`}>
+                      {opt.sublabel}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </GlassCard>
+
+          {/* Listing Type */}
+          <GlassCard>
+            <label className="text-white font-semibold mb-3 block">İlan Tipi</label>
+            <div className="grid grid-cols-2 gap-3">
+              {LISTING_TYPES.map((opt) => {
+                const isSelected = videoSettings.listingType === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setVideoSettings({ listingType: opt.value })}
+                    className={`
+                      relative rounded-xl p-4 text-center transition-all duration-200
+                      ${isSelected 
+                        ? "border-2 border-blue-500 bg-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.5)]" 
+                        : "border border-white/20 bg-card/50 hover:bg-card hover:border-white/30"
+                      }
+                    `}
+                  >
+                    {isSelected && (
+                      <div className="absolute -top-2 -right-2 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    )}
+                    <p className={`font-medium ${isSelected ? "text-blue-400" : "text-white"}`}>
+                      {opt.label}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
           </GlassCard>
 
@@ -162,43 +183,38 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
             <div className="space-y-3">
               <VideoSettingToggle
                 label="Danışman Adı"
-                enabled={settings.show_name}
-                onChange={() => toggleSetting("show_name")}
+                enabled={videoSettings.overlays.consultantName}
+                onChange={() => handleOverlayToggle("consultantName")}
               />
               <VideoSettingToggle
                 label="Telefon"
-                enabled={settings.show_phone}
-                onChange={() => toggleSetting("show_phone")}
+                enabled={videoSettings.overlays.phone}
+                onChange={() => handleOverlayToggle("phone")}
               />
               <VideoSettingToggle
                 label="Logo"
-                enabled={settings.show_logo}
-                onChange={() => toggleSetting("show_logo")}
+                enabled={videoSettings.overlays.logo}
+                onChange={() => handleOverlayToggle("logo")}
               />
               <VideoSettingToggle
                 label="Profil Fotoğrafı"
-                enabled={settings.show_avatar}
-                onChange={() => toggleSetting("show_avatar")}
+                enabled={videoSettings.overlays.profilePhoto}
+                onChange={() => handleOverlayToggle("profilePhoto")}
               />
               <VideoSettingToggle
                 label="Ada/Parsel Bilgisi"
-                enabled={settings.show_parcel_info}
-                onChange={() => toggleSetting("show_parcel_info")}
+                enabled={videoSettings.overlays.parcelInfo}
+                onChange={() => handleOverlayToggle("parcelInfo")}
               />
               <VideoSettingToggle
                 label="Yakın Çevre Bilgileri"
-                enabled={settings.show_environment}
-                onChange={() => toggleSetting("show_environment")}
+                enabled={videoSettings.overlays.nearbyPlaces}
+                onChange={() => handleOverlayToggle("nearbyPlaces")}
               />
               <VideoSettingToggle
                 label="Altyazı"
-                enabled={settings.show_subtitles}
-                onChange={() => toggleSetting("show_subtitles")}
-              />
-              <VideoSettingToggle
-                label="Final İletişim Kartı"
-                enabled={settings.show_final_card}
-                onChange={() => toggleSetting("show_final_card")}
+                enabled={videoSettings.overlays.subtitles}
+                onChange={() => handleOverlayToggle("subtitles")}
               />
             </div>
           </GlassCard>
@@ -213,7 +229,6 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
           </button>
           <PrimaryButton
             onClick={handleSaveAndContinue}
-            loading={saving}
             className="flex-1"
           >
             Çevre Bilgilerine Geç
