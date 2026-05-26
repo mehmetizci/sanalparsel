@@ -2,6 +2,37 @@
 
 import React, { Component, ReactNode } from "react";
 
+// Global error listeners - set up immediately
+if (typeof window !== "undefined") {
+  // Global window error listener
+  window.addEventListener("error", (event) => {
+    try {
+      localStorage.setItem("sanalparsel_last_error", JSON.stringify({
+        message: event.error?.message || "Unknown error",
+        stack: event.error?.stack || "",
+        timestamp: Date.now(),
+        type: "window_error"
+      }));
+    } catch {
+      // localStorage might not be available
+    }
+  });
+
+  // Unhandled promise rejection listener
+  window.addEventListener("unhandledrejection", (event) => {
+    try {
+      localStorage.setItem("sanalparsel_last_error", JSON.stringify({
+        message: String(event.reason),
+        stack: event.reason?.stack || "",
+        timestamp: Date.now(),
+        type: "unhandled_rejection"
+      }));
+    } catch {
+      // localStorage might not be available
+    }
+  });
+}
+
 // Global error state - shared across the app
 let globalErrorState: { hasError: boolean; error: Error | null; stackTrace: string } = {
   hasError: false,
@@ -30,6 +61,18 @@ export default class GlobalErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): State {
+    // Store error in localStorage
+    try {
+      localStorage.setItem("sanalparsel_last_error", JSON.stringify({
+        message: error.message,
+        stack: error.stack || "",
+        timestamp: Date.now(),
+        type: "react_boundary"
+      }));
+    } catch {
+      // Ignore
+    }
+
     globalErrorState = {
       hasError: true,
       error,
@@ -69,174 +112,87 @@ export default class GlobalErrorBoundary extends Component<Props, State> {
   };
 
   render() {
+    // Full screen error overlay - plain HTML fallback
     if (this.state.hasError) {
-      return <ErrorScreen 
-        error={this.state.error} 
-        stackTrace={this.state.stackTrace} 
-        onReset={this.handleReset}
-        onCopy={this.copyDebugInfo}
-      />;
+      return (
+        <div style={{ 
+          padding: "20px", 
+          color: "white", 
+          background: "#020617", 
+          minHeight: "100vh",
+          fontFamily: "monospace"
+        }}>
+          <h1 style={{ fontSize: "24px", color: "#ef4444", marginBottom: "20px" }}>
+            Uygulama Hatası
+          </h1>
+          
+          <div style={{ marginBottom: "20px" }}>
+            <h2 style={{ fontSize: "16px", color: "#fbbf24", marginBottom: "10px" }}>
+              Hata Mesajı:
+            </h2>
+            <pre style={{ 
+              background: "#111827", 
+              padding: "10px", 
+              borderRadius: "8px",
+              overflow: "auto",
+              maxHeight: "150px",
+              fontSize: "14px"
+            }}>
+              {this.state.error?.message || "Bilinmeyen hata"}
+            </pre>
+          </div>
+
+          <div style={{ marginBottom: "20px" }}>
+            <h2 style={{ fontSize: "16px", color: "#fbbf24", marginBottom: "10px" }}>
+              Stack Trace:
+            </h2>
+            <pre style={{ 
+              background: "#111827", 
+              padding: "10px", 
+              borderRadius: "8px",
+              overflow: "auto",
+              maxHeight: "300px",
+              fontSize: "12px"
+            }}>
+              {(this.state.error?.stack || "No stack trace").split("\n").slice(0, 15).join("\n")}
+            </pre>
+          </div>
+
+          <div style={{ marginBottom: "20px" }}>
+            <a 
+              href="/debug" 
+              style={{ 
+                display: "inline-block",
+                padding: "12px 24px",
+                background: "#3b82f6",
+                color: "white",
+                borderRadius: "8px",
+                textDecoration: "none",
+                marginRight: "10px"
+              }}
+            >
+              Debug Sayfası
+            </a>
+            <button
+              onClick={this.handleReset}
+              style={{
+                padding: "12px 24px",
+                background: "#ef4444",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer"
+              }}
+            >
+              Tekrar Dene
+            </button>
+          </div>
+        </div>
+      );
     }
 
     return this.props.children;
   }
-}
-
-// Error Screen Component - Function Component (uses hooks)
-function ErrorScreen({ 
-  error, 
-  stackTrace, 
-  onReset, 
-  onCopy 
-}: { 
-  error: Error | null;
-  stackTrace: string;
-  onReset: () => void;
-  onCopy: () => void;
-}) {
-  const stateInfo = getStateInfo();
-
-  return (
-    <div className="min-h-screen bg-gray-950 text-white p-4">
-      <div className="max-w-lg mx-auto">
-        {/* Error Icon */}
-        <div className="flex justify-center mb-6">
-          <div className="w-20 h-20 bg-red-600/20 rounded-full flex items-center justify-center">
-            <svg className="w-10 h-10 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-        </div>
-
-        {/* Error Title */}
-        <h1 className="text-2xl font-bold text-red-400 text-center mb-2">
-          Bir Hata Oluştu
-        </h1>
-        <p className="text-red-300 text-center mb-6">
-          Sayfa düzgün yüklenemedi
-        </p>
-
-        {/* Error Message */}
-        <div className="bg-black/40 rounded-2xl p-4 mb-4">
-          <h2 className="text-yellow-400 font-semibold mb-2">Hata Mesajı:</h2>
-          <p className="text-white font-mono text-sm break-all">
-            {error?.message || "Bilinmeyen hata"}
-          </p>
-        </div>
-
-        {/* Stack Trace */}
-        <div className="bg-black/40 rounded-2xl p-4 mb-4">
-          <h2 className="text-yellow-400 font-semibold mb-2">Stack Trace (ilk 10 satır):</h2>
-          <pre className="text-yellow-300 text-xs font-mono whitespace-pre-wrap max-h-40 overflow-auto">
-            {stackTrace.split("\n").slice(0, 10).join("\n")}
-          </pre>
-        </div>
-
-        {/* State Info */}
-        <div className="bg-black/40 rounded-2xl p-4 mb-4">
-          <h2 className="text-blue-400 font-semibold mb-2">Durum Bilgisi:</h2>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <StateItem label="projectConfig" value={stateInfo.projectConfig} />
-            <StateItem label="aiNarration" value={stateInfo.aiNarration} />
-            <StateItem label="voiceSettings" value={stateInfo.voiceSettings} />
-            <StateItem label="cachedAudioUrl" value={stateInfo.cachedAudioUrl} />
-          </div>
-        </div>
-
-        {/* Copy Button */}
-        <button
-          onClick={onCopy}
-          className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl mb-3 transition-colors"
-        >
-          Debug Bilgilerini Kopyala
-        </button>
-
-        {/* Reset Button */}
-        <button
-          onClick={onReset}
-          className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-semibold rounded-xl transition-colors"
-        >
-          Tekrar Dene
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// State Item Component
-function StateItem({ label, value }: { label: string; value: string }) {
-  const isExists = value === "true";
-  return (
-    <div className="bg-black/30 rounded-lg p-2">
-      <span className="text-gray-400 text-xs">{label}:</span>
-      <span className={`ml-2 font-medium ${isExists ? "text-green-400" : "text-red-400"}`}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-// Get state info from localStorage
-function getStateInfo(): { projectConfig: string; aiNarration: string; voiceSettings: string; cachedAudioUrl: string } {
-  return {
-    projectConfig: getProjectConfigExists(),
-    aiNarration: getAiNarrationExists(),
-    voiceSettings: getVoiceSettingsExists(),
-    cachedAudioUrl: getCachedAudioUrlExists(),
-  };
-}
-
-function getProjectConfigExists(): string {
-  try {
-    const data = localStorage.getItem("sanalparsel_project_config");
-    if (data) {
-      const configs = JSON.parse(data);
-      return Object.keys(configs || {}).length > 0 ? "true" : "false";
-    }
-  } catch {
-    // Ignore
-  }
-  return "false";
-}
-
-function getAiNarrationExists(): string {
-  try {
-    const data = localStorage.getItem("sanalparsel_project_config");
-    if (data) {
-      const configs = JSON.parse(data) as Record<string, { aiNarration?: { text?: string } }>;
-      const firstConfig = Object.values(configs || {})[0];
-      return firstConfig?.aiNarration?.text ? "true" : "false";
-    }
-  } catch {
-    // Ignore
-  }
-  return "false";
-}
-
-function getVoiceSettingsExists(): string {
-  try {
-    const data = localStorage.getItem("sanalparsel-parcel");
-    if (data) {
-      const state = JSON.parse(data);
-      return state?.state?.voiceSettings ? "true" : "false";
-    }
-  } catch {
-    // Ignore
-  }
-  return "false";
-}
-
-function getCachedAudioUrlExists(): string {
-  try {
-    const data = localStorage.getItem("sanalparsel-parcel");
-    if (data) {
-      const state = JSON.parse(data);
-      return state?.state?.cachedAudioUrl ? "true" : "false";
-    }
-  } catch {
-    // Ignore
-  }
-  return "false";
 }
 
 // Generate debug text for clipboard
@@ -245,9 +201,43 @@ function generateDebugText(): string {
 
   const pathname = window.location.pathname;
   const userAgent = navigator.userAgent;
-  const stateInfo = getStateInfo();
-  
-  const localStorageKeys = Object.keys(typeof localStorage !== "undefined" ? localStorage : {});
+  const localStorageKeys = Object.keys(localStorage);
+
+  // Inline helper functions
+  const getProjectConfigInfo = (): string => {
+    try {
+      const data = localStorage.getItem("sanalparsel_project_config");
+      if (data) {
+        const configs = JSON.parse(data);
+        const keys = Object.keys(configs);
+        return keys.length > 0 ? "true" : "false";
+      }
+    } catch { /* ignore */ }
+    return "false";
+  };
+
+  const getAiNarrationInfo = (): string => {
+    try {
+      const data = localStorage.getItem("sanalparsel_project_config");
+      if (data) {
+        const configs = JSON.parse(data) as Record<string, { aiNarration?: { text?: string } }>;
+        const firstConfig = Object.values(configs)[0];
+        return firstConfig?.aiNarration?.text ? "true" : "false";
+      }
+    } catch { /* ignore */ }
+    return "false";
+  };
+
+  const getVoiceSettingsInfo = (): string => {
+    try {
+      const data = localStorage.getItem("sanalparsel-parcel");
+      if (data) {
+        const state = JSON.parse(data);
+        return state?.state?.voiceSettings ? "true" : "false";
+      }
+    } catch { /* ignore */ }
+    return "false";
+  };
 
   return [
     "=== SANALPARSEL DEBUG INFO ===",
@@ -256,10 +246,9 @@ function generateDebugText(): string {
     `User Agent: ${userAgent}`,
     "",
     "=== STATE ===",
-    `projectConfig exists: ${stateInfo.projectConfig}`,
-    `aiNarration exists: ${stateInfo.aiNarration}`,
-    `voiceSettings exists: ${stateInfo.voiceSettings}`,
-    `cachedAudioUrl exists: ${stateInfo.cachedAudioUrl}`,
+    `projectConfig exists: ${getProjectConfigInfo()}`,
+    `aiNarration exists: ${getAiNarrationInfo()}`,
+    `voiceSettings exists: ${getVoiceSettingsInfo()}`,
     "",
     "=== LOCAL STORAGE KEYS ===",
     ...localStorageKeys.map(k => `  ${k}`),
