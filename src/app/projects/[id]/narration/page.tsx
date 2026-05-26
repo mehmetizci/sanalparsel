@@ -175,7 +175,7 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
 
   return (
     <AppShell>
-      <div className="px-4 py-5 max-w-2xl mx-auto pb-28">
+      <div className="px-4 py-5 max-w-2xl mx-auto pb-32">
         <StepHeader
           step={6}
           totalSteps={10}
@@ -317,16 +317,25 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Navigation Buttons */}
+        <div className="mt-4 flex gap-3">
+          <button
+            onClick={() => router.push(`/projects/${id}/environment`)}
+            className="px-5 py-2.5 rounded-xl border border-white/[0.1] text-white/60 text-sm hover:bg-white/[0.05] hover:text-white transition-all"
+          >
+            ← Geri
+          </button>
+        </div>
       </div>
 
       {/* Sticky Bottom CTA */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#07182F]/95 backdrop-blur-xl border-t border-white/[0.05]">
-        <motion.button
+        <button
           onClick={handleSaveAndContinue}
           disabled={!narration.text}
-          whileTap={narration.text ? { scale: 0.98 } : {}}
           className={`
-            w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all
+            w-full py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98]
             ${narration.text 
               ? "bg-gradient-to-r from-primary to-blue-500 text-white shadow-lg shadow-primary/30" 
               : "bg-white/[0.05] text-white/30"
@@ -347,7 +356,7 @@ export default function NarrationPage({ params }: { params: { id: string } }) {
               <span>Seslendirmeye Geç</span>
             </>
           )}
-        </motion.button>
+        </button>
       </div>
     </AppShell>
   );
