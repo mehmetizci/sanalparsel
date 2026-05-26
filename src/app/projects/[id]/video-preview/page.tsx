@@ -8,8 +8,6 @@ import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import VoiceSelector from "@/components/VoiceSelector";
-import LoadingRenderState from "@/components/LoadingRenderState";
-import PrimaryButton from "@/components/PrimaryButton";
 
 export default function VideoPreviewPage({ params }: { params: { id: string } }) {
   const { id } = params;
@@ -21,6 +19,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [loading, setLoading] = useState(true);
   const [generatingVoice, setGeneratingVoice] = useState(false);
   const [creatingVideo, setCreatingVideo] = useState(false);
+  const [textExpanded, setTextExpanded] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -112,7 +111,6 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     try {
       const supabase = createClient();
       
-      // Create video record
       const { data: videoData } = await supabase
         .from("videos")
         .insert({
@@ -127,8 +125,6 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
 
       if (videoData) {
         setVideo(videoData as Video);
-        
-        // Trigger render (in production, this would call a render worker)
         setTimeout(() => {
           router.push(`/projects/${id}/download`);
         }, 3000);
@@ -151,10 +147,12 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   }
 
   const videoStatus = video?.status || "preparing";
+  const hasAudio = !!narration?.audio_url;
+  const textPreview = narration?.text || "";
 
   return (
     <AppShell>
-      <div className="px-4 py-8 max-w-2xl mx-auto">
+      <div className="px-4 py-5 max-w-2xl mx-auto">
         <StepHeader
           step={7}
           totalSteps={10}
@@ -163,10 +161,14 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         />
 
         {video && videoStatus !== "completed" ? (
-          <LoadingRenderState status={videoStatus as "preparing" | "audio_creating" | "rendering" | "finalizing" | "completed"} progress={videoStatus === "rendering" ? 50 : 20} />
+          <div className="text-center py-12">
+            <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+            <p className="text-white/60 text-sm">Video hazırlanıyor...</p>
+          </div>
         ) : (
           <>
-            <GlassCard className="mb-4">
+            {/* Voice Selector Card */}
+            <GlassCard className="mb-4 p-4">
               <VoiceSelector
                 voiceType={voiceType}
                 onChange={setVoiceType}
@@ -177,44 +179,77 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
               />
             </GlassCard>
 
-            {narration?.audio_url && (
-              <GlassCard className="mb-4">
-                <h4 className="text-white font-semibold mb-3">Tanıtım Metni Önizleme</h4>
-                <p className="text-muted leading-relaxed">{narration.text}</p>
-              </GlassCard>
+            {/* Collapsible Text Preview */}
+            {textPreview && (
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-white/50 text-xs">Metin Önizleme</span>
+                  <span className="text-white/30 text-xs">{textPreview.length} karakter</span>
+                </div>
+                <div className="relative rounded-xl overflow-hidden" style={{ background: "rgba(15,23,42,0.5)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div className={`p-4 ${!textExpanded && "line-clamp-4"}`}>
+                    <p className="text-white/70 text-sm leading-relaxed">{textPreview}</p>
+                  </div>
+                  {textPreview.length > 200 && (
+                    <button
+                      onClick={() => setTextExpanded(!textExpanded)}
+                      className="w-full py-2 text-center text-primary/80 text-xs hover:text-primary transition-colors border-t border-white/[0.05]"
+                    >
+                      {textExpanded ? "▲ Daha Az" : "▼ Devamını Gör"}
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
 
-            <div className="glass rounded-2xl p-6 mb-6 bg-gradient-to-r from-primary/20 to-accent/20">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-card flex items-center justify-center">
-                  <svg className="w-7 h-7 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-white font-bold">{project?.short_title || "Proje Videosu"}</h3>
-                  <p className="text-muted text-sm">30 sn · Reels 1080x1920</p>
-                </div>
+            {/* Navigation Buttons */}
+            <div className="flex gap-3 mb-4">
+              <button
+                onClick={() => router.push(`/projects/${id}/narration`)}
+                className="flex-1 py-3 rounded-xl border border-white/[0.1] text-white/70 text-sm hover:bg-white/[0.05] transition-all font-medium"
+              >
+                Geri
+              </button>
+              <button
+                disabled={!hasAudio || creatingVideo}
+                onClick={handleCreateVideo}
+                className={`
+                  flex-1 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all
+                  ${hasAudio 
+                    ? "bg-gradient-to-r from-primary to-blue-500 text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30" 
+                    : "bg-white/[0.05] text-white/30 border border-white/[0.05]"
+                }
+                ${creatingVideo ? "opacity-70" : ""}
+              `}
+              >
+                {creatingVideo ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Hazırlanıyor...
+                  </>
+                ) : (
+                  <>
+                    <span>🎬</span>
+                    <span>Sinematik Video Oluştur</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Video Format Info */}
+            <div className="text-center py-3 px-4 rounded-xl" style={{ background: "linear-gradient(135deg, rgba(37,99,235,0.08) 0%, rgba(124,58,237,0.04) 100%)", border: "1px solid rgba(255,255,255,0.05)" }}>
+              <div className="flex items-center justify-center gap-2 text-white/50 text-xs">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span>{project?.short_title || "Proje"} • 30 sn • Reels 1080×1920</span>
               </div>
             </div>
           </>
         )}
-
-        <div className="flex gap-3">
-          <button
-            onClick={() => router.push(`/projects/${id}/narration`)}
-            className="flex-1 py-3 rounded-xl border border-white/10 text-white hover:bg-white/5 transition-colors font-medium"
-          >
-            Geri
-          </button>
-          <PrimaryButton
-            onClick={handleCreateVideo}
-            loading={creatingVideo}
-            className="flex-1"
-          >
-            Video Oluştur
-          </PrimaryButton>
-        </div>
       </div>
     </AppShell>
   );
