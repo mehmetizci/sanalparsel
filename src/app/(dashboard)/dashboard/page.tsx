@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project } from "@/types";
+import { hasAnyProjectConfig, getMostRecentProjectId } from "@/lib/project-config";
 import AppShell from "@/components/AppShell";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
@@ -29,13 +30,23 @@ export default function DashboardPage() {
       
       setUser(user);
       
-      // Fetch projects
+      // Check if user has any saved project in localStorage
+      const hasSavedProject = hasAnyProjectConfig();
+      const mostRecentId = getMostRecentProjectId();
+      
+      // If no projects in DB but has saved localStorage config, redirect to continue
       const { data: projectsData } = await supabase
         .from("projects")
         .select("*")
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(5);
+      
+      if (projectsData && projectsData.length === 0 && hasSavedProject && mostRecentId) {
+        // User has localStorage project but no DB records - redirect to continue
+        router.push(`/projects/${mostRecentId}/parcel-info`);
+        return;
+      }
       
       if (projectsData) {
         setProjects(projectsData as Project[]);

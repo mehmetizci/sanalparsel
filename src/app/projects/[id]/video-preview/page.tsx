@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { Project, Narration, Video } from "@/types";
 import { useParcelStore } from "@/lib/parcel-store";
+import {
+  ProjectConfig,
+  loadProjectConfig,
+  createDefaultProjectConfig,
+} from "@/lib/project-config";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
@@ -35,6 +40,10 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   };
   const cachedAudioUrl = useParcelStore((state) => state.cachedAudioUrl) || null;
   
+  // Project config state - with safe default
+  const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
+  const [projectConfigLoaded, setProjectConfigLoaded] = useState(false);
+  
   const [project, setProject] = useState<Project | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
   const [video, setVideo] = useState<Video | null>(null);
@@ -45,6 +54,29 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string | null>(null);
+
+  // Load project config from localStorage
+  useEffect(() => {
+    const loadConfig = () => {
+      try {
+        const stored = loadProjectConfig(projectId);
+        if (stored) {
+          setProjectConfig(stored);
+        } else {
+          // Create default config if none exists
+          const newConfig = createDefaultProjectConfig(projectId);
+          setProjectConfig(newConfig);
+        }
+      } catch (error) {
+        console.error("Failed to load project config:", error);
+        // Still create a default config to prevent crashes
+        const newConfig = createDefaultProjectConfig(projectId);
+        setProjectConfig(newConfig);
+      }
+      setProjectConfigLoaded(true);
+    };
+    loadConfig();
+  }, [projectId]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -208,9 +240,38 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     );
   }
 
+  // Show message if project config couldn't be loaded
+  const showProjectNotFound = !projectConfig && projectConfigLoaded;
+  const narrationText = localNarrationText || narration?.text || "";
+
+  if (showProjectNotFound) {
+    return (
+      <AppShell>
+        <div className="px-4 py-8 max-w-2xl mx-auto">
+          <GlassCard className="border-yellow-500/30 bg-yellow-500/5">
+            <div className="flex flex-col items-center text-center py-8">
+              <svg className="w-16 h-16 text-yellow-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <h3 className="text-yellow-400 font-bold text-lg mb-2">Proje Verisi Bulunamadı</h3>
+              <p className="text-yellow-200/80 text-sm mb-6">
+                Lütfen proje adımlarına geri dönün ve tekrar deneyin.
+              </p>
+              <button
+                onClick={() => router.push("/dashboard")}
+                className="px-6 py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-semibold rounded-xl transition-colors"
+              >
+                Projeye Geri Dön
+              </button>
+            </div>
+          </GlassCard>
+        </div>
+      </AppShell>
+    );
+  }
+
   const videoStatus = video?.status || "preparing";
   const hasGeneratedAudio = !!(voiceSettings.generatedAudioBlob || cachedAudioUrl);
-  const narrationText = localNarrationText || narration?.text || "";
 
   return (
     <AppShell>

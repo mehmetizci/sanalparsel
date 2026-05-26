@@ -560,6 +560,51 @@ export function deleteProjectConfig(projectId: string): void {
 }
 
 /**
+ * Get the most recently updated project ID from localStorage
+ * Returns the project ID with the most recent updatedAt timestamp
+ */
+export function getMostRecentProjectId(): string | null {
+  if (typeof window === "undefined") return null;
+  
+  try {
+    const configs = getAllProjectConfigs();
+    const projectIds = Object.keys(configs);
+    
+    if (projectIds.length === 0) return null;
+    
+    // Find the project with the most recent updatedAt
+    let mostRecentId: string | null = null;
+    let mostRecentTime = 0;
+    
+    for (const id of projectIds) {
+      const updatedAt = configs[id]?.updatedAt || 0;
+      if (updatedAt > mostRecentTime) {
+        mostRecentTime = updatedAt;
+        mostRecentId = id;
+      }
+    }
+    
+    return mostRecentId;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if any project config exists in localStorage
+ */
+export function hasAnyProjectConfig(): boolean {
+  if (typeof window === "undefined") return false;
+  
+  try {
+    const configs = getAllProjectConfigs();
+    return Object.keys(configs).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Migrate legacy settings to new config format
  */
 export function migrateLegacySettings(

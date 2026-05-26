@@ -188,7 +188,7 @@ function getStateInfo(): { projectConfig: string; aiNarration: string; voiceSett
 
 function getProjectConfigExists(): string {
   try {
-    const data = localStorage.getItem("sanalparsel-configs");
+    const data = localStorage.getItem("sanalparsel_project_config");
     if (data) {
       const configs = JSON.parse(data);
       return Object.keys(configs || {}).length > 0 ? "true" : "false";
@@ -201,7 +201,7 @@ function getProjectConfigExists(): string {
 
 function getAiNarrationExists(): string {
   try {
-    const data = localStorage.getItem("sanalparsel-configs");
+    const data = localStorage.getItem("sanalparsel_project_config");
     if (data) {
       const configs = JSON.parse(data) as Record<string, { aiNarration?: { text?: string } }>;
       const firstConfig = Object.values(configs || {})[0];
