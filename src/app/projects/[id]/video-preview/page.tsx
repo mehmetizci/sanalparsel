@@ -128,6 +128,11 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       setVoiceState("error");
       return;
     }
+    if (!project?.user_id) {
+      console.warn("[TTS] No user_id available");
+      setVoiceState("error");
+      return;
+    }
 
     abortControllerRef.current = new AbortController();
     setVoiceState("generating");
@@ -136,7 +141,8 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       console.log("[TTS] Starting voice generation...", { 
         textLength: narration.text.length, 
         voiceType,
-        projectId: id
+        projectId: id,
+        userId: project.user_id
       });
       
       const response = await fetch("/api/tts", {
@@ -145,6 +151,8 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         body: JSON.stringify({
           text: narration.text,
           voice: voiceType,
+          userId: project.user_id,
+          projectId: id,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -159,21 +167,18 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       // Always parse response - even on error
       const data = await response.json().catch(() => null);
       
-      if (!response.ok) {
+      if (!response.ok || !data?.success || !data?.audioUrl) {
         console.error("[TTS] API error:", data);
-        throw new Error(data?.error || "Ses oluşturulamadı");
+        const errorMsg = data?.error || "Ses oluşturulamadı";
+        throw new Error(errorMsg);
       }
       
       console.log("[TTS] Data received", { 
         hasAudioUrl: !!data?.audioUrl, 
         provider: data?.provider,
+        storagePath: data?.storagePath,
         duration: data?.duration 
       });
-      
-      if (!data?.audioUrl) {
-        console.warn("[TTS] No audioUrl in response");
-        throw new Error("Ses dosyası oluşturulamadı");
-      }
       
       console.log("[TTS] Saving to database...");
       const supabase = createClient();
@@ -189,7 +194,6 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       
       if (dbError) {
         console.error("[TTS] Database error:", dbError);
-        // Don't fail if DB save fails - we still have the audio URL
       } else {
         console.log("[TTS] Database saved successfully");
       }
@@ -208,7 +212,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         setVoiceState("error");
       }
     }
-  }, [narration?.text, voiceType, id]);
+  }, [narration?.text, voiceType, id, project?.user_id]);
 
   const handleVoiceRetry = useCallback(() => {
     setVoiceState("idle");
