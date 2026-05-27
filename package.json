@@ -2,6 +2,9 @@
   "name": "sanalparsel",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -15,7 +18,6 @@
     "mapbox-gl": "^3.24.0",
     "maplibre-gl": "^4.1.0",
     "next": "14.2.35",
-    "node-edge-tts": "^1.2.10",
     "react": "^18",
     "react-dom": "^18",
     "zustand": "^5.0.13"
