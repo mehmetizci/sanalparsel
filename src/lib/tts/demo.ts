@@ -12,7 +12,7 @@ export function hasTTSConfig(): boolean {
 }
 
 /**
- * Get TTS provider type
+ * Get TTS provider type - checks for configured API keys
  */
 export function getTTSProvider(): string {
   if (process.env.AZURE_TTS_KEY) return "azure";
