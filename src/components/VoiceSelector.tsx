@@ -61,6 +61,18 @@ export default function VoiceSelector({
     }
   }, [audioUrl]);
 
+  // Reset when audioUrl becomes null or empty - for retry
+  useEffect(() => {
+    if (!audioUrl && audioRef.current) {
+      currentUrlRef.current = null;
+      audioRef.current.src = "";
+      audioRef.current.load();
+      setDuration(0);
+      setCurrentTime(0);
+      setIsPlaying(false);
+    }
+  }, [audioUrl]);
+
   // Set up audio event listeners
   useEffect(() => {
     const audio = audioRef.current;
@@ -238,7 +250,7 @@ export default function VoiceSelector({
       </button>
 
       {/* Audio Player - Only show when audio is ready */}
-      {audioUrl && voiceState === "ready" && (
+      {audioUrl && voiceState === "ready" && audioUrl.startsWith("http") && (
         <div 
           className="relative rounded-xl overflow-hidden"
           style={{
