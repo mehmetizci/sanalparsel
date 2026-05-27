@@ -99,10 +99,12 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
 
       if (!cancelled && videoData) {
         setVideo(videoData as Video);
-        // If there's an active render, show appropriate state
-        if (videoData.status === "preparing" || videoData.status === "rendering") {
-          setRenderState("preparing");
+        // Only show preparing state if there's a COMPLETED render to resume
+        // Not just any video record - this prevents stale state from showing
+        if (videoData.status === "completed") {
+          setRenderState("idle"); // Ready to create new video
         }
+        // If actively rendering in DB, we'll start fresh (don't resume)
       }
 
       if (!cancelled) {
@@ -119,12 +121,24 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
 
   // Voice generation with cancellation support - COMPLETELY SEPARATE from render state
   const handleGenerateVoice = useCallback(async () => {
-    if (!narration?.text || !mountedRef.current) return;
+    // Safety check - ensure we have text to generate
+    if (!mountedRef.current) return;
+    if (!narration?.text) {
+      console.warn("[TTS] No narration text available");
+      setVoiceState("error");
+      return;
+    }
 
     abortControllerRef.current = new AbortController();
     setVoiceState("generating");
     
     try {
+      console.log("[TTS] Starting voice generation...", { 
+        textLength: narration.text.length, 
+        voiceType,
+        projectId: id
+      });
+      
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -135,37 +149,62 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         signal: abortControllerRef.current.signal,
       });
 
-      if (!mountedRef.current) return;
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Ses oluşturulamadı");
+      if (!mountedRef.current) {
+        console.log("[TTS] Component unmounted, aborting");
+        return;
       }
       
-      const data = await response.json();
-      if (data.audioUrl) {
-        const supabase = createClient();
-        await supabase.from("narrations").upsert({
-          project_id: id,
-          text: narration.text,
-          voice_type: voiceType,
-          audio_url: data.audioUrl,
-          duration: data.duration || null,
-        }, {
-          onConflict: "project_id",
-        });
-        
-        if (mountedRef.current) {
-          setNarration((prev) => prev ? { ...prev, audio_url: data.audioUrl } : null);
-          setVoiceState("ready");
-        }
+      console.log("[TTS] Response received", { status: response.status });
+      
+      // Always parse response - even on error
+      const data = await response.json().catch(() => null);
+      
+      if (!response.ok) {
+        console.error("[TTS] API error:", data);
+        throw new Error(data?.error || "Ses oluşturulamadı");
+      }
+      
+      console.log("[TTS] Data received", { 
+        hasAudioUrl: !!data?.audioUrl, 
+        provider: data?.provider,
+        duration: data?.duration 
+      });
+      
+      if (!data?.audioUrl) {
+        console.warn("[TTS] No audioUrl in response");
+        throw new Error("Ses dosyası oluşturulamadı");
+      }
+      
+      console.log("[TTS] Saving to database...");
+      const supabase = createClient();
+      const { error: dbError } = await supabase.from("narrations").upsert({
+        project_id: id,
+        text: narration.text,
+        voice_type: voiceType,
+        audio_url: data.audioUrl,
+        duration: data.duration || null,
+      }, {
+        onConflict: "project_id",
+      });
+      
+      if (dbError) {
+        console.error("[TTS] Database error:", dbError);
+        // Don't fail if DB save fails - we still have the audio URL
+      } else {
+        console.log("[TTS] Database saved successfully");
+      }
+      
+      if (mountedRef.current) {
+        console.log("[TTS] Setting state to ready");
+        setNarration((prev) => prev ? { ...prev, audio_url: data.audioUrl } : null);
+        setVoiceState("ready");
       }
     } catch (err) {
       if ((err as Error).name === "AbortError") {
-        // Cancelled - reset to idle
+        console.log("[TTS] Request aborted");
         if (mountedRef.current) setVoiceState("idle");
       } else if (mountedRef.current) {
-        console.error("Voice generation error:", err);
+        console.error("[TTS] Voice generation error:", err);
         setVoiceState("error");
       }
     }
@@ -381,15 +420,17 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           </div>
         )}
 
-        {/* Cancelled/Resumable State */}
-        {(renderState === "cancelled" || (renderState === "idle" && video)) && (
+        {/* Cancelled/Resumable State - Only show if we were actively rendering */}
+        {(renderState === "cancelled" || renderState === "error") && (
           <div className="mb-4 p-4 rounded-xl text-center" style={{ background: "rgba(15,23,42,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>
-            <p className="text-white/60 text-sm mb-3">Video oluşturma {renderState === "cancelled" ? "iptal edildi" : "yarıda kaldı"}</p>
+            <p className="text-white/60 text-sm mb-3">
+              {renderState === "cancelled" ? "Video oluşturma iptal edildi" : "Video oluşturma hatası"}
+            </p>
             <button
-              onClick={handleCreateVideo}
+              onClick={handleResetRender}
               className="px-4 py-2 text-xs bg-primary/20 text-primary rounded-lg hover:bg-primary/30 transition-colors"
             >
-              ▶ Kaldığı Yerden Devam Et
+              ▶ Yeni Video Oluştur
             </button>
           </div>
         )}
