@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-admin";
-import { DEMO_AUDIO_BASE64, DEMO_AUDIO_DURATION, getTTSProvider } from "@/lib/tts/demo";
+import { EdgeTTS } from "node-edge-tts";
 
-// Turkish voice mappings for real TTS
+// Turkish voice mappings for Edge TTS
 const VOICE_MAP: Record<string, string> = {
   female: "tr-TR-EmelNeural",
   male: "tr-TR-AhmetNeural",
   corporate: "tr-TR-AhmetNeural",
 };
-
-// Request timeout in milliseconds
-const REQUEST_TIMEOUT = 20000; // 20 seconds
 
 // Bucket name for generated audio
 const STORAGE_BUCKET = "generated-audio";
@@ -33,8 +30,6 @@ export async function POST(request: NextRequest) {
   console.log(`[TTS:${requestId}] [ENV CHECK]`);
   console.log(`  SUPABASE_URL exists:`, !!process.env.NEXT_PUBLIC_SUPABASE_URL);
   console.log(`  SUPABASE_SERVICE_ROLE_KEY exists:`, !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-  console.log(`  AZURE_TTS_KEY exists:`, !!process.env.AZURE_TTS_KEY);
-  console.log(`  AZURE_TTS_REGION:`, process.env.AZURE_TTS_REGION || "westeurope (default)");
   
   try {
     const body: TTSRequestBody = await request.json();
@@ -62,35 +57,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const provider = getTTSProvider();
-    console.log(`[TTS:${requestId}] [PROVIDER] ${provider}`);
-    
-    // If no TTS config, use demo audio (stored as data URL)
-    if (provider === "demo") {
-      console.log(`[TTS:${requestId}] [DEMO MODE] Using base64 audio`);
-      
-      return NextResponse.json({
-        success: true,
-        audioUrl: `data:audio/mpeg;base64,${DEMO_AUDIO_BASE64}`,
-        duration: DEMO_AUDIO_DURATION,
-        provider: "demo",
-        voice: VOICE_MAP[voice] || VOICE_MAP.female,
-        storagePath: null,
-        message: "Demo modu - Gerçek ses için Azure TTS yapılandırın",
-      });
-    }
-
-    // Generate real audio with Azure TTS
-    if (provider === "azure") {
-      console.log(`[TTS:${requestId}] [AZURE MODE] Starting generation...`);
-      return await generateAndUploadAudio(text, voice, userId, projectId, requestId);
-    }
-
-    console.log(`[TTS:${requestId}] [ERROR] Unknown provider: ${provider}`);
-    return NextResponse.json({
-      success: false,
-      error: `Bilinmeyen TTS sağlayıcı: ${provider}`,
-    }, { status: 400 });
+    console.log(`[TTS:${requestId}] [PROVIDER] Edge TTS (free)`);
+    return await generateAndUploadAudio(text, voice, userId, projectId, requestId);
     
   } catch (error) {
     console.error(`[TTS:${requestId}] [FATAL ERROR]`, error);
@@ -108,7 +76,7 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Generate audio with Azure TTS and upload to Supabase Storage
+ * Generate audio with Edge TTS and upload to Supabase Storage
  */
 async function generateAndUploadAudio(
   text: string, 
@@ -118,91 +86,66 @@ async function generateAndUploadAudio(
   requestId: number
 ): Promise<NextResponse> {
   const voiceId = VOICE_MAP[voice] || VOICE_MAP.female;
-  const apiKey = process.env.AZURE_TTS_KEY;
-  const region = process.env.AZURE_TTS_REGION || "westeurope";
 
-  console.log(`[TTS:${requestId}] [AZURE] Voice: ${voiceId}, Region: ${region}`);
+  console.log(`[TTS:${requestId}] [EDGE TTS] Voice: ${voiceId}`);
 
   try {
-    // Step 1: Call Azure TTS
-    console.log(`[TTS:${requestId}] [STEP 1] Calling Azure TTS API...`);
+    // Step 1: Call Edge TTS
+    console.log(`[TTS:${requestId}] [STEP 1] Calling Edge TTS...`);
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      console.log(`[TTS:${requestId}] [TIMEOUT] 20s timeout triggered`);
-      controller.abort();
-    }, REQUEST_TIMEOUT);
+    const tts = new EdgeTTS({
+      voice: voiceId,
+      outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+    });
 
-    const azureResponse = await fetch(
-      `https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`,
-      {
-        method: "POST",
-        headers: {
-          "Ocp-Apim-Subscription-Key": apiKey!,
-          "Content-Type": "application/ssml+xml",
-          "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
-        },
-        body: `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='tr-TR'>
-          <voice name='${voiceId}'>${text}</voice>
-        </speak>`,
-        signal: controller.signal,
-      }
-    );
+    // Generate audio to a temp file
+    const tempPath = `/tmp/edge-tts-${requestId}.mp3`;
+    await tts.ttsPromise(text, tempPath);
 
-    clearTimeout(timeoutId);
+    // Read the generated file
+    const fs = await import("fs");
+    const audioBuffer = fs.readFileSync(tempPath);
+    
+    // Clean up temp file
+    try {
+      fs.unlinkSync(tempPath);
+    } catch {}
 
-    console.log(`[TTS:${requestId}] [STEP 1] Azure TTS response status: ${azureResponse.status}`);
+    console.log(`[TTS:${requestId}] [STEP 1] Edge TTS success, buffer size: ${audioBuffer.length} bytes`);
 
-    if (!azureResponse.ok) {
-      const errorText = await azureResponse.text().catch(() => "Unknown error");
-      console.error(`[TTS:${requestId}] [STEP 1 ERROR] Azure TTS failed:`, errorText);
+    if (audioBuffer.length === 0) {
+      console.error(`[TTS:${requestId}] [STEP 1 ERROR] Empty audio buffer`);
       return NextResponse.json(
-        { 
-          success: false,
-          error: `Azure TTS hatası (${azureResponse.status}): ${errorText.substring(0, 200)}` 
-        },
+        { success: false, error: "Edge TTS boş yanıt döndürdü" },
         { status: 502 }
       );
     }
 
-    // Step 2: Get audio buffer
-    console.log(`[TTS:${requestId}] [STEP 2] Reading audio buffer...`);
-    const audioBuffer = await azureResponse.arrayBuffer();
-    console.log(`[TTS:${requestId}] [STEP 2] Audio buffer size: ${audioBuffer.byteLength} bytes`);
-
-    if (audioBuffer.byteLength === 0) {
-      console.error(`[TTS:${requestId}] [STEP 2 ERROR] Empty audio buffer`);
-      return NextResponse.json(
-        { success: false, error: "Azure TTS boş yanıt döndürdü" },
-        { status: 502 }
-      );
-    }
-
-    // Step 3: Generate storage path
+    // Step 2: Generate storage path
     const timestamp = Date.now();
     const fileName = `voice-${voice}-${timestamp}.mp3`;
     const storagePath = `${userId}/${projectId}/${fileName}`;
 
-    console.log(`[TTS:${requestId}] [STEP 3] Storage path: ${storagePath}`);
+    console.log(`[TTS:${requestId}] [STEP 2] Storage path: ${storagePath}`);
 
-    // Step 4: Create Supabase client
-    console.log(`[TTS:${requestId}] [STEP 4] Creating Supabase client...`);
+    // Step 3: Create Supabase client
+    console.log(`[TTS:${requestId}] [STEP 3] Creating Supabase client...`);
     const supabase = createServerClient();
-    console.log(`[TTS:${requestId}] [STEP 4] Supabase client created`);
+    console.log(`[TTS:${requestId}] [STEP 3] Supabase client created`);
 
-    // Step 5: Check/create bucket
-    console.log(`[TTS:${requestId}] [STEP 5] Checking bucket '${STORAGE_BUCKET}'...`);
+    // Step 4: Check/create bucket
+    console.log(`[TTS:${requestId}] [STEP 4] Checking bucket '${STORAGE_BUCKET}'...`);
     const { error: bucketError } = await supabase.storage.getBucket(STORAGE_BUCKET);
     
     if (bucketError) {
-      console.log(`[TTS:${requestId}] [STEP 5] Bucket not found, creating...`);
+      console.log(`[TTS:${requestId}] [STEP 4] Bucket not found, creating...`);
       const { error: createError } = await supabase.storage.createBucket(STORAGE_BUCKET, {
         public: true,
         fileSizeLimit: 10485760, // 10MB
       });
       
       if (createError) {
-        console.error(`[TTS:${requestId}] [STEP 5 ERROR] Bucket creation failed:`, createError);
+        console.error(`[TTS:${requestId}] [STEP 4 ERROR] Bucket creation failed:`, createError);
         return NextResponse.json(
           { 
             success: false,
@@ -211,16 +154,16 @@ async function generateAndUploadAudio(
           { status: 500 }
         );
       }
-      console.log(`[TTS:${requestId}] [STEP 5] Bucket created successfully`);
+      console.log(`[TTS:${requestId}] [STEP 4] Bucket created successfully`);
     } else {
-      console.log(`[TTS:${requestId}] [STEP 5] Bucket exists`);
+      console.log(`[TTS:${requestId}] [STEP 4] Bucket exists`);
     }
 
-    // Step 6: Upload file
-    console.log(`[TTS:${requestId}] [STEP 6] Uploading to Supabase Storage...`);
+    // Step 5: Upload file
+    console.log(`[TTS:${requestId}] [STEP 5] Uploading to Supabase Storage...`);
     console.log(`  contentType: audio/mpeg`);
     console.log(`  path: ${storagePath}`);
-    console.log(`  buffer size: ${audioBuffer.byteLength}`);
+    console.log(`  buffer size: ${audioBuffer.length}`);
     
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
@@ -230,7 +173,7 @@ async function generateAndUploadAudio(
       });
 
     if (uploadError) {
-      console.error(`[TTS:${requestId}] [STEP 6 ERROR] Upload failed:`, uploadError);
+      console.error(`[TTS:${requestId}] [STEP 5 ERROR] Upload failed:`, uploadError);
       return NextResponse.json(
         { 
           success: false,
@@ -240,15 +183,15 @@ async function generateAndUploadAudio(
       );
     }
 
-    console.log(`[TTS:${requestId}] [STEP 6] Upload success:`, uploadData);
+    console.log(`[TTS:${requestId}] [STEP 5] Upload success:`, uploadData);
 
-    // Step 7: Get public URL
-    console.log(`[TTS:${requestId}] [STEP 7] Getting public URL...`);
+    // Step 6: Get public URL
+    console.log(`[TTS:${requestId}] [STEP 6] Getting public URL...`);
     const { data: urlData } = supabase.storage
       .from(STORAGE_BUCKET)
       .getPublicUrl(storagePath);
 
-    console.log(`[TTS:${requestId}] [STEP 7] Public URL: ${urlData.publicUrl}`);
+    console.log(`[TTS:${requestId}] [STEP 6] Public URL: ${urlData.publicUrl}`);
 
     const duration = Math.ceil(text.length / 15);
 
@@ -260,13 +203,13 @@ async function generateAndUploadAudio(
       audioUrl: urlData.publicUrl,
       storagePath: storagePath,
       duration,
-      provider: "azure",
+      provider: "edge-tts",
       voice: voiceId,
-      fileSize: audioBuffer.byteLength,
+      fileSize: audioBuffer.length,
     });
     
   } catch (error) {
-    console.error(`[TTS:${requestId}] [FATAL] Azure TTS exception:`, error);
+    console.error(`[TTS:${requestId}] [FATAL] Edge TTS exception:`, error);
     return NextResponse.json(
       { 
         success: false,
