@@ -8,6 +8,7 @@ import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import VoiceSelector from "@/components/VoiceSelector";
+import type { VoiceState } from "@/components/VoiceSelector";
 
 type RenderState = "idle" | "preparing" | "generating" | "completed" | "error" | "cancelled";
 
@@ -21,10 +22,12 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [video, setVideo] = useState<Video | null>(null);
   const [voiceType, setVoiceType] = useState<VoiceType>("female");
   const [loading, setLoading] = useState(true);
-  const [generatingVoice, setGeneratingVoice] = useState(false);
   const [textExpanded, setTextExpanded] = useState(false);
   
-  // Render state management
+  // SEPRATED voiceState - completely independent from renderState
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  
+  // Render state management - completely separate from voice
   const [renderState, setRenderState] = useState<RenderState>("idle");
   const [renderProgress, setRenderProgress] = useState(0);
   
@@ -82,6 +85,10 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       if (!cancelled && narData) {
         setNarration(narData as Narration);
         setVoiceType((narData as Narration).voice_type || "female");
+        // If there's existing audio, set voice state to ready
+        if ((narData as Narration).audio_url) {
+          setVoiceState("ready");
+        }
       }
 
       const { data: videoData } = await supabase
@@ -110,54 +117,67 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     };
   }, [id, router]);
 
-  // Voice generation with cancellation support
-  const handleGenerateVoice = async () => {
+  // Voice generation with cancellation support - COMPLETELY SEPARATE from render state
+  const handleGenerateVoice = useCallback(async () => {
     if (!narration?.text || !mountedRef.current) return;
 
     abortControllerRef.current = new AbortController();
-    setGeneratingVoice(true);
+    setVoiceState("generating");
     
     try {
-      const response = await fetch("/api/voice", {
+      const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: narration.text,
-          voice_type: voiceType,
+          voice: voiceType,
         }),
         signal: abortControllerRef.current.signal,
       });
 
       if (!mountedRef.current) return;
       
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Ses oluşturulamadı");
+      }
+      
       const data = await response.json();
-      if (data.audio_url) {
+      if (data.audioUrl) {
         const supabase = createClient();
         await supabase.from("narrations").upsert({
           project_id: id,
           text: narration.text,
           voice_type: voiceType,
-          audio_url: data.audio_url,
+          audio_url: data.audioUrl,
+          duration: data.duration || null,
         }, {
           onConflict: "project_id",
         });
         
         if (mountedRef.current) {
-          setNarration((prev) => prev ? { ...prev, audio_url: data.audio_url } : null);
+          setNarration((prev) => prev ? { ...prev, audio_url: data.audioUrl } : null);
+          setVoiceState("ready");
         }
       }
     } catch (err) {
       if ((err as Error).name === "AbortError") {
-        // Cancelled - do nothing
+        // Cancelled - reset to idle
+        if (mountedRef.current) setVoiceState("idle");
       } else if (mountedRef.current) {
         console.error("Voice generation error:", err);
-      }
-    } finally {
-      if (mountedRef.current) {
-        setGeneratingVoice(false);
+        setVoiceState("error");
       }
     }
-  };
+  }, [narration?.text, voiceType, id]);
+
+  const handleVoiceRetry = useCallback(() => {
+    setVoiceState("idle");
+    // Trigger regenerate after state reset
+    setTimeout(() => {
+      handleGenerateVoice();
+    }, 50);
+  }, [handleGenerateVoice]);
 
   // Video creation with cancellation support
   const handleCreateVideo = useCallback(async () => {
@@ -383,9 +403,10 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 voiceType={voiceType}
                 onChange={setVoiceType}
                 onGenerate={handleGenerateVoice}
-                disabled={generatingVoice}
-                isGenerating={generatingVoice}
+                disabled={voiceState === "generating" || isRenderActive()}
+                voiceState={voiceState}
                 audioUrl={narration?.audio_url}
+                onRetry={handleVoiceRetry}
               />
             </GlassCard>
 
