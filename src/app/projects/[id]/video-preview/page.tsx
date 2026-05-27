@@ -26,6 +26,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   
   // SEPRATED voiceState - completely independent from renderState
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [ttsProvider, setTtsProvider] = useState<string | null>(null);
   
   // Render state management - completely separate from voice
   const [renderState, setRenderState] = useState<RenderState>("idle");
@@ -179,6 +180,11 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         storagePath: data?.storagePath,
         duration: data?.duration 
       });
+      
+      // Save provider info for UI display
+      if (data?.provider) {
+        setTtsProvider(data.provider);
+      }
       
       console.log("[TTS] Saving to database...");
       const supabase = createClient();
@@ -452,6 +458,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 voiceState={voiceState}
                 audioUrl={narration?.audio_url}
                 onRetry={handleVoiceRetry}
+                provider={ttsProvider}
               />
             </GlassCard>
 

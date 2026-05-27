@@ -13,6 +13,7 @@ interface VoiceSelectorProps {
   voiceState?: VoiceState;
   audioUrl?: string | null;
   onRetry?: () => void;
+  provider?: string | null;
 }
 
 const voiceLabels: Record<VoiceType, string> = {
@@ -29,6 +30,7 @@ export default function VoiceSelector({
   voiceState = "idle",
   audioUrl,
   onRetry,
+  provider,
 }: VoiceSelectorProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -36,6 +38,13 @@ export default function VoiceSelector({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentUrlRef = useRef<string | null>(null);
+
+  // Log provider info for debugging (MVP: not shown in UI)
+  useEffect(() => {
+    if (provider) {
+      console.log(`[VoiceSelector] TTS provider: ${provider}`);
+    }
+  }, [provider]);
 
   // Initialize audio element
   useEffect(() => {
@@ -125,8 +134,17 @@ export default function VoiceSelector({
     setErrorMessage(null);
     try {
       await onGenerate();
-    } catch {
-      setErrorMessage("Ses oluşturulurken bir hata oluştu");
+    } catch (err) {
+      // Show user-friendly message, hide technical details
+      const errorMsg = err instanceof Error ? err.message : "Ses oluşturulamadı";
+      // Map technical errors to user-friendly messages
+      if (errorMsg.includes("403") || errorMsg.includes("edge-tts")) {
+        setErrorMessage("Ses servisi şu anda kullanılamıyor. Lütfen tekrar deneyin.");
+      } else if (errorMsg.includes("timeout") || errorMsg.includes("network")) {
+        setErrorMessage("Bağlantı hatası. İnternet bağlantınızı kontrol edin.");
+      } else {
+        setErrorMessage("Ses oluşturulamadı. Lütfen tekrar deneyin.");
+      }
     }
   }, [onGenerate]);
 

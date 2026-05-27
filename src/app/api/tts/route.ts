@@ -34,7 +34,7 @@ async function generateWithEdgeTTS(text: string, voice: string): Promise<Buffer>
   const outputPath = path.join(os.tmpdir(), `edge-tts-${Date.now()}.mp3`);
   
   console.log(`[EDGE TTS CLI] Starting`);
-  console.log(`[EDGE TTS CLI] Command: python3 -m edge_tts --voice ${voice} --text "..." --write-media ${outputPath}`);
+  console.log(`[EDGE TTS CLI] Voice: ${voice}`);
   
   return new Promise((resolve, reject) => {
     const child = spawn("python3", [
@@ -61,8 +61,8 @@ async function generateWithEdgeTTS(text: string, voice: string): Promise<Buffer>
     
     child.on("close", (code) => {
       if (code !== 0) {
-        console.error(`[EDGE TTS CLI] Exit code: ${code}`);
-        console.error(`[EDGE TTS CLI] stderr: ${errorOutput}`);
+        console.error(`[EDGE TTS CLI] Failed with exit code: ${code}`);
+        console.error(`[EDGE TTS CLI] Error: ${errorOutput || "Unknown error"}`);
         
         try {
           if (fs.existsSync(outputPath)) {
@@ -75,6 +75,7 @@ async function generateWithEdgeTTS(text: string, voice: string): Promise<Buffer>
       }
       
       if (!fs.existsSync(outputPath)) {
+        console.error(`[EDGE TTS CLI] Output file not created`);
         reject(new Error("edge-tts CLI did not create output file"));
         return;
       }
@@ -87,14 +88,16 @@ async function generateWithEdgeTTS(text: string, voice: string): Promise<Buffer>
         } catch {}
         
         if (!audioBuffer || audioBuffer.length === 0) {
+          console.error(`[EDGE TTS CLI] Empty audio buffer returned`);
           reject(new Error("edge-tts CLI returned empty audio buffer"));
           return;
         }
         
-        console.log(`[EDGE TTS CLI] MP3 created`);
+        console.log(`[EDGE TTS CLI] MP3 created (${audioBuffer.length} bytes)`);
         resolve(audioBuffer);
         
       } catch (readError) {
+        console.error(`[EDGE TTS CLI] Failed to read output file: ${readError}`);
         reject(new Error(`Failed to read MP3 file: ${readError}`));
       }
     });
@@ -108,7 +111,7 @@ async function generateWithGTTS(text: string): Promise<Buffer> {
   const outputPath = path.join(os.tmpdir(), `gtts-${Date.now()}.mp3`);
   
   console.log(`[GTTS] Starting`);
-  console.log(`[GTTS] Command: python3 -c "from gtts import gTTS; gTTS(text='...', lang='tr').save('${outputPath}')"`);
+  console.log(`[GTTS] Language: tr`);
   
   return new Promise((resolve, reject) => {
     const child = spawn("python3", [
@@ -129,8 +132,8 @@ async function generateWithGTTS(text: string): Promise<Buffer> {
     
     child.on("close", (code) => {
       if (code !== 0) {
-        console.error(`[GTTS] Exit code: ${code}`);
-        console.error(`[GTTS] stderr: ${errorOutput}`);
+        console.error(`[GTTS] Failed with exit code: ${code}`);
+        console.error(`[GTTS] Error: ${errorOutput || "Unknown error"}`);
         
         try {
           if (fs.existsSync(outputPath)) {
@@ -143,6 +146,7 @@ async function generateWithGTTS(text: string): Promise<Buffer> {
       }
       
       if (!fs.existsSync(outputPath)) {
+        console.error(`[GTTS] Output file not created`);
         reject(new Error("gTTS CLI did not create output file"));
         return;
       }
@@ -155,14 +159,16 @@ async function generateWithGTTS(text: string): Promise<Buffer> {
         } catch {}
         
         if (!audioBuffer || audioBuffer.length === 0) {
+          console.error(`[GTTS] Empty audio buffer returned`);
           reject(new Error("gTTS CLI returned empty audio buffer"));
           return;
         }
         
-        console.log(`[GTTS] MP3 created`);
+        console.log(`[GTTS] MP3 created (${audioBuffer.length} bytes)`);
         resolve(audioBuffer);
         
       } catch (readError) {
+        console.error(`[GTTS] Failed to read output file: ${readError}`);
         reject(new Error(`Failed to read MP3 file: ${readError}`));
       }
     });
@@ -201,7 +207,7 @@ export async function POST(request: NextRequest) {
   const requestId = Date.now();
   
   console.log("=".repeat(60));
-  console.log(`[TTS:${requestId}] ===== TTS REQUEST STARTED =====`);
+  console.log(`[TTS] Request started (${requestId})`);
   
   let provider = "edge-tts";
   
@@ -209,14 +215,10 @@ export async function POST(request: NextRequest) {
     const body: TTSRequestBody = await request.json();
     const { text, voice = "female", userId, projectId } = body;
 
-    console.log(`[TTS:${requestId}] [INPUT]`);
-    console.log(`  text length: ${text?.length || 0}`);
-    console.log(`  voice: ${voice}`);
-    console.log(`  userId: ${userId}`);
-    console.log(`  projectId: ${projectId}`);
+    console.log(`[TTS] Input - text length: ${text?.length || 0}, voice: ${voice}`);
 
     if (!text) {
-      console.log(`[TTS:${requestId}] [ERROR] Missing text`);
+      console.log(`[TTS] Error: Missing text`);
       return NextResponse.json(
         { success: false, error: "Metin gereklidir" },
         { status: 400 }
@@ -224,7 +226,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!userId || !projectId) {
-      console.log(`[TTS:${requestId}] [ERROR] Missing userId or projectId`);
+      console.log(`[TTS] Error: Missing userId or projectId`);
       return NextResponse.json(
         { success: false, error: "Kullanıcı ve proje bilgisi gereklidir" },
         { status: 400 }
@@ -233,7 +235,6 @@ export async function POST(request: NextRequest) {
 
     // Get voice ID from voice type
     const selectedVoice = VOICE_MAP[voice] || VOICE_MAP.female;
-    console.log(`[TTS:${requestId}] [VOICE] Selected: ${selectedVoice}`);
 
     // Try Edge TTS first
     let audioBuffer: Buffer;
@@ -251,8 +252,8 @@ export async function POST(request: NextRequest) {
         provider = "gtts-fallback";
       } catch (gttsError) {
         // Both providers failed
-        console.error(`[TTS:${requestId}] [FATAL] Both TTS providers failed`);
-        console.error(`[EDGE TTS] Error: ${edgeError}`);
+        console.error(`[TTS] FATAL: Both TTS providers failed`);
+        console.error(`[EDGE TTS CLI] Error: ${edgeError}`);
         console.error(`[GTTS] Error: ${gttsError}`);
         
         return NextResponse.json(
@@ -280,7 +281,7 @@ export async function POST(request: NextRequest) {
       });
       
       if (createError) {
-        console.error(`[TTS:${requestId}] [ERROR] Bucket creation failed:`, createError);
+        console.error(`[TTS] Error: Bucket creation failed - ${createError.message}`);
         return NextResponse.json(
           { success: false, error: `Bucket oluşturulamadı: ${createError.message}` },
           { status: 500 }
@@ -291,8 +292,8 @@ export async function POST(request: NextRequest) {
     // Upload to Supabase
     const publicUrl = await uploadToSupabase(audioBuffer, storagePath, supabase);
     
-    console.log(`[TTS] Public URL returned: ${publicUrl}`);
-    console.log(`[TTS:${requestId}] [SUCCESS] Audio URL ready (provider: ${provider})`);
+    console.log(`[TTS] Public URL returned`);
+    console.log(`[TTS] Success - provider: ${provider}`);
 
     return NextResponse.json({
       success: true,
@@ -305,7 +306,7 @@ export async function POST(request: NextRequest) {
     });
     
   } catch (error) {
-    console.error(`[TTS:${requestId}] [FATAL ERROR]`, error);
+    console.error(`[TTS] FATAL ERROR:`, error);
     
     const errorMessage = error instanceof Error ? error.message : "Ses oluşturulurken hata oluştu";
     
@@ -314,7 +315,7 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   } finally {
-    console.log(`[TTS:${requestId}] ===== TTS REQUEST ENDED =====`);
+    console.log(`[TTS] Request ended`);
     console.log("=".repeat(60));
   }
 }
