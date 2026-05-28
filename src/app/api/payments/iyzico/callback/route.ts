@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-admin";
 
+// Get app URL with fallback
+function getAppUrl(): string {
+  return (
+    process.env.PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "https://sanalparsel.onrender.com"
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -8,9 +17,11 @@ export async function POST(request: NextRequest) {
     const status = formData.get("paymentStatus") as string;
     const conversationId = formData.get("conversationId") as string;
 
+    const appUrl = getAppUrl();
+
     if (!token || !status) {
       return NextResponse.redirect(
-        new URL("/payment/failed?error=missing_params", request.url)
+        new URL(`${appUrl}/payment/failed?error=missing_params`)
       );
     }
 
@@ -27,7 +38,7 @@ export async function POST(request: NextRequest) {
     if (orderError || !order) {
       console.error("Order not found:", orderError);
       return NextResponse.redirect(
-        new URL("/payment/failed?error=order_not_found", request.url)
+        new URL(`${appUrl}/payment/failed?error=order_not_found`)
       );
     }
 
@@ -35,7 +46,7 @@ export async function POST(request: NextRequest) {
     if (order.status === "paid") {
       console.log("Order already processed, skipping:", order.id);
       return NextResponse.redirect(
-        new URL("/payment/success?order_id=" + order.id, request.url)
+        new URL(`${appUrl}/payment/success?order_id=${order.id}`)
       );
     }
 
@@ -73,7 +84,7 @@ export async function POST(request: NextRequest) {
       });
 
       return NextResponse.redirect(
-        new URL("/payment/success?order_id=" + order.id, request.url)
+        new URL(`${appUrl}/payment/success?order_id=${order.id}`)
       );
     } else {
       // Payment failed
@@ -86,13 +97,14 @@ export async function POST(request: NextRequest) {
         .eq("id", order.id);
 
       return NextResponse.redirect(
-        new URL("/payment/failed?error=payment_declined", request.url)
+        new URL(`${appUrl}/payment/failed?error=payment_declined`)
       );
     }
   } catch (error) {
     console.error("Callback error:", error);
+    const appUrl = getAppUrl();
     return NextResponse.redirect(
-      new URL("/payment/failed?error=server_error", request.url)
+      new URL(`${appUrl}/payment/failed?error=server_error`)
     );
   }
 }
