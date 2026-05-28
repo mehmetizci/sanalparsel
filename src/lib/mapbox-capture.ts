@@ -14,6 +14,7 @@ declare global {
       pitch: number;
       bearing: number;
     };
+    mapInitReady?: boolean;
     map?: {
       isStyleLoaded: () => boolean;
       getZoom: () => number;
@@ -21,6 +22,8 @@ declare global {
       getCanvas: () => { toDataURL: (type: string, quality?: number) => string };
       easeTo: (opts: object) => void;
       on: (event: string, callback: () => void) => void;
+      once: (event: string, callback: () => void) => void;
+      isMoving: () => boolean;
     };
   }
 }
@@ -116,6 +119,7 @@ export class MapboxFrameCapture {
       pitch: ${pitch},
       bearing: ${bearing}
     };
+    window.mapInitReady = true;
   </script>
 </body>
 </html>`;
@@ -125,6 +129,27 @@ export class MapboxFrameCapture {
     if (!this.page) throw new Error("Page not initialized");
     console.log("[MapboxCapture] Waiting for map...");
 
+    // First wait for scripts to load
+    await this.page.evaluate(() => new Promise<void>((resolve) => {
+      // Wait for mapInitReady flag which means scripts are loaded
+      if (window.mapInitReady) {
+        resolve();
+      } else {
+        const checkInterval = setInterval(() => {
+          if (window.mapInitReady) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+        // Timeout after 10s
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          resolve();
+        }, 10000);
+      }
+    }));
+
+    // Wait for initial map load
     await this.page.evaluate(() => new Promise<void>((resolve) => {
       const config = window.mapConfig;
 
@@ -142,12 +167,18 @@ export class MapboxFrameCapture {
             bearing: config.bearing,
             antialias: true,
             preserveDrawingBuffer: true,
+            fadeDuration: 0,
           });
           window.map = map;
 
-          map.on('load', () => {
-            console.log('MAP_LOADED');
-            resolve();
+          // Wait for style to load first
+          map.on('style.load', () => {
+            console.log('MAP_STYLE_LOADED');
+            // Now wait for all tiles to be loaded (idle state)
+            map.once('idle', () => {
+              console.log('MAP_IDLE');
+              resolve();
+            });
           });
         } else {
           resolve();
@@ -158,12 +189,13 @@ export class MapboxFrameCapture {
       if ((globalThis as any).mapboxgl) {
         initMap();
       } else {
-        setTimeout(initMap, 1000);
+        setTimeout(initMap, 2000);
       }
     }));
 
-    await new Promise((r) => setTimeout(r, 3000));
-    console.log("[MapboxCapture] Map ready!");
+    // Extra buffer for satellite tiles to render
+    await new Promise((r) => setTimeout(r, 2000));
+    console.log("[MapboxCapture] Map ready with tiles!");
   }
 
   async captureFrame(keyframe: CameraKeyframe): Promise<CaptureResult> {
@@ -172,8 +204,10 @@ export class MapboxFrameCapture {
     }
 
     try {
+      // Move camera and wait for tiles to fully render
       await this.page.evaluate((kf) => {
         if (window.map) {
+          // Move camera instantly (duration: 0)
           window.map.easeTo({
             center: kf.center,
             zoom: kf.zoom,
@@ -184,8 +218,32 @@ export class MapboxFrameCapture {
         }
       }, keyframe);
 
-      await new Promise((r) => setTimeout(r, 150));
+      // Wait for tiles to load after camera movement
+      await this.page.evaluate(() => new Promise<void>((resolve) => {
+        if (window.map) {
+          // Wait for idle state after camera movement
+          const map = window.map;
+          const timeout = setTimeout(resolve, 2000); // 2s fallback
+          map.once('idle', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+          // Also check if tiles are loading
+          if (map.isMoving()) {
+            map.once('moveend', () => {
+              clearTimeout(timeout);
+              map.once('idle', () => resolve());
+            });
+          }
+        } else {
+          resolve();
+        }
+      }));
 
+      // Extra buffer for satellite tile rendering
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Capture canvas
       const dataUrl = await this.page.evaluate(() => {
         if (!window.map) return '';
         const canvas = window.map.getCanvas();
@@ -200,7 +258,22 @@ export class MapboxFrameCapture {
       const buffer = Buffer.from(base64Data, "base64");
 
       if (!this.validateFrame(buffer)) {
-        await new Promise((r) => setTimeout(r, 300));
+        console.log("[MapboxCapture] Frame not valid, retrying with idle wait...");
+        
+        // Wait for tiles to fully load on retry
+        await this.page.evaluate(() => new Promise<void>((resolve) => {
+          if (window.map) {
+            const map = window.map;
+            const timeout = setTimeout(resolve, 3000);
+            map.once('idle', () => {
+              clearTimeout(timeout);
+              resolve();
+            });
+          } else {
+            resolve();
+          }
+        }));
+
         const retryDataUrl = await this.page.evaluate(() => {
           if (!window.map) return '';
           return window.map.getCanvas().toDataURL('image/png', 1.0);
