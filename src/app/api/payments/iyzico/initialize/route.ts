@@ -11,6 +11,40 @@ const PACKAGES = {
 
 type PackageId = keyof typeof PACKAGES;
 
+// Helper function to normalize Turkish phone numbers
+function normalizeTurkishPhone(phone: string): string | undefined {
+  if (!phone) return undefined;
+  
+  // Extract only digits
+  const digits = phone.replace(/\D/g, "");
+  
+  // Already correct format: +905XXXXXXXXX (12 digits starting with 90)
+  if (digits.startsWith("90") && digits.length === 12) {
+    return `+${digits}`;
+  }
+  
+  // Starts with 0: 05XXXXXXXXX (11 digits)
+  if (digits.startsWith("0") && digits.length === 11) {
+    return `+9${digits}`;
+  }
+  
+  // No leading 0: 5XXXXXXXXX (10 digits)
+  if (digits.length === 10 && digits.startsWith("5")) {
+    return `+90${digits}`;
+  }
+  
+  return undefined;
+}
+
+// Get app URL with fallback
+function getAppUrl(): string {
+  return (
+    process.env.PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "https://sanalparsel.onrender.com"
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get("authorization");
@@ -52,6 +86,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: `Profil bilgileriniz eksik: ${missingFields.join(", ")}. Lütfen önce profilinizi tamamlayın.`, redirectTo: "/profile" },
         { status: 400 }
+      );
+    }
+
+    // Validate callback URL
+    const appUrl = getAppUrl();
+    const callbackUrl = `${appUrl}/api/payments/iyzico/callback`;
+    
+    if (!callbackUrl.startsWith("https://")) {
+      return NextResponse.json(
+        { error: "PUBLIC_APP_URL tanımlı değil veya geçersiz" },
+        { status: 500 }
       );
     }
 
@@ -107,8 +152,8 @@ export async function POST(request: NextRequest) {
       packageName: pkg.name,
       packageId: packageId,
       price: pkg.price,
-      callbackUrl: `${process.env.PUBLIC_APP_URL}/api/payments/iyzico/callback`,
-      clientIp: clientIp,
+      callbackUrl,
+      clientIp,
     });
 
     if (!iyzicoResponse.success || !iyzicoResponse.paymentPageUrl) {
@@ -176,6 +221,7 @@ async function initializeIyzicoCheckout(params: {
     hasApiKey,
     hasSecretKey,
     keyMode: isSandbox ? "sandbox" : "production",
+    callbackUrl: params.callbackUrl,
   });
 
   if (!apiKey || !secretKey) {
@@ -195,6 +241,31 @@ async function initializeIyzicoCheckout(params: {
     const firstName = nameParts[0];
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0];
 
+    // Normalize phone number
+    const normalizedPhone = normalizeTurkishPhone(params.userPhone);
+    console.log("iyzico phone:", {
+      original: params.userPhone,
+      normalized: normalizedPhone || "[NOT_VALID]",
+    });
+
+    // Build buyer object - only include gsmNumber if phone is valid
+    const buyer: Record<string, string> = {
+      id: params.userId,
+      name: firstName,
+      surname: lastName,
+      email: params.userEmail,
+      identityNumber: "11111111111",
+      registrationAddress: `${params.userDistrict}, ${params.userCity}, Turkey`,
+      city: params.userCity,
+      country: "Turkey",
+      zipCode: "34000",
+      ip: params.clientIp,
+    };
+    
+    if (normalizedPhone) {
+      buyer.gsmNumber = normalizedPhone;
+    }
+
     // Build request body
     const requestBody = {
       locale: "tr",
@@ -207,19 +278,7 @@ async function initializeIyzicoCheckout(params: {
       callbackUrl: params.callbackUrl,
       enabledInstallments: [1],
       paymentSource: "GROW",
-      buyer: {
-        id: params.userId,
-        name: firstName,
-        surname: lastName,
-        email: params.userEmail,
-        gsmNumber: params.userPhone.startsWith("+") ? params.userPhone : `+90${params.userPhone}`,
-        identityNumber: "11111111111",
-        registrationAddress: `${params.userDistrict}, ${params.userCity}, Turkey`,
-        city: params.userCity,
-        country: "Turkey",
-        zipCode: "34000",
-        ip: params.clientIp,
-      },
+      buyer,
       shippingAddress: {
         contactName: `${firstName} ${lastName}`,
         city: params.userCity,
@@ -245,13 +304,13 @@ async function initializeIyzicoCheckout(params: {
       ],
     };
 
+    console.log("iyzico initialize payload:", JSON.stringify(requestBody, null, 2));
+
     // Create IYZWSv2 authorization header
     // Format: Base64(SHA1(apiKey + secretKey + randomString + conversationId))
     const hashInput = `${apiKey}${secretKey}${randomString}${params.orderId}`;
     const hash = createHmac("sha1", secretKey).update(hashInput).digest("base64");
     const authorization = `IYZWSv2 ${apiKey}:${hash}`;
-
-    console.log("iyzico initialize payload:", JSON.stringify(requestBody, null, 2));
 
     const endpoint = `${baseUrl}/payment/iyzipos/checkoutform/initialize/auth/ecom`;
     
