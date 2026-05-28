@@ -270,82 +270,186 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     if (renderStateRef.current === "generating") return;
 
     abortControllerRef.current = new AbortController();
-    setRenderState("generating");
-    renderStateRef.current = "generating";
+    setRenderState("preparing");
+    renderStateRef.current = "preparing";
     setRenderProgress(0);
     
+    console.log("[Render] === Starting real video render ===");
+    
     try {
+      // Step 1: Create video record in database
+      console.log("[Render] Creating video record in database...");
       const supabase = createClient();
       
-      // Check for existing video first
-      const { data: existingVideo } = await supabase
+      const { data: videoData, error: videoError } = await supabase
         .from("videos")
-        .select("*")
-        .eq("project_id", id)
+        .insert({
+          project_id: id,
+          user_id: project?.user_id,
+          status: "preparing",
+          format: "reels",
+          duration: 30,
+        })
+        .select()
         .single();
 
-      let videoData;
-      
-      if (existingVideo && existingVideo.status !== "completed") {
-        // Resume existing render
-        videoData = existingVideo;
-      } else {
-        // Create new video
-        const { data } = await supabase
-          .from("videos")
-          .insert({
-            project_id: id,
-            user_id: project?.user_id,
-            status: "preparing",
-            format: "reels",
-            duration: 30,
-          })
-          .select()
-          .single();
-        videoData = data;
+      if (videoError || !videoData) {
+        throw new Error(videoError?.message || "Video record oluşturulamadı");
       }
 
-      if (videoData && mountedRef.current) {
-        setVideo(videoData as Video);
-        
-        // Simulate render progress with cleanup support
-        const progressSteps: { progress: number; state: RenderState; delay: number }[] = [
-          { progress: 10, state: "preparing", delay: 500 },
-          { progress: 30, state: "generating", delay: 1000 },
-          { progress: 60, state: "generating", delay: 1500 },
-          { progress: 85, state: "generating", delay: 2000 },
-          { progress: 100, state: "completed", delay: 2500 },
-        ];
+      console.log("[Render] Video record created:", videoData.id);
+      setVideo(videoData as Video);
 
-        for (const step of progressSteps) {
-          if (!mountedRef.current || abortControllerRef.current?.signal.aborted) {
-            setRenderState("cancelled");
+      // Step 2: Call real render API
+      console.log("[Render] Calling /api/render...");
+      
+      const renderResponse = await fetch("/api/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: id,
+          compositionProps: {
+            projectId: id,
+            parcelName: project?.short_title || "Parsel",
+            parcelArea: "0",
+            parcelCenter: [38.4237, 27.1428], // Placeholder - should come from parcel
+            parcelBounds: [[27.1400, 38.4200], [27.1450, 38.4250]],
+            duration: 30,
+            cameraModes: ["orbit360"],
+            cameraFeel: "cinematic",
+            startHeight: 300,
+            narrationAudioUrl: narration?.audio_url || "",
+            consultantName: "Danışman",
+            consultantPhone: "+90 555 123 4567",
+            width: 1080,
+            height: 1920,
+            fps: 30,
+            quality: "premium",
+            primaryColor: "#3b82f6",
+          },
+        }),
+        signal: abortControllerRef.current.signal,
+      });
+
+      if (!mountedRef.current) return;
+      
+      const renderData = await renderResponse.json();
+      
+      console.log("[Render] API Response:", JSON.stringify(renderData, null, 2));
+      
+      if (!renderResponse.ok || renderData.error) {
+        throw new Error(renderData.error || "Render başlatılamadı");
+      }
+
+      const renderId = renderData.renderId;
+      console.log("[Render] Render job started:", renderId);
+      console.log("[Render] Estimated time:", renderData.estimatedTime, "seconds");
+      
+      // Update render state
+      setRenderState("generating");
+      renderStateRef.current = "generating";
+
+      // Step 3: Poll for render status
+      console.log("[Render] Starting poll for render status...");
+      
+      let pollCount = 0;
+      const maxPolls = 300; // 5 minutes max
+      const pollInterval = setInterval(async () => {
+        if (!mountedRef.current || abortControllerRef.current?.signal.aborted) {
+          clearInterval(pollInterval);
+          return;
+        }
+        
+        pollCount++;
+        if (pollCount > maxPolls) {
+          clearInterval(pollInterval);
+          setRenderState("error");
+          console.error("[Render] Poll timeout exceeded");
+          return;
+        }
+        
+        try {
+          const statusResponse = await fetch(`/api/render?id=${renderId}`);
+          const statusData = await statusResponse.json();
+          
+          console.log(`[Render] Poll #${pollCount}:`, {
+            status: statusData.status,
+            progress: statusData.progress,
+            phase: statusData.phase,
+            message: statusData.message,
+            frameCount: statusData.frameCount,
+          });
+          
+          if (!mountedRef.current) {
+            clearInterval(pollInterval);
             return;
           }
-          await new Promise(resolve => setTimeout(resolve, step.delay));
-          if (mountedRef.current) {
-            setRenderProgress(step.progress);
-            const newState = step.state;
-            setRenderState(newState);
-            renderStateRef.current = newState;
+          
+          // Update progress
+          setRenderProgress(statusData.progress || 0);
+          
+          // Handle status
+          if (statusData.status === "completed") {
+            clearInterval(pollInterval);
+            console.log("[Render] ✅ Render completed!");
+            console.log("[Render] Output URL:", statusData.outputUrl);
+            
+            // Update video record in database
+            await supabase
+              .from("videos")
+              .update({
+                status: "completed",
+                output_url: statusData.outputUrl,
+                metadata: { renderId, ...statusData },
+              })
+              .eq("id", videoData.id);
+            
+            setRenderProgress(100);
+            setRenderState("completed");
+            
+            // Navigate to download after short delay
+            if (mountedRef.current) {
+              setTimeout(() => {
+                router.push(`/projects/${id}/download`);
+              }, 1500);
+            }
+            
+          } else if (statusData.status === "failed") {
+            clearInterval(pollInterval);
+            console.error("[Render] ❌ Render failed:", statusData.error);
+            
+            await supabase
+              .from("videos")
+              .update({
+                status: "failed",
+                metadata: { renderId, error: statusData.error, logs: statusData.logs },
+              })
+              .eq("id", videoData.id);
+            
+            setRenderState("error");
+            
+          } else if (statusData.status === "rendering" || statusData.status === "encoding" || statusData.status === "uploading") {
+            // Keep rendering state
+            setRenderState("generating");
+            renderStateRef.current = "generating";
           }
+          
+        } catch (pollError) {
+          console.error("[Render] Poll error:", pollError);
         }
-
-        // Navigate to download if completed - use local variable to avoid narrowing
-        const didComplete = progressSteps[progressSteps.length - 1].progress === 100;
-        if (mountedRef.current && didComplete) {
-          router.push(`/projects/${id}/download`);
-        }
-      }
+        
+      }, 1000); // Poll every second
+      
     } catch (err) {
       if ((err as Error).name === "AbortError") {
+        console.log("[Render] Render cancelled by user");
         if (mountedRef.current) setRenderState("cancelled");
       } else if (mountedRef.current) {
-        console.error("Video creation error:", err);
+        console.error("[Render] ❌ Error:", err);
         setRenderState("error");
       }
     }
-  }, [id, project?.user_id, router]);
+  }, [id, project?.user_id, narration, router]);
 
   // Cancel render
   const handleCancelRender = () => {
