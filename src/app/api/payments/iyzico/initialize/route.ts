@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       userEmail: user.email || "",
       userName: user.user_metadata?.full_name || "Unknown",
+      userPhone: user.user_metadata?.phone || undefined,
       packageName: pkg.name,
       packageId: packageId,
       price: pkg.price,
@@ -128,6 +129,7 @@ async function initializeIyzicoCheckout(params: {
   userId: string;
   userEmail: string;
   userName: string;
+  userPhone?: string;
   packageName: string;
   packageId: string;
   price: number;
@@ -152,6 +154,25 @@ async function initializeIyzicoCheckout(params: {
     const firstName = nameParts[0] || "Musteri";
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "Musteri";
 
+    // Build buyer object - only include gsmNumber if user has a valid phone
+    const buyer: Record<string, string> = {
+      id: params.userId,
+      name: firstName,
+      surname: lastName,
+      email: params.userEmail || "musteri@example.com",
+      identityNumber: "11111111111",
+      registrationAddress: "İstanbul, Türkiye",
+      city: "İstanbul",
+      country: "Türkiye",
+      zipCode: "34000",
+      ip: params.clientIp || "85.34.78.112",
+    };
+    
+    // Only add gsmNumber if user has a valid phone number
+    if (params.userPhone && params.userPhone.length >= 10) {
+      buyer.gsmNumber = params.userPhone.startsWith("+") ? params.userPhone : `+90${params.userPhone}`;
+    }
+
     // iyzico Checkout Form Initialize request
     const request = {
       locale: "tr",
@@ -163,31 +184,19 @@ async function initializeIyzicoCheckout(params: {
       paymentGroup: "PRODUCT",
       callbackUrl: params.callbackUrl,
       enabledInstallments: [1],
-      buyer: {
-        id: params.userId,
-        name: firstName,
-        surname: lastName,
-        email: params.userEmail || "musteri@example.com",
-        gsmNumber: "+90-----------",
-        identityNumber: "11111111111",
-        registrationAddress: "Istanbul, Turkey",
-        city: "Istanbul",
-        country: "Turkey",
-        zipCode: "34000",
-        ip: params.clientIp || "85.34.78.112",
-      },
+      buyer,
       shippingAddress: {
         contactName: `${firstName} ${lastName}`,
-        city: "Istanbul",
-        country: "Turkey",
-        address: "Istanbul, Turkey",
+        city: "İstanbul",
+        country: "Türkiye",
+        address: "İstanbul, Türkiye",
         zipCode: "34000",
       },
       billingAddress: {
         contactName: `${firstName} ${lastName}`,
-        city: "Istanbul",
-        country: "Turkey",
-        address: "Istanbul, Turkey",
+        city: "İstanbul",
+        country: "Türkiye",
+        address: "İstanbul, Türkiye",
         zipCode: "34000",
       },
       basketItems: [
