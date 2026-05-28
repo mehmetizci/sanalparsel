@@ -235,7 +235,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         setVoiceState("error");
       }
     }
-  }, [narration?.text, voiceType, id, project?.user_id]);
+  }, [narration?.text, voiceType, id, project?.user_id, ttsProvider, ttsSpeed]);
 
   const handleVoiceRetry = useCallback(() => {
     setVoiceState("idle");

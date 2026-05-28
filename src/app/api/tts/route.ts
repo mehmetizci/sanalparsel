@@ -6,9 +6,6 @@ import { generateAudio, ensureStorageBucket } from "@/lib/services/tts";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Storage bucket name
-const STORAGE_BUCKET = "generated-audio";
-
 // Request body type
 interface TTSRequestBody {
   text: string;
