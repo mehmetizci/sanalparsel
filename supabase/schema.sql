@@ -4,8 +4,27 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Profiles table
-CREATE TABLE profiles (
+-- User Profiles table
+CREATE TABLE user_profiles (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    full_name TEXT,
+    phone TEXT,
+    office_name TEXT,
+    office_address TEXT,
+    license_number TEXT,
+    show_name BOOLEAN DEFAULT true,
+    show_phone BOOLEAN DEFAULT true,
+    show_logo BOOLEAN DEFAULT true,
+    show_profile_photo BOOLEAN DEFAULT false,
+    show_license BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(user_id)
+);
+
+-- Legacy profiles table (for backward compatibility)
+CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     full_name TEXT,
@@ -143,6 +162,7 @@ CREATE TABLE payments (
 -- Row Level Security (RLS)
 
 -- Enable RLS on all tables
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_settings ENABLE ROW LEVEL SECURITY;
@@ -152,7 +172,12 @@ ALTER TABLE videos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE credits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 
--- Profiles RLS
+-- User Profiles RLS
+CREATE POLICY "Users can view own user_profile" ON user_profiles FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can update own user_profile" ON user_profiles FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own user_profile" ON user_profiles FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Legacy Profiles RLS
 CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -206,6 +231,8 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
     INSERT INTO public.profiles (user_id, full_name)
+    VALUES (new.id, new.raw_user_meta_data->>'full_name');
+    INSERT INTO public.user_profiles (user_id, full_name)
     VALUES (new.id, new.raw_user_meta_data->>'full_name');
     RETURN new;
 END;

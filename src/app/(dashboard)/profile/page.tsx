@@ -1,48 +1,63 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import AppShell from "@/components/AppShell";
 import GlassCard from "@/components/GlassCard";
-import PrimaryButton from "@/components/PrimaryButton";
+import Toast, { ToastType } from "@/components/Toast";
 
-interface ProfileData {
-  id: string;
+interface ProfileFormData {
+  id?: string;
   full_name: string;
   phone: string;
-  avatar_url: string;
   office_name: string;
-  office_logo_url: string;
   office_address: string;
-  license_no: string;
-  default_show_name: boolean;
-  default_show_phone: boolean;
-  default_show_logo: boolean;
-  default_show_avatar: boolean;
-  default_show_license: boolean;
+  license_number: string;
+  show_name: boolean;
+  show_phone: boolean;
+  show_logo: boolean;
+  show_profile_photo: boolean;
+  show_license: boolean;
+}
+
+const defaultFormData: ProfileFormData = {
+  full_name: "",
+  phone: "",
+  office_name: "",
+  office_address: "",
+  license_number: "",
+  show_name: true,
+  show_phone: true,
+  show_logo: true,
+  show_profile_photo: false,
+  show_license: false,
+};
+
+interface ToastState {
+  visible: boolean;
+  message: string;
+  type: ToastType;
 }
 
 export default function ProfilePage() {
   const router = useRouter();
-  const [profile, setProfile] = useState<ProfileData>({
-    id: "",
-    full_name: "",
-    phone: "",
-    avatar_url: "",
-    office_name: "",
-    office_logo_url: "",
-    office_address: "",
-    license_no: "",
-    default_show_name: true,
-    default_show_phone: true,
-    default_show_logo: true,
-    default_show_avatar: false,
-    default_show_license: false,
-  });
+  const [formData, setFormData] = useState<ProfileFormData>(defaultFormData);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [toast, setToast] = useState<ToastState>({ visible: false, message: "", type: "success" });
+
+  const showToast = useCallback((message: string, type: ToastType) => {
+    setToast({ visible: true, message, type });
+  }, []);
+
+  const hideToast = useCallback(() => {
+    setToast((prev) => ({ ...prev, visible: false }));
+  }, []);
+
+  const updateField = <K extends keyof ProfileFormData>(field: K, value: ProfileFormData[K]) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -54,17 +69,36 @@ export default function ProfilePage() {
         return;
       }
 
-      const { data } = await supabase
-        .from("profiles")
+      const { data, error } = await supabase
+        .from("user_profiles")
         .select("*")
         .eq("user_id", user.id)
         .single();
 
-      setProfile((prev) => ({
-        ...prev,
-        ...data,
-        full_name: data?.full_name || user.user_metadata?.full_name || prev.full_name,
-      }));
+      if (error && error.code !== "PGRST116") {
+        console.error("Profile fetch error:", error);
+      }
+
+      if (data) {
+        setFormData({
+          id: data.id,
+          full_name: data.full_name || user.user_metadata?.full_name || "",
+          phone: data.phone || "",
+          office_name: data.office_name || "",
+          office_address: data.office_address || "",
+          license_number: data.license_number || "",
+          show_name: data.show_name ?? true,
+          show_phone: data.show_phone ?? true,
+          show_logo: data.show_logo ?? true,
+          show_profile_photo: data.show_profile_photo ?? false,
+          show_license: data.show_license ?? false,
+        });
+      } else {
+        setFormData((prev) => ({
+          ...prev,
+          full_name: user.user_metadata?.full_name || "",
+        }));
+      }
 
       setLoading(false);
     };
@@ -74,25 +108,44 @@ export default function ProfilePage() {
 
   const handleSave = async () => {
     setSaving(true);
-    setMessage(null);
 
     try {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
 
-      if (!user) return;
+      if (!user) {
+        showToast("Oturum süresi dolmuş. Lütfen tekrar giriş yapın.", "error");
+        return;
+      }
 
-      await supabase.from("profiles").upsert({
+      const profileData = {
         user_id: user.id,
-        ...profile,
-      }, {
-        onConflict: "user_id",
-      });
+        full_name: formData.full_name,
+        phone: formData.phone,
+        office_name: formData.office_name,
+        office_address: formData.office_address,
+        license_number: formData.license_number,
+        show_name: formData.show_name,
+        show_phone: formData.show_phone,
+        show_logo: formData.show_logo,
+        show_profile_photo: formData.show_profile_photo,
+        show_license: formData.show_license,
+        updated_at: new Date().toISOString(),
+      };
 
-      setMessage({ type: "success", text: "Profil başarıyla kaydedildi!" });
-    } catch (error) {
-      console.error("Save error:", error);
-      setMessage({ type: "error", text: "Profil kaydedilirken bir hata oluştu." });
+      const { error } = await supabase
+        .from("user_profiles")
+        .upsert(profileData, { onConflict: "user_id" });
+
+      if (error) {
+        console.error("Save error:", error);
+        showToast("Kayıt sırasında hata oluştu", "error");
+      } else {
+        showToast("Profil bilgileri kaydedildi", "success");
+      }
+    } catch (err) {
+      console.error("Save error:", err);
+      showToast("Kayıt sırasında hata oluştu", "error");
     } finally {
       setSaving(false);
     }
@@ -101,7 +154,7 @@ export default function ProfilePage() {
   const handleSignOut = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.push("/");
+    router.push("/login");
   };
 
   if (loading) {
@@ -116,153 +169,189 @@ export default function ProfilePage() {
 
   return (
     <AppShell>
-      <div className="px-4 py-8 max-w-2xl mx-auto">
+      <div className="px-4 py-8 max-w-2xl mx-auto pb-32">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-white">Profil Ayarları</h1>
           <p className="text-muted mt-1">Kişisel bilgilerinizi ve video varsayılanlarınızı yönetin</p>
         </div>
 
-        {message && (
-          <div className={`mb-4 p-4 rounded-xl ${
-            message.type === "success" 
-              ? "bg-success/10 border border-success/20 text-success"
-              : "bg-warning/10 border border-warning/20 text-warning"
-          }`}>
-            {message.text}
-          </div>
-        )}
-
+        {/* Kişisel Bilgiler */}
         <GlassCard className="mb-4">
-          <h3 className="text-white font-semibold mb-4">Kişisel Bilgiler</h3>
+          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            Kişisel Bilgiler
+          </h3>
           <div className="space-y-4">
             <div>
               <label className="block text-muted text-sm mb-2">Ad Soyad</label>
               <input
                 type="text"
-                value={profile.full_name}
-                onChange={(e) => setProfile({ ...profile, full_name: e.target.value })}
+                value={formData.full_name}
+                onChange={(e) => updateField("full_name", e.target.value)}
                 placeholder="Ahmet Yılmaz"
-                className="w-full bg-card/50 border border-white/10 rounded-xl p-3 text-white placeholder-muted/50 focus:outline-none focus:border-primary/50"
+                className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
               />
             </div>
             <div>
               <label className="block text-muted text-sm mb-2">Cep Telefonu</label>
               <input
                 type="tel"
-                value={profile.phone}
-                onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                value={formData.phone}
+                onChange={(e) => updateField("phone", e.target.value)}
                 placeholder="0532 123 45 67"
-                className="w-full bg-card/50 border border-white/10 rounded-xl p-3 text-white placeholder-muted/50 focus:outline-none focus:border-primary/50"
+                className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
               />
             </div>
           </div>
         </GlassCard>
 
+        {/* Ofis Bilgileri */}
         <GlassCard className="mb-4">
-          <h3 className="text-white font-semibold mb-4">Ofis Bilgileri</h3>
+          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+            Ofis Bilgileri
+          </h3>
           <div className="space-y-4">
             <div>
               <label className="block text-muted text-sm mb-2">Ofis Adı</label>
               <input
                 type="text"
-                value={profile.office_name}
-                onChange={(e) => setProfile({ ...profile, office_name: e.target.value })}
+                value={formData.office_name}
+                onChange={(e) => updateField("office_name", e.target.value)}
                 placeholder="ABC Emlak"
-                className="w-full bg-card/50 border border-white/10 rounded-xl p-3 text-white placeholder-muted/50 focus:outline-none focus:border-primary/50"
+                className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
               />
             </div>
             <div>
               <label className="block text-muted text-sm mb-2">Ofis Adresi</label>
               <input
                 type="text"
-                value={profile.office_address}
-                onChange={(e) => setProfile({ ...profile, office_address: e.target.value })}
+                value={formData.office_address}
+                onChange={(e) => updateField("office_address", e.target.value)}
                 placeholder="İstanbul, Türkiye"
-                className="w-full bg-card/50 border border-white/10 rounded-xl p-3 text-white placeholder-muted/50 focus:outline-none focus:border-primary/50"
+                className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
               />
             </div>
             <div>
               <label className="block text-muted text-sm mb-2">Yetki Belge No</label>
               <input
                 type="text"
-                value={profile.license_no}
-                onChange={(e) => setProfile({ ...profile, license_no: e.target.value })}
+                value={formData.license_number}
+                onChange={(e) => updateField("license_number", e.target.value)}
                 placeholder="1234567"
-                className="w-full bg-card/50 border border-white/10 rounded-xl p-3 text-white placeholder-muted/50 focus:outline-none focus:border-primary/50"
+                className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
               />
             </div>
           </div>
         </GlassCard>
 
+        {/* Video Varsayılanları */}
         <GlassCard className="mb-4">
-          <h3 className="text-white font-semibold mb-4">Video Varsayılanları</h3>
+          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+            <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            Video Varsayılanları
+          </h3>
           <p className="text-muted text-sm mb-4">Videolarda varsayılan olarak gösterilecek bilgiler</p>
           <div className="space-y-3">
-            <label className="flex items-center gap-3 cursor-pointer">
+            <label className="custom-checkbox flex items-center gap-3 cursor-pointer py-1">
               <input
                 type="checkbox"
-                checked={profile.default_show_name}
-                onChange={(e) => setProfile({ ...profile, default_show_name: e.target.checked })}
-                className="w-5 h-5 rounded border-white/20 bg-card/50 text-primary focus:ring-primary"
+                checked={formData.show_name}
+                onChange={(e) => updateField("show_name", e.target.checked)}
               />
+              <span className="checkmark" />
               <span className="text-white">Ad Soyad göster</span>
             </label>
-            <label className="flex items-center gap-3 cursor-pointer">
+            <label className="custom-checkbox flex items-center gap-3 cursor-pointer py-1">
               <input
                 type="checkbox"
-                checked={profile.default_show_phone}
-                onChange={(e) => setProfile({ ...profile, default_show_phone: e.target.checked })}
-                className="w-5 h-5 rounded border-white/20 bg-card/50 text-primary focus:ring-primary"
+                checked={formData.show_phone}
+                onChange={(e) => updateField("show_phone", e.target.checked)}
               />
+              <span className="checkmark" />
               <span className="text-white">Telefon göster</span>
             </label>
-            <label className="flex items-center gap-3 cursor-pointer">
+            <label className="custom-checkbox flex items-center gap-3 cursor-pointer py-1">
               <input
                 type="checkbox"
-                checked={profile.default_show_logo}
-                onChange={(e) => setProfile({ ...profile, default_show_logo: e.target.checked })}
-                className="w-5 h-5 rounded border-white/20 bg-card/50 text-primary focus:ring-primary"
+                checked={formData.show_logo}
+                onChange={(e) => updateField("show_logo", e.target.checked)}
               />
+              <span className="checkmark" />
               <span className="text-white">Logo göster</span>
             </label>
-            <label className="flex items-center gap-3 cursor-pointer">
+            <label className="custom-checkbox flex items-center gap-3 cursor-pointer py-1">
               <input
                 type="checkbox"
-                checked={profile.default_show_avatar}
-                onChange={(e) => setProfile({ ...profile, default_show_avatar: e.target.checked })}
-                className="w-5 h-5 rounded border-white/20 bg-card/50 text-primary focus:ring-primary"
+                checked={formData.show_profile_photo}
+                onChange={(e) => updateField("show_profile_photo", e.target.checked)}
               />
+              <span className="checkmark" />
               <span className="text-white">Profil fotoğrafı göster</span>
             </label>
-            <label className="flex items-center gap-3 cursor-pointer">
+            <label className="custom-checkbox flex items-center gap-3 cursor-pointer py-1">
               <input
                 type="checkbox"
-                checked={profile.default_show_license}
-                onChange={(e) => setProfile({ ...profile, default_show_license: e.target.checked })}
-                className="w-5 h-5 rounded border-white/20 bg-card/50 text-primary focus:ring-primary"
+                checked={formData.show_license}
+                onChange={(e) => updateField("show_license", e.target.checked)}
               />
+              <span className="checkmark" />
               <span className="text-white">Yetki belge no göster</span>
             </label>
           </div>
         </GlassCard>
 
-        <PrimaryButton
-          onClick={handleSave}
-          loading={saving}
-          fullWidth
-          size="lg"
-          className="mb-4"
-        >
-          Değişiklikleri Kaydet
-        </PrimaryButton>
-
+        {/* Çıkış Yap */}
         <button
           onClick={handleSignOut}
-          className="w-full py-3 rounded-xl border border-warning/20 text-warning hover:bg-warning/10 transition-colors font-medium"
+          className="w-full py-3 rounded-xl border border-warning/20 text-warning hover:bg-warning/10 transition-colors font-medium mb-4"
         >
           Çıkış Yap
         </button>
       </div>
+
+      {/* Sticky Bottom Button */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#07182F] via-[#07182F]/95 to-transparent">
+        <div className="max-w-2xl mx-auto">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full bg-gradient-to-r from-primary to-blue-600 text-white font-semibold rounded-xl py-4 px-8 text-lg shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] flex items-center justify-center gap-2"
+          >
+            {saving ? (
+              <>
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Kaydediliyor...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Değişiklikleri Kaydet</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Toast */}
+      {toast.visible && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={hideToast}
+        />
+      )}
     </AppShell>
   );
 }

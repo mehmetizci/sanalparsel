@@ -123,3 +123,70 @@ body {
   width: 100% !important;
   height: 100% !important;
 }
+
+/* Modern Custom Checkbox */
+.custom-checkbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.custom-checkbox input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.custom-checkbox .checkmark {
+  width: 22px;
+  height: 22px;
+  background: rgba(16, 37, 68, 0.6);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.custom-checkbox:hover .checkmark {
+  border-color: rgba(37, 99, 235, 0.5);
+  background: rgba(16, 37, 68, 0.8);
+}
+
+.custom-checkbox input:checked ~ .checkmark {
+  background: linear-gradient(135deg, #2563EB, #7C3AED);
+  border-color: transparent;
+}
+
+.custom-checkbox input:checked ~ .checkmark::after {
+  content: "";
+  width: 6px;
+  height: 10px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translateY(-1px);
+}
+
+.custom-checkbox input:focus-visible ~ .checkmark {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
+}
+
+/* Input Focus Glow Effect */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25), 0 0 20px rgba(37, 99, 235, 0.15);
+}
+
+/* Mobile touch optimization */
+@media (hover: none) {
+  button:active, 
+  a:active,
+  .custom-checkbox:active .checkmark {
+    transform: scale(0.97);
+  }
+}
