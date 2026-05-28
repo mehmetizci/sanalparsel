@@ -168,7 +168,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <AppShell>
+    <AppShell showNav={false}>
       <div className="px-4 py-8 max-w-2xl mx-auto pb-32">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-white">Profil Ayarları</h1>
