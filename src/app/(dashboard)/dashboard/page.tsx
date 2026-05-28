@@ -11,9 +11,18 @@ import PrimaryButton from "@/components/PrimaryButton";
 import EmptyState from "@/components/EmptyState";
 import { useParcelStore } from "@/lib/parcel-store";
 
+interface UserProfile {
+  full_name: string | null;
+  phone: string | null;
+  office_name: string | null;
+  office_address: string | null;
+  license_number: string | null;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: { full_name?: string } } | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [credits, setCredits] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -34,6 +43,17 @@ export default function DashboardPage() {
       }
       
       setUser(user);
+      
+      // Fetch user profile
+      const { data: profileData } = await supabase
+        .from("user_profiles")
+        .select("full_name, phone, office_name, office_address, license_number")
+        .eq("user_id", user.id)
+        .single();
+      
+      if (profileData) {
+        setProfile(profileData as UserProfile);
+      }
       
       // Fetch projects
       const { data: projectsData } = await supabase
@@ -101,7 +121,10 @@ export default function DashboardPage() {
     );
   }
 
-  const firstName = user?.user_metadata?.full_name?.split(" ")[0] || " هناك";
+  const firstName = profile?.full_name?.split(" ")[0]
+    || user?.user_metadata?.full_name?.split(" ")[0]
+    || user?.email?.split("@")[0]
+    || "";
 
   return (
     <AppShell>
