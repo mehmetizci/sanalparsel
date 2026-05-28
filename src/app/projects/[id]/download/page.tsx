@@ -4,20 +4,39 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
+import { deductCredit } from "@/lib/credits";
 import { Project, Video } from "@/types";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import PrimaryButton from "@/components/PrimaryButton";
+import Toast, { ToastType } from "@/components/Toast";
+
+interface ToastState {
+  visible: boolean;
+  message: string;
+  type: ToastType;
+}
 
 export default function DownloadPage({ params }: { params: { id: string } }) {
   const { id } = params;
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [video, setVideo] = useState<Video | null>(null);
-  const [credits, setCredits] = useState(0);
+  const [credits, setCredits] = useState(5);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [showInsufficientModal, setShowInsufficientModal] = useState(false);
+  const [toast, setToast] = useState<ToastState>({ visible: false, message: "", type: "success" });
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const showToast = (message: string, type: ToastType) => {
+    setToast({ visible: true, message, type });
+  };
+
+  const hideToast = () => {
+    setToast((prev) => ({ ...prev, visible: false }));
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -28,6 +47,8 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
         router.push("/login");
         return;
       }
+
+      setUserId(user.id);
 
       const { data: projectData } = await supabase
         .from("projects")
@@ -53,15 +74,15 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
         setVideo(videoData as Video);
       }
 
-      // Fetch credits
-      const { data: creditsData } = await supabase
-        .from("credits")
-        .select("amount")
-        .eq("user_id", user.id);
+      // Fetch credits from user_profiles
+      const { data: profileData } = await supabase
+        .from("user_profiles")
+        .select("credits")
+        .eq("user_id", user.id)
+        .single();
 
-      if (creditsData) {
-        const total = creditsData.reduce((sum, c) => sum + c.amount, 0);
-        setCredits(total);
+      if (profileData) {
+        setCredits(profileData.credits ?? 5);
       }
 
       setLoading(false);
@@ -71,22 +92,30 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
   }, [id, router]);
 
   const handleDownload = async () => {
+    if (!userId || !project) {
+      showToast("Oturum süresi dolmuş. Lütfen tekrar giriş yapın.", "error");
+      return;
+    }
+
+    // Check credits first
     if (credits < 1) {
-      router.push("/billing");
+      setShowInsufficientModal(true);
       return;
     }
 
     setDownloading(true);
     try {
+      // Deduct credit using the helper function
+      const result = await deductCredit(userId, 1);
+      
+      if (!result.success) {
+        setShowInsufficientModal(true);
+        setDownloading(false);
+        return;
+      }
+
       const supabase = createClient();
       
-      // Deduct credit
-      await supabase.from("credits").insert({
-        user_id: project?.user_id,
-        amount: -1,
-        source: "video_download",
-      });
-
       // Update video status
       if (video) {
         await supabase
@@ -101,10 +130,19 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
         .update({ status: "completed" })
         .eq("id", id);
 
+      // Update local credits state
+      setCredits(result.remaining);
+      
+      showToast("Video indirme başlatılıyor...", "success");
+      
       // In production, this would trigger actual video download
-      alert("Video indirme başlatılıyor...");
+      // For now, show download started
+      setTimeout(() => {
+        alert("Video indirme başlatılıyor...");
+      }, 500);
     } catch (error) {
       console.error("Download error:", error);
+      showToast("İndirme sırasında hata oluştu", "error");
     } finally {
       setDownloading(false);
     }
@@ -213,6 +251,45 @@ export default function DownloadPage({ params }: { params: { id: string } }) {
           </div>
         )}
       </div>
+
+      {/* Insufficient Credits Modal */}
+      {showInsufficientModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-2xl p-6 max-w-sm w-full border border-white/10 shadow-xl">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-warning/10 flex items-center justify-center">
+              <svg className="w-8 h-8 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-white text-center mb-2">Yetersiz Kredi</h3>
+            <p className="text-muted text-center mb-6">
+              Bu videoyu indirmek için yeterli krediniz yok. Lütfen kredi satın alın.
+            </p>
+            <div className="space-y-3">
+              <Link href="/billing">
+                <button className="w-full py-3 rounded-xl bg-gradient-to-r from-primary to-blue-600 text-white font-semibold hover:shadow-lg hover:shadow-primary/30 transition-all">
+                  Kredi Satın Al
+                </button>
+              </Link>
+              <button
+                onClick={() => setShowInsufficientModal(false)}
+                className="w-full py-3 rounded-xl border border-white/10 text-muted hover:text-white hover:bg-white/5 transition-colors font-medium"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast.visible && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={hideToast}
+        />
+      )}
     </AppShell>
   );
 }

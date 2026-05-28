@@ -19,6 +19,7 @@ interface ProfileFormData {
   show_logo: boolean;
   show_profile_photo: boolean;
   show_license: boolean;
+  credits: number;
 }
 
 const defaultFormData: ProfileFormData = {
@@ -32,6 +33,7 @@ const defaultFormData: ProfileFormData = {
   show_logo: true,
   show_profile_photo: false,
   show_license: false,
+  credits: 5,
 };
 
 interface ToastState {
@@ -92,6 +94,7 @@ export default function ProfilePage() {
           show_logo: data.show_logo ?? true,
           show_profile_photo: data.show_profile_photo ?? false,
           show_license: data.show_license ?? false,
+          credits: data.credits ?? 5,
         });
       } else {
         setFormData((prev) => ({
@@ -130,6 +133,7 @@ export default function ProfilePage() {
         show_logo: formData.show_logo,
         show_profile_photo: formData.show_profile_photo,
         show_license: formData.show_license,
+        credits: formData.credits,
         updated_at: new Date().toISOString(),
       };
 
@@ -246,6 +250,29 @@ export default function ProfilePage() {
                 className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
               />
             </div>
+          </div>
+        </GlassCard>
+
+        {/* Kredi Bilgisi */}
+        <GlassCard className="mb-4 bg-gradient-to-r from-success/10 to-primary/10 border border-success/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-success/20 flex items-center justify-center">
+                <svg className="w-6 h-6 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-muted text-sm">Mevcut Kredi</p>
+                <p className="text-3xl font-bold text-white">{formData.credits}</p>
+              </div>
+            </div>
+            <a 
+              href="/billing"
+              className="px-4 py-2 rounded-xl bg-success/20 text-success font-medium hover:bg-success/30 transition-colors"
+            >
+              Kredi Satın Al
+            </a>
           </div>
         </GlassCard>
 

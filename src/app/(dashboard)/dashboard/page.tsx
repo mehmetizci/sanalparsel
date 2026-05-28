@@ -17,6 +17,7 @@ interface UserProfile {
   office_name: string | null;
   office_address: string | null;
   license_number: string | null;
+  credits: number | null;
 }
 
 export default function DashboardPage() {
@@ -24,7 +25,7 @@ export default function DashboardPage() {
   const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: { full_name?: string } } | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [credits, setCredits] = useState(0);
+  const [credits, setCredits] = useState(5);
   const [loading, setLoading] = useState(true);
   const [openProjectError, setOpenProjectError] = useState<string | null>(null);
 
@@ -44,15 +45,16 @@ export default function DashboardPage() {
       
       setUser(user);
       
-      // Fetch user profile
+      // Fetch user profile with credits
       const { data: profileData } = await supabase
         .from("user_profiles")
-        .select("full_name, phone, office_name, office_address, license_number")
+        .select("full_name, phone, office_name, office_address, license_number, credits")
         .eq("user_id", user.id)
         .single();
       
       if (profileData) {
         setProfile(profileData as UserProfile);
+        setCredits(profileData.credits ?? 5);
       }
       
       // Fetch projects
@@ -65,17 +67,6 @@ export default function DashboardPage() {
       
       if (projectsData) {
         setProjects(projectsData as Project[]);
-      }
-      
-      // Fetch credits
-      const { data: creditsData } = await supabase
-        .from("credits")
-        .select("amount")
-        .eq("user_id", user.id);
-      
-      if (creditsData) {
-        const total = creditsData.reduce((sum, c) => sum + c.amount, 0);
-        setCredits(total);
       }
       
       setLoading(false);

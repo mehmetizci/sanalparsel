@@ -18,6 +18,7 @@ CREATE TABLE user_profiles (
     show_logo BOOLEAN DEFAULT true,
     show_profile_photo BOOLEAN DEFAULT false,
     show_license BOOLEAN DEFAULT false,
+    credits INTEGER DEFAULT 5,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE(user_id)
@@ -242,6 +243,54 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Credit management functions
+
+-- Function to add credits to a user
+CREATE OR REPLACE FUNCTION add_user_credits(user_uuid UUID, amount INTEGER)
+RETURNS INTEGER AS $$
+DECLARE
+    new_credits INTEGER;
+BEGIN
+    UPDATE user_profiles 
+    SET credits = COALESCE(credits, 0) + amount,
+        updated_at = now()
+    WHERE user_id = user_uuid
+    RETURNING credits INTO new_credits;
+    
+    -- Also log the credit addition
+    INSERT INTO credits (user_id, amount, source)
+    VALUES (user_uuid, amount, 'purchase');
+    
+    RETURN new_credits;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to deduct credits from a user
+CREATE OR REPLACE FUNCTION deduct_user_credits(user_uuid UUID, amount INTEGER DEFAULT 1)
+RETURNS BOOLEAN AS $$
+DECLARE
+    current_credits INTEGER;
+BEGIN
+    SELECT credits INTO current_credits
+    FROM user_profiles
+    WHERE user_id = user_uuid;
+    
+    IF current_credits IS NULL OR current_credits < amount THEN
+        RETURN FALSE;
+    END IF;
+    
+    UPDATE user_profiles 
+    SET credits = credits - amount,
+        updated_at = now()
+    WHERE user_id = user_uuid;
+    
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Migration for existing users without credits
+UPDATE user_profiles SET credits = 5 WHERE credits IS NULL;
 
 -- Indexes for performance
 CREATE INDEX idx_projects_user_id ON projects(user_id);
