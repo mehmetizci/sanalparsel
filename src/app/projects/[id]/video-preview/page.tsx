@@ -28,6 +28,11 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [ttsProvider, setTtsProvider] = useState<TTSProvider>("openai");
   const [ttsSpeed, setTtsSpeed] = useState(1.55);
   
+  // TTS metadata from backend response (the actual used provider)
+  const [ttsUsedProvider, setTtsUsedProvider] = useState<string | null>(null);
+  const [ttsUsedVoice, setTtsUsedVoice] = useState<string | null>(null);
+  const [showFallbackWarning, setShowFallbackWarning] = useState(false);
+  
   // SEPRATED voiceState - completely independent from renderState
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   
@@ -154,12 +159,10 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     setVoiceState("generating");
     
     try {
-      console.log("[TTS] Starting voice generation...", { 
-        textLength: narration.text.length, 
-        voiceType,
-        projectId: id,
-        userId: project.user_id
-      });
+      console.log("[TTS] === Starting voice generation ===");
+      console.log("[TTS] Selected provider:", ttsProvider);
+      console.log("[TTS] Selected voice:", voiceType);
+      console.log("[TTS] Selected speed:", ttsSpeed);
       
       const response = await fetch("/api/tts", {
         method: "POST",
@@ -180,10 +183,18 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         return;
       }
       
-      console.log("[TTS] Response received", { status: response.status });
+      console.log("[TTS] Response status:", response.status);
       
       // Always parse response - even on error
       const data = await response.json().catch(() => null);
+      
+      console.log("[TTS] Response data:", JSON.stringify(data, null, 2));
+      
+      // Check if OpenAI failed and fallback was used
+      if (data?.fallbackUsed && data?.provider !== "openai") {
+        console.warn("[TTS] ⚠️ OpenAI failed, fallback was used!");
+        console.warn(`[TTS] Requested: openai, Actual: ${data?.provider}`);
+      }
       
       if (!response.ok || !data?.success || !data?.audioUrl) {
         console.error("[TTS] API error:", data);
@@ -191,16 +202,24 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         throw new Error(errorMsg);
       }
       
-      console.log("[TTS] Data received", { 
-        hasAudioUrl: !!data?.audioUrl, 
-        provider: data?.provider,
-        storagePath: data?.storagePath,
-        duration: data?.duration 
-      });
+      console.log("[TTS] ✓ Audio generation successful");
+      console.log(`[TTS] Provider: ${data?.provider}, Voice: ${data?.voice}, Speed: ${data?.speed}`);
+      console.log("[TTS] Audio URL:", data?.audioUrl);
       
-      // Save provider info for UI display
+      // Use the provider from backend response (not local state)
+      // This ensures the UI shows exactly what was used
       if (data?.provider) {
-        setTtsProvider(data.provider);
+        console.log("[TTS] Updating provider state from response:", data.provider);
+        setTtsUsedProvider(data.provider);
+        setTtsUsedVoice(data.voice);
+      }
+      
+      // Show fallback warning if OpenAI failed
+      if (data?.fallbackUsed && data?.provider !== "openai") {
+        console.warn("[TTS] ⚠️ Showing fallback warning to user");
+        setShowFallbackWarning(true);
+      } else {
+        setShowFallbackWarning(false);
       }
       
       console.log("[TTS] Saving to database...");
@@ -465,6 +484,19 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         {/* Main Content - Only show when not rendering */}
         {renderState === "idle" && (
           <>
+            {/* Fallback Warning */}
+            {showFallbackWarning && (
+              <div className="mb-4 p-3 rounded-xl flex items-center gap-3" style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)" }}>
+                <svg className="w-5 h-5 text-warning shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div>
+                  <p className="text-warning text-sm font-medium">OpenAI TTS başarısız oldu</p>
+                  <p className="text-white/60 text-xs">Edge TTS kullanıldı. Lütfen tekrar deneyin veya API anahtarınızı kontrol edin.</p>
+                </div>
+              </div>
+            )}
+
             {/* Voice Selector Card */}
             <GlassCard className="mb-4 p-4">
               <VoiceSelector
@@ -479,6 +511,8 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 onProviderChange={setTtsProvider}
                 speed={ttsSpeed}
                 onSpeedChange={setTtsSpeed}
+                usedProvider={ttsUsedProvider}
+                usedVoice={ttsUsedVoice}
               />
             </GlassCard>
 

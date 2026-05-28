@@ -62,6 +62,9 @@ type SupabaseStorageClient = {
 
 /**
  * Generate audio with the specified provider
+ * 
+ * IMPORTANT: When user explicitly selects "openai", do NOT silently fall back to Edge TTS.
+ * If OpenAI fails, return error with fallbackUsed: true so UI can show user message.
  */
 export async function generateAudio(
   options: TTSTextOptions,
@@ -73,16 +76,18 @@ export async function generateAudio(
   const voice = settings.voice || DEFAULT_VOICE;
   const speed = settings.speed || DEFAULT_SPEED;
   
-  console.log(`[TTS Service] Generating audio for project ${projectId}`);
-  console.log(`[TTS Service] Provider: ${provider}, Voice: ${voice}, Speed: ${speed}`);
+  console.log(`[TTS Service] === Generating audio for project ${projectId} ===`);
+  console.log(`[TTS Service] Selected provider: ${provider}`);
+  console.log(`[TTS Service] Voice: ${voice}, Speed: ${speed}`);
   
   let audioBuffer: Buffer | null = null;
   let audioSettings: Record<string, unknown> = {};
   let fallbackUsed = false;
+  let usedProvider = provider;
   
-  // Try primary provider (OpenAI)
+  // Try primary provider based on explicit selection
   if (provider === "openai") {
-    console.log("[TTS Service] Attempting OpenAI TTS...");
+    console.log("[TTS Service] Requested provider: OPENAI - attempting OpenAI TTS...");
     
     const openaiResult = await generateWithOpenAI(text, {
       voice: voice as "nova" | "onyx" | "shimmer" | "coral",
@@ -93,60 +98,49 @@ export async function generateAudio(
     if (openaiResult.success && openaiResult.audioBuffer) {
       audioBuffer = openaiResult.audioBuffer;
       audioSettings = openaiResult.settings || {};
-      console.log("[TTS Service] OpenAI TTS successful");
+      usedProvider = "openai";
+      console.log("[TTS Service] ✓ OpenAI TTS successful");
     } else {
-      console.log(`[TTS Service] OpenAI TTS failed: ${openaiResult.error}`);
-      console.log("[TTS Service] Attempting Edge TTS fallback...");
+      // OpenAI failed - do NOT silently fallback if user explicitly chose openai
+      console.error("[TTS Service] ✗ OpenAI TTS FAILED");
+      console.error(`[TTS Service] Error: ${openaiResult.error}`);
+      console.error("[TTS Service] NOT falling back to Edge TTS - user explicitly selected OpenAI");
       
-      // Try Edge TTS fallback
-      try {
-        const edgeResult = await generateWithEdgeTTS(text, { voice });
-        if (edgeResult.success && edgeResult.audioBuffer) {
-          audioBuffer = edgeResult.audioBuffer;
-          audioSettings = edgeResult.settings || {};
-          fallbackUsed = true;
-          console.log("[TTS Service] Edge TTS fallback successful");
-        }
-      } catch (edgeError) {
-        console.log(`[TTS Service] Edge TTS also failed: ${edgeError}`);
-        
-        // Try gTTS as final fallback
-        try {
-          const gttsResult = await generateWithGTTS(text);
-          if (gttsResult.success && gttsResult.audioBuffer) {
-            audioBuffer = gttsResult.audioBuffer;
-            audioSettings = gttsResult.settings || {};
-            fallbackUsed = true;
-            console.log("[TTS Service] gTTS fallback successful");
-          }
-        } catch (gttsError) {
-          console.log(`[TTS Service] gTTS also failed: ${gttsError}`);
-        }
-      }
+      // Return error with fallbackUsed: true so UI knows to show message
+      return {
+        success: false,
+        error: openaiResult.error || "OpenAI TTS failed",
+        errorMessage: `OpenAI TTS başarısız oldu: ${openaiResult.error}. Lütfen Edge TTS seçin veya daha sonra tekrar deneyin.`,
+        fallbackUsed: true, // Indicates OpenAI was attempted but failed
+      };
     }
   } else {
-    // Use Edge TTS directly
-    console.log("[TTS Service] Using Edge TTS provider...");
+    // User explicitly chose edge-tts - use Edge TTS directly
+    console.log("[TTS Service] Requested provider: EDGE_TTS - using Edge TTS...");
     
     try {
       const edgeResult = await generateWithEdgeTTS(text, { voice });
       if (edgeResult.success && edgeResult.audioBuffer) {
         audioBuffer = edgeResult.audioBuffer;
         audioSettings = edgeResult.settings || {};
+        usedProvider = "edge-tts";
+        console.log("[TTS Service] ✓ Edge TTS successful");
       }
     } catch (edgeError) {
-      console.log(`[TTS Service] Edge TTS failed: ${edgeError}`);
+      console.error(`[TTS Service] Edge TTS failed: ${edgeError}`);
       
-      // Try gTTS fallback
+      // Try gTTS as fallback for edge-tts selection
       try {
         const gttsResult = await generateWithGTTS(text);
         if (gttsResult.success && gttsResult.audioBuffer) {
           audioBuffer = gttsResult.audioBuffer;
           audioSettings = gttsResult.settings || {};
+          usedProvider = "gtts-fallback";
           fallbackUsed = true;
+          console.log("[TTS Service] gTTS fallback successful");
         }
       } catch (gttsError) {
-        console.log(`[TTS Service] gTTS fallback also failed: ${gttsError}`);
+        console.error(`[TTS Service] gTTS fallback also failed: ${gttsError}`);
       }
     }
   }
@@ -162,9 +156,10 @@ export async function generateAudio(
   
   // Upload to Supabase Storage
   console.log("[TTS Service] Uploading to Supabase Storage...");
+  console.log(`[TTS Service] Used provider: ${usedProvider}`);
   
   const timestamp = Date.now();
-  const providerTag = fallbackUsed ? "fallback" : (audioSettings.provider || provider);
+  const providerTag = usedProvider;
   const fileName = `voice-${providerTag}-${timestamp}.mp3`;
   const storagePath = `${userId}/${projectId}/${fileName}`;
   
@@ -198,13 +193,20 @@ export async function generateAudio(
     // Estimate duration (rough approximation)
     const duration = Math.ceil(text.length / (speed * 10));
     
+    // Get voice from audioSettings or use the passed voice
+    const returnedVoice = (audioSettings.voice as string) || voice;
+    
+    console.log(`[TTS Service] === Audio generation COMPLETE ===`);
+    console.log(`[TTS Service] Provider: ${usedProvider}, Voice: ${returnedVoice}, Speed: ${speed}`);
+    console.log(`[TTS Service] Fallback used: ${fallbackUsed}`);
+    
     return {
       success: true,
       audioUrl: audioUrl,
       storagePath: storagePath,
       duration: duration,
-      provider: (audioSettings.provider || provider) as string,
-      voice: (audioSettings.voice || voice) as string,
+      provider: usedProvider,
+      voice: returnedVoice,
       speed: speed,
       fallbackUsed: fallbackUsed,
     };

@@ -103,12 +103,13 @@ export async function generateWithOpenAI(
 
   // Validate API key
   if (!process.env.OPENAI_API_KEY) {
-    console.error("[OpenAI TTS] Missing API key");
-    return { success: false, error: "OpenAI API key not configured" };
+    console.error("[OpenAI TTS] ERROR: OPENAI_API_KEY missing on backend environment");
+    return { success: false, error: "OPENAI_API_KEY missing on backend environment" };
   }
 
   try {
     // Call OpenAI Audio Speech API
+    console.log("[OpenAI TTS] Calling OpenAI API...");
     const audioResponse = await openai.audio.speech.create({
       model: model,
       voice: voice,

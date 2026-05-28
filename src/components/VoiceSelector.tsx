@@ -39,6 +39,9 @@ interface VoiceSelectorProps {
   onProviderChange?: (provider: TTSProvider) => void;
   speed?: number;
   onSpeedChange?: (speed: number) => void;
+  // Actual used provider from backend response
+  usedProvider?: string | null;
+  usedVoice?: string | null;
 }
 
 const defaultVoice: OpenAIVoice = "nova";
@@ -57,6 +60,8 @@ export default function VoiceSelector({
   onProviderChange,
   speed = defaultSpeed,
   onSpeedChange,
+  usedProvider,
+  usedVoice,
 }: VoiceSelectorProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -429,10 +434,12 @@ export default function VoiceSelector({
                 <span className="text-primary text-[10px] font-medium">✓ Ses Hazır</span>
               </div>
             </div>
-            {/* Provider/Voice info */}
+            {/* Provider/Voice info - use backend response when available */}
             <div className="mt-2 flex items-center gap-2 text-[10px] text-white/40">
-              <span className="px-1.5 py-0.5 rounded bg-white/5">{provider === "openai" ? "OpenAI" : "Edge TTS"}</span>
-              <span>{voiceType}</span>
+              <span className="px-1.5 py-0.5 rounded bg-white/5">
+                {usedProvider === "openai" ? "OpenAI TTS" : usedProvider === "edge-tts" ? "Edge TTS" : (provider === "openai" ? "OpenAI" : "Edge")}
+              </span>
+              <span>{usedVoice || voiceType}</span>
               <span>{speed}x</span>
             </div>
           </div>
