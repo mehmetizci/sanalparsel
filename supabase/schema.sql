@@ -10,6 +10,8 @@ CREATE TABLE user_profiles (
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     full_name TEXT,
     phone TEXT,
+    city TEXT,
+    district TEXT,
     office_name TEXT,
     office_address TEXT,
     license_number TEXT,
@@ -312,6 +314,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Migration for existing users without credits
 UPDATE user_profiles SET credits = 5 WHERE credits IS NULL;
+
+-- Migration for adding city and district columns (if not exists)
+-- Run this separately if the columns already exist but need to be added:
+-- ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS city TEXT;
+-- ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS district TEXT;
 
 -- Indexes for performance
 CREATE INDEX idx_projects_user_id ON projects(user_id);

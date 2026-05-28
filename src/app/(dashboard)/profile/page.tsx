@@ -11,6 +11,8 @@ interface ProfileFormData {
   id?: string;
   full_name: string;
   phone: string;
+  city: string;
+  district: string;
   office_name: string;
   office_address: string;
   license_number: string;
@@ -25,6 +27,8 @@ interface ProfileFormData {
 const defaultFormData: ProfileFormData = {
   full_name: "",
   phone: "",
+  city: "",
+  district: "",
   office_name: "",
   office_address: "",
   license_number: "",
@@ -86,6 +90,8 @@ export default function ProfilePage() {
           id: data.id,
           full_name: data.full_name || user.user_metadata?.full_name || "",
           phone: data.phone || "",
+          city: data.city || "",
+          district: data.district || "",
           office_name: data.office_name || "",
           office_address: data.office_address || "",
           license_number: data.license_number || "",
@@ -125,6 +131,8 @@ export default function ProfilePage() {
         user_id: user.id,
         full_name: formData.full_name,
         phone: formData.phone,
+        city: formData.city,
+        district: formData.district,
         office_name: formData.office_name,
         office_address: formData.office_address,
         license_number: formData.license_number,
@@ -207,6 +215,28 @@ export default function ProfilePage() {
                 placeholder="0532 123 45 67"
                 className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-muted text-sm mb-2">Şehir</label>
+                <input
+                  type="text"
+                  value={formData.city}
+                  onChange={(e) => updateField("city", e.target.value)}
+                  placeholder="İstanbul"
+                  className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
+                />
+              </div>
+              <div>
+                <label className="block text-muted text-sm mb-2">İlçe</label>
+                <input
+                  type="text"
+                  value={formData.district}
+                  onChange={(e) => updateField("district", e.target.value)}
+                  placeholder="Kadıköy"
+                  className="w-full bg-card/50 border border-white/10 rounded-xl p-3.5 text-white placeholder-muted/50 transition-all duration-200"
+                />
+              </div>
             </div>
           </div>
         </GlassCard>
