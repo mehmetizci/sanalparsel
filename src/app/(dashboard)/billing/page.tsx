@@ -3,23 +3,30 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { CreditPackage } from "@/types";
 import AppShell from "@/components/AppShell";
 import GlassCard from "@/components/GlassCard";
 import CreditPackageCard from "@/components/CreditPackageCard";
 import PrimaryButton from "@/components/PrimaryButton";
 
-const CREDIT_PACKAGES: CreditPackage[] = [
-  { id: "pkg-1", name: "Başlangıç", videos: 1, price: 149, price_id: "price_1" },
-  { id: "pkg-5", name: "Standart", videos: 5, price: 599, price_id: "price_5", },
-  { id: "pkg-20", name: "Profesyonel", videos: 20, price: 1999, price_id: "price_20" },
+// Package definitions matching iyzico backend
+const CREDIT_PACKAGES = [
+  { id: "starter", name: "Başlangıç", videos: 1, price: 149 },
+  { id: "standard", name: "Standart", videos: 5, price: 599 },
+  { id: "pro", name: "Pro", videos: 10, price: 999 },
 ];
+
+interface Package {
+  id: string;
+  name: string;
+  videos: number;
+  price: number;
+}
 
 export default function BillingPage() {
   const router = useRouter();
-  const [credits, setCredits] = useState(0);
+  const [credits, setCredits] = useState(5);
   const [loading, setLoading] = useState(true);
-  const [selectedPackage, setSelectedPackage] = useState<CreditPackage | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
@@ -32,14 +39,15 @@ export default function BillingPage() {
         return;
       }
 
-      const { data: creditsData } = await supabase
-        .from("credits")
-        .select("amount")
-        .eq("user_id", user.id);
+      // Fetch credits from user_profiles
+      const { data: profile } = await supabase
+        .from("user_profiles")
+        .select("credits")
+        .eq("user_id", user.id)
+        .single();
 
-      if (creditsData) {
-        const total = creditsData.reduce((sum, c) => sum + c.amount, 0);
-        setCredits(total);
+      if (profile) {
+        setCredits(profile.credits ?? 5);
       }
 
       setLoading(false);
@@ -53,20 +61,41 @@ export default function BillingPage() {
 
     setProcessing(true);
     try {
-      const response = await fetch("/api/payment/create", {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      // Get the session token for auth
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const response = await fetch("/api/payments/iyzico/initialize", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
         body: JSON.stringify({
-          package: selectedPackage,
+          packageId: selectedPackage.id,
         }),
       });
 
       const data = await response.json();
-      if (data.payment_url) {
-        window.location.href = data.payment_url;
+      
+      if (data.success && data.paymentPageUrl) {
+        // Redirect to iyzico checkout form
+        window.location.href = data.paymentPageUrl;
+      } else {
+        console.error("Payment init error:", data.error);
+        alert("Ödeme başlatılamadı: " + (data.error || "Bilinmeyen hata"));
       }
     } catch (error) {
       console.error("Purchase error:", error);
+      alert("Bir hata oluştu. Lütfen tekrar deneyin.");
     } finally {
       setProcessing(false);
     }

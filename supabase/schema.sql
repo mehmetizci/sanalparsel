@@ -160,6 +160,21 @@ CREATE TABLE payments (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Payment Orders table (for iyzico Checkout Form)
+CREATE TABLE payment_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    package_id TEXT NOT NULL,
+    credit_amount INTEGER NOT NULL,
+    price NUMERIC(10,2) NOT NULL,
+    currency TEXT DEFAULT 'TRY',
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'failed', 'cancelled')),
+    iyzico_token TEXT,
+    iyzico_payment_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Row Level Security (RLS)
 
 -- Enable RLS on all tables
@@ -224,6 +239,12 @@ CREATE POLICY "Users can insert own credits" ON credits FOR INSERT WITH CHECK (a
 -- Payments RLS
 CREATE POLICY "Users can view own payments" ON payments FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own payments" ON payments FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Payment Orders RLS
+ALTER TABLE payment_orders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own payment_orders" ON payment_orders FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own payment_orders" ON payment_orders FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own payment_orders" ON payment_orders FOR UPDATE USING (auth.uid() = user_id);
 
 -- Functions
 

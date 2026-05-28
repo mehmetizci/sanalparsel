@@ -1,10 +1,13 @@
 "use client";
 
-import { CreditPackage } from "@/types";
-
 interface CreditPackageCardProps {
-  pkg: CreditPackage;
-  onSelect: (pkg: CreditPackage) => void;
+  pkg: {
+    id: string;
+    name: string;
+    videos: number;
+    price: number;
+  };
+  onSelect: (pkg: { id: string; name: string; videos: number; price: number }) => void;
   recommended?: boolean;
 }
 
