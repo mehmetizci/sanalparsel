@@ -35,7 +35,7 @@ export async function deductCredit(userId: string, amount: number = 1): Promise<
   }
   
   // Deduct credits using RPC function
-  const { data, error } = await supabase.rpc("deduct_user_credits", {
+  const { error } = await supabase.rpc("deduct_user_credits", {
     user_uuid: userId,
     amount: amount,
   });
