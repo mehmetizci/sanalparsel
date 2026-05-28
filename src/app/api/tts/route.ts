@@ -1,224 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-admin";
-import { spawn } from "child_process";
-import fs from "fs";
-import path from "path";
-import os from "os";
+import { generateAudio, ensureStorageBucket } from "@/lib/services/tts";
 
 // Node.js runtime强制要求
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Bucket name for generated audio
+// Storage bucket name
 const STORAGE_BUCKET = "generated-audio";
-
-// Turkish voice mapping for Edge TTS
-const VOICE_MAP: Record<string, string> = {
-  female: "tr-TR-EmelNeural",
-  male: "tr-TR-AhmetNeural",
-  corporate: "tr-TR-AhmetNeural",
-};
 
 // Request body type
 interface TTSRequestBody {
   text: string;
-  voice: string;
+  voice?: string;
   userId: string;
   projectId: string;
+  provider?: "openai" | "edge-tts";
+  speed?: number;
+  instructions?: string;
 }
 
-/**
- * Generate audio using Python edge-tts CLI
- */
-async function generateWithEdgeTTS(text: string, voice: string): Promise<Buffer> {
-  const outputPath = path.join(os.tmpdir(), `edge-tts-${Date.now()}.mp3`);
-  
-  console.log(`[EDGE TTS CLI] Starting`);
-  console.log(`[EDGE TTS CLI] Voice: ${voice}`);
-  
-  return new Promise((resolve, reject) => {
-    const child = spawn("python3", [
-      "-m",
-      "edge_tts",
-      "--voice",
-      voice,
-      "--text",
-      text,
-      "--write-media",
-      outputPath
-    ]);
-    
-    let errorOutput = "";
-    
-    child.on("error", (err) => {
-      console.error(`[EDGE TTS CLI] Spawn error: ${err.message}`);
-      reject(new Error(`Failed to start edge-tts: ${err.message}`));
-    });
-    
-    child.stderr.on("data", (data) => {
-      errorOutput += data.toString();
-    });
-    
-    child.on("close", (code) => {
-      if (code !== 0) {
-        console.error(`[EDGE TTS CLI] Failed with exit code: ${code}`);
-        console.error(`[EDGE TTS CLI] Error: ${errorOutput || "Unknown error"}`);
-        
-        try {
-          if (fs.existsSync(outputPath)) {
-            fs.unlinkSync(outputPath);
-          }
-        } catch {}
-        
-        reject(new Error(`edge-tts CLI failed with code ${code}: ${errorOutput}`));
-        return;
-      }
-      
-      if (!fs.existsSync(outputPath)) {
-        console.error(`[EDGE TTS CLI] Output file not created`);
-        reject(new Error("edge-tts CLI did not create output file"));
-        return;
-      }
-      
-      try {
-        const audioBuffer = fs.readFileSync(outputPath);
-        
-        try {
-          fs.unlinkSync(outputPath);
-        } catch {}
-        
-        if (!audioBuffer || audioBuffer.length === 0) {
-          console.error(`[EDGE TTS CLI] Empty audio buffer returned`);
-          reject(new Error("edge-tts CLI returned empty audio buffer"));
-          return;
-        }
-        
-        console.log(`[EDGE TTS CLI] MP3 created (${audioBuffer.length} bytes)`);
-        resolve(audioBuffer);
-        
-      } catch (readError) {
-        console.error(`[EDGE TTS CLI] Failed to read output file: ${readError}`);
-        reject(new Error(`Failed to read MP3 file: ${readError}`));
-      }
-    });
-  });
-}
-
-/**
- * Generate audio using Python gTTS (Google Text-to-Speech) - Fallback
- */
-async function generateWithGTTS(text: string): Promise<Buffer> {
-  const outputPath = path.join(os.tmpdir(), `gtts-${Date.now()}.mp3`);
-  
-  console.log(`[GTTS] Starting`);
-  console.log(`[GTTS] Language: tr`);
-  
-  return new Promise((resolve, reject) => {
-    const child = spawn("python3", [
-      "-c",
-      `from gtts import gTTS; gTTS(text=${JSON.stringify(text)}, lang='tr').save(${JSON.stringify(outputPath)})`
-    ]);
-    
-    let errorOutput = "";
-    
-    child.on("error", (err) => {
-      console.error(`[GTTS] Spawn error: ${err.message}`);
-      reject(new Error(`Failed to start gTTS: ${err.message}`));
-    });
-    
-    child.stderr.on("data", (data) => {
-      errorOutput += data.toString();
-    });
-    
-    child.on("close", (code) => {
-      if (code !== 0) {
-        console.error(`[GTTS] Failed with exit code: ${code}`);
-        console.error(`[GTTS] Error: ${errorOutput || "Unknown error"}`);
-        
-        try {
-          if (fs.existsSync(outputPath)) {
-            fs.unlinkSync(outputPath);
-          }
-        } catch {}
-        
-        reject(new Error(`gTTS CLI failed with code ${code}: ${errorOutput}`));
-        return;
-      }
-      
-      if (!fs.existsSync(outputPath)) {
-        console.error(`[GTTS] Output file not created`);
-        reject(new Error("gTTS CLI did not create output file"));
-        return;
-      }
-      
-      try {
-        const audioBuffer = fs.readFileSync(outputPath);
-        
-        try {
-          fs.unlinkSync(outputPath);
-        } catch {}
-        
-        if (!audioBuffer || audioBuffer.length === 0) {
-          console.error(`[GTTS] Empty audio buffer returned`);
-          reject(new Error("gTTS CLI returned empty audio buffer"));
-          return;
-        }
-        
-        console.log(`[GTTS] MP3 created (${audioBuffer.length} bytes)`);
-        resolve(audioBuffer);
-        
-      } catch (readError) {
-        console.error(`[GTTS] Failed to read output file: ${readError}`);
-        reject(new Error(`Failed to read MP3 file: ${readError}`));
-      }
-    });
-  });
-}
-
-/**
- * Upload audio to Supabase Storage
- */
-async function uploadToSupabase(
-  audioBuffer: Buffer,
-  storagePath: string,
-  supabase: ReturnType<typeof createServerClient>
-): Promise<string> {
-  const { error: uploadError } = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .upload(storagePath, audioBuffer, {
-      contentType: "audio/mpeg",
-      upsert: true,
-    });
-
-  if (uploadError) {
-    throw new Error(`Upload failed: ${uploadError.message}`);
-  }
-
-  console.log(`[SUPABASE] Upload successful`);
-
-  const { data: urlData } = supabase.storage
-    .from(STORAGE_BUCKET)
-    .getPublicUrl(storagePath);
-
-  return urlData.publicUrl;
-}
+// Default values from environment
+const DEFAULT_PROVIDER = (process.env.TTS_PROVIDER as "openai" | "edge-tts") || "openai";
+const DEFAULT_VOICE = process.env.OPENAI_TTS_VOICE || "nova";
+const DEFAULT_SPEED = parseFloat(process.env.OPENAI_TTS_SPEED || "1.55");
 
 export async function POST(request: NextRequest) {
   const requestId = Date.now();
   
   console.log("=".repeat(60));
-  console.log(`[TTS] Request started (${requestId})`);
-  
-  let provider = "edge-tts";
+  console.log(`[TTS API] Request started (${requestId})`);
   
   try {
     const body: TTSRequestBody = await request.json();
-    const { text, voice = "female", userId, projectId } = body;
+    const { 
+      text, 
+      voice = DEFAULT_VOICE, 
+      userId, 
+      projectId, 
+      provider = DEFAULT_PROVIDER,
+      speed = DEFAULT_SPEED,
+      instructions 
+    } = body;
 
-    console.log(`[TTS] Input - text length: ${text?.length || 0}, voice: ${voice}`);
+    console.log(`[TTS API] Input - text length: ${text?.length || 0}, provider: ${provider}, voice: ${voice}`);
 
+    // Validate required fields
     if (!text) {
-      console.log(`[TTS] Error: Missing text`);
+      console.log(`[TTS API] Error: Missing text`);
       return NextResponse.json(
         { success: false, error: "Metin gereklidir" },
         { status: 400 }
@@ -226,87 +55,94 @@ export async function POST(request: NextRequest) {
     }
 
     if (!userId || !projectId) {
-      console.log(`[TTS] Error: Missing userId or projectId`);
+      console.log(`[TTS API] Error: Missing userId or projectId`);
       return NextResponse.json(
         { success: false, error: "Kullanıcı ve proje bilgisi gereklidir" },
         { status: 400 }
       );
     }
 
-    // Get voice ID from voice type
-    const selectedVoice = VOICE_MAP[voice] || VOICE_MAP.female;
-
-    // Try Edge TTS first
-    let audioBuffer: Buffer;
-    
-    try {
-      audioBuffer = await generateWithEdgeTTS(text, selectedVoice);
-      provider = "edge-tts";
-    } catch (edgeError) {
-      // Edge TTS failed, try gTTS fallback
-      console.log(`[EDGE TTS CLI] Failed, trying gTTS fallback`);
-      console.log(`[EDGE TTS CLI] Error: ${edgeError}`);
-      
-      try {
-        audioBuffer = await generateWithGTTS(text);
-        provider = "gtts-fallback";
-      } catch (gttsError) {
-        // Both providers failed
-        console.error(`[TTS] FATAL: Both TTS providers failed`);
-        console.error(`[EDGE TTS CLI] Error: ${edgeError}`);
-        console.error(`[GTTS] Error: ${gttsError}`);
-        
-        return NextResponse.json(
-          { success: false, error: "Ses oluşturulamadı. Lütfen daha sonra tekrar deneyin." },
-          { status: 500 }
-        );
-      }
+    // Validate voice for OpenAI
+    const validVoices = ["nova", "onyx", "shimmer", "coral", "female", "male", "corporate"];
+    if (!validVoices.includes(voice)) {
+      console.log(`[TTS API] Warning: Unknown voice "${voice}", using default`);
     }
-
-    // Generate storage path
-    const timestamp = Date.now();
-    const fileName = `voice-${provider}-${timestamp}.mp3`;
-    const storagePath = `${userId}/${projectId}/${fileName}`;
 
     // Create Supabase client
     const supabase = createServerClient();
 
-    // Check/create bucket
-    const { error: bucketError } = await supabase.storage.getBucket(STORAGE_BUCKET);
-    
-    if (bucketError) {
-      const { error: createError } = await supabase.storage.createBucket(STORAGE_BUCKET, {
-        public: true,
-        fileSizeLimit: 10485760,
-      });
-      
-      if (createError) {
-        console.error(`[TTS] Error: Bucket creation failed - ${createError.message}`);
-        return NextResponse.json(
-          { success: false, error: `Bucket oluşturulamadı: ${createError.message}` },
-          { status: 500 }
-        );
-      }
+    // Ensure bucket exists
+    const bucketReady = await ensureStorageBucket(supabase);
+    if (!bucketReady) {
+      return NextResponse.json(
+        { success: false, error: "Storage bucket hazır değil" },
+        { status: 500 }
+      );
     }
 
-    // Upload to Supabase
-    const publicUrl = await uploadToSupabase(audioBuffer, storagePath, supabase);
-    
-    console.log(`[TTS] Public URL returned`);
-    console.log(`[TTS] Success - provider: ${provider}`);
+    // Generate audio using TTS service
+    const result = await generateAudio(
+      {
+        text,
+        projectId,
+        userId,
+        settings: {
+          provider: provider as "openai" | "edge-tts",
+          voice,
+          speed,
+          instructions,
+        },
+      },
+      supabase
+    );
+
+    if (!result.success) {
+      console.error(`[TTS API] Generation failed: ${result.error}`);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: result.errorMessage || result.error || "Ses oluşturulamadı",
+          fallbackUsed: result.fallbackUsed 
+        },
+        { status: 500 }
+      );
+    }
+
+    console.log(`[TTS API] Success - provider: ${result.provider}, voice: ${result.voice}`);
+    console.log(`[TTS API] Audio URL: ${result.audioUrl}`);
+
+    // Update project with audio info in database (optional)
+    // This could be used to persist audio_url for video rendering
+    try {
+      await supabase
+        .from("projects")
+        .update({
+          audio_url: result.audioUrl,
+          audio_status: "ready",
+          tts_provider: result.provider,
+          tts_voice: result.voice,
+          tts_speed: result.speed,
+        })
+        .eq("id", projectId)
+        .eq("user_id", userId);
+    } catch (dbError) {
+      // Non-critical error - audio is already uploaded
+      console.log(`[TTS API] Warning: Could not update project: ${dbError}`);
+    }
 
     return NextResponse.json({
       success: true,
-      audioUrl: publicUrl,
-      storagePath: storagePath,
-      duration: Math.ceil(text.length / 15),
-      provider: provider,
-      voice: selectedVoice,
-      fileSize: audioBuffer.length,
+      audioUrl: result.audioUrl,
+      storagePath: result.storagePath,
+      duration: result.duration,
+      provider: result.provider,
+      voice: result.voice,
+      speed: result.speed,
+      fallbackUsed: result.fallbackUsed || false,
     });
-    
+
   } catch (error) {
-    console.error(`[TTS] FATAL ERROR:`, error);
+    console.error(`[TTS API] FATAL ERROR:`, error);
     
     const errorMessage = error instanceof Error ? error.message : "Ses oluşturulurken hata oluştu";
     
@@ -315,7 +151,7 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   } finally {
-    console.log(`[TTS] Request ended`);
+    console.log(`[TTS API] Request ended`);
     console.log("=".repeat(60));
   }
 }

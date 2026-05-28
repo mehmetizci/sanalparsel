@@ -49,6 +49,12 @@ export interface Project {
   custom_note: string | null;
   status: "draft" | "analysis_ready" | "video_ready" | "completed";
   created_at: string;
+  // TTS Audio fields
+  audio_url?: string | null;
+  audio_status?: "idle" | "generating" | "ready" | "failed";
+  tts_provider?: TTSProvider;
+  tts_voice?: OpenAIVoice;
+  tts_speed?: number;
 }
 
 export interface ProjectSettings {
@@ -93,9 +99,12 @@ export interface Narration {
   project_id: string;
   text: string;
   tone: "corporate" | "investment" | "social" | "short" | "premium";
-  voice_type: "female" | "male" | "corporate";
+  voice_type: "female" | "male" | "corporate" | OpenAIVoice;
   audio_url: string | null;
   duration: number | null;
+  tts_provider?: TTSProvider;
+  tts_voice?: OpenAIVoice;
+  tts_speed?: number;
 }
 
 export interface Video {
@@ -134,6 +143,52 @@ export type CameraSequenceMode = "orbit360" | "spiralDescend" | "topView" | "low
 
 export type VideoTone = "corporate" | "investment" | "social" | "short" | "premium";
 export type VoiceType = "female" | "male" | "corporate";
+
+// TTS Provider types
+export type TTSProvider = "openai" | "edge-tts";
+
+// OpenAI TTS voice types
+export type OpenAIVoice = "nova" | "onyx" | "shimmer" | "coral";
+
+// TTS Settings interface
+export interface TTSSettings {
+  provider: TTSProvider;
+  voice: OpenAIVoice | VoiceType;
+  speed: number;
+  instructions?: string;
+}
+
+// TTS Generation options
+export interface TTSGenerateOptions {
+  projectId: string;
+  text: string;
+  provider?: TTSProvider;
+  voice?: OpenAIVoice;
+  speed?: number;
+  instructions?: string;
+}
+
+// TTS Generation result
+export interface TTSGenerateResult {
+  success: boolean;
+  audioUrl?: string;
+  storagePath?: string;
+  duration?: number;
+  provider?: TTSProvider;
+  voice?: string;
+  speed?: number;
+  error?: string;
+}
+
+// Audio state for project
+export interface AudioState {
+  audioUrl: string | null;
+  status: "idle" | "generating" | "ready" | "failed";
+  provider: TTSProvider;
+  voice: OpenAIVoice;
+  speed: number;
+  instructions?: string;
+}
 
 export interface DroneSettings {
   duration: 30 | 45 | 60;

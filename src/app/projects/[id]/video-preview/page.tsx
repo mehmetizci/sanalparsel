@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { Project, Narration, Video, VoiceType } from "@/types";
+import { Project, Narration, Video, TTSProvider, OpenAIVoice } from "@/types";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
@@ -20,13 +20,16 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [project, setProject] = useState<Project | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
   const [video, setVideo] = useState<Video | null>(null);
-  const [voiceType, setVoiceType] = useState<VoiceType>("female");
+  const [voiceType, setVoiceType] = useState<OpenAIVoice>("nova");
   const [loading, setLoading] = useState(true);
   const [textExpanded, setTextExpanded] = useState(false);
   
+  // TTS settings state
+  const [ttsProvider, setTtsProvider] = useState<TTSProvider>("openai");
+  const [ttsSpeed, setTtsSpeed] = useState(1.55);
+  
   // SEPRATED voiceState - completely independent from renderState
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  const [ttsProvider, setTtsProvider] = useState<string | null>(null);
   
   // Render state management - completely separate from voice
   const [renderState, setRenderState] = useState<RenderState>("idle");
@@ -85,11 +88,23 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
 
       if (!cancelled && narData) {
         setNarration(narData as Narration);
-        setVoiceType((narData as Narration).voice_type || "female");
+        // Set voice type from narration (or project)
+        setVoiceType((narData as Narration).voice_type as OpenAIVoice || "nova");
         // If there's existing audio, set voice state to ready
         if ((narData as Narration).audio_url) {
           setVoiceState("ready");
         }
+      }
+
+      // Load TTS settings from project if available
+      if (projectData.tts_provider) {
+        setTtsProvider(projectData.tts_provider as TTSProvider);
+      }
+      if (projectData.tts_voice) {
+        setVoiceType(projectData.tts_voice as OpenAIVoice);
+      }
+      if (projectData.tts_speed) {
+        setTtsSpeed(projectData.tts_speed);
       }
 
       const { data: videoData } = await supabase
@@ -154,6 +169,8 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           voice: voiceType,
           userId: project.user_id,
           projectId: id,
+          provider: ttsProvider,
+          speed: ttsSpeed,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -459,6 +476,9 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 audioUrl={narration?.audio_url}
                 onRetry={handleVoiceRetry}
                 provider={ttsProvider}
+                onProviderChange={setTtsProvider}
+                speed={ttsSpeed}
+                onSpeedChange={setTtsSpeed}
               />
             </GlassCard>
 

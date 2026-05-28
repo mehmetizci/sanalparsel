@@ -1,36 +1,62 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { VoiceType } from "@/types";
+import { TTSProvider, OpenAIVoice } from "@/types";
 
 export type VoiceState = "idle" | "generating" | "ready" | "error";
 
+// OpenAI TTS voice options
+export const OPENAI_VOICES: { id: OpenAIVoice; name: string; description: string }[] = [
+  { id: "nova", name: "Nova", description: "Hızlı ve canlı" },
+  { id: "onyx", name: "Onyx", description: "Premium ve güçlü" },
+  { id: "shimmer", name: "Shimmer", description: "Yumuşak premium" },
+  { id: "coral", name: "Coral", description: "Sıcak ve doğal" },
+];
+
+// Speed options
+export const SPEED_OPTIONS: { id: string; label: string; value: number; description: string }[] = [
+  { id: "1.25", label: "1.25x", value: 1.25, description: "Normal canlı" },
+  { id: "1.45", label: "1.45x", value: 1.45, description: "Hızlı" },
+  { id: "1.55", label: "1.55x", value: 1.55, description: "Reels hızlı" },
+  { id: "1.75", label: "1.75x", value: 1.75, description: "Çok hızlı" },
+];
+
+// Provider options
+export const PROVIDER_OPTIONS: { id: TTSProvider; name: string; description: string }[] = [
+  { id: "openai", name: "OpenAI TTS", description: "Premium AI ses" },
+  { id: "edge-tts", name: "Edge TTS", description: "Microsoft Edge (Yedek)" },
+];
+
 interface VoiceSelectorProps {
-  voiceType: VoiceType;
-  onChange: (type: VoiceType) => void;
+  voiceType?: OpenAIVoice;
+  onChange?: (type: OpenAIVoice) => void;
   onGenerate: () => Promise<void>;
   disabled?: boolean;
   voiceState?: VoiceState;
   audioUrl?: string | null;
   onRetry?: () => void;
-  provider?: string | null;
+  provider?: TTSProvider;
+  onProviderChange?: (provider: TTSProvider) => void;
+  speed?: number;
+  onSpeedChange?: (speed: number) => void;
 }
 
-const voiceLabels: Record<VoiceType, string> = {
-  female: "Kadın",
-  male: "Erkek",
-  corporate: "Kurumsal",
-};
+const defaultVoice: OpenAIVoice = "nova";
+const defaultSpeed = 1.55;
+const defaultProvider: TTSProvider = "openai";
 
 export default function VoiceSelector({
-  voiceType,
+  voiceType = defaultVoice,
   onChange,
   onGenerate,
   disabled,
   voiceState = "idle",
   audioUrl,
   onRetry,
-  provider,
+  provider = defaultProvider,
+  onProviderChange,
+  speed = defaultSpeed,
+  onSpeedChange,
 }: VoiceSelectorProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -39,7 +65,7 @@ export default function VoiceSelector({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentUrlRef = useRef<string | null>(null);
 
-  // Log provider info for debugging (MVP: not shown in UI)
+  // Log provider info for debugging
   useEffect(() => {
     if (provider) {
       console.log(`[VoiceSelector] TTS provider: ${provider}`);
@@ -224,32 +250,95 @@ export default function VoiceSelector({
         </div>
       )}
 
-      {/* Voice Selection - Horizontal scroll chips */}
-      <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4" style={{ scrollbarWidth: 'none' }}>
-        {(Object.keys(voiceLabels) as VoiceType[]).map((type) => {
-          const isActive = voiceType === type;
-          return (
-            <button
-              key={type}
-              onClick={() => onChange(type)}
-              disabled={disabled || isGenerating}
-              className={`
-                shrink-0 px-4 py-2 text-xs font-medium rounded-full transition-all duration-200 whitespace-nowrap flex items-center gap-1.5
-                ${disabled || isGenerating ? "opacity-50" : ""}
-                ${isActive 
-                  ? "bg-primary text-white shadow-lg shadow-primary/30" 
-                  : "bg-white/[0.05] text-white/50 border border-white/[0.08]"
-                }
-              `}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-              {voiceLabels[type]}
-            </button>
-          );
-        })}
+      {/* Provider Selection */}
+      {onProviderChange && (
+        <div className="space-y-2">
+          <label className="text-white/50 text-xs font-medium">Seslendirme Servisi</label>
+          <div className="flex gap-2">
+            {PROVIDER_OPTIONS.map((opt) => {
+              const isActive = provider === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => onProviderChange(opt.id)}
+                  disabled={disabled || isGenerating}
+                  className={`
+                    flex-1 px-3 py-2 text-xs font-medium rounded-lg transition-all duration-200
+                    ${disabled || isGenerating ? "opacity-50" : ""}
+                    ${isActive 
+                      ? "bg-primary text-white" 
+                      : "bg-white/[0.05] text-white/50 border border-white/[0.08]"
+                    }
+                  `}
+                >
+                  <div className="font-medium">{opt.name}</div>
+                  <div className="text-white/40 text-[10px] mt-0.5">{opt.description}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Voice Selection - OpenAI TTS Voices */}
+      <div className="space-y-2">
+        <label className="text-white/50 text-xs font-medium">Ses Karakteri</label>
+        <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4" style={{ scrollbarWidth: 'none' }}>
+          {OPENAI_VOICES.map((voice) => {
+            const isActive = voiceType === voice.id;
+            return (
+              <button
+                key={voice.id}
+                onClick={() => onChange?.(voice.id)}
+                disabled={disabled || isGenerating}
+                className={`
+                  shrink-0 px-4 py-2 text-xs font-medium rounded-full transition-all duration-200 whitespace-nowrap flex items-center gap-1.5
+                  ${disabled || isGenerating ? "opacity-50" : ""}
+                  ${isActive 
+                    ? "bg-primary text-white shadow-lg shadow-primary/30" 
+                    : "bg-white/[0.05] text-white/50 border border-white/[0.08]"
+                  }
+                `}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                {voice.name}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {/* Speed Selection */}
+      {onSpeedChange && (
+        <div className="space-y-2">
+          <label className="text-white/50 text-xs font-medium">Hız</label>
+          <div className="flex gap-1.5">
+            {SPEED_OPTIONS.map((opt) => {
+              const isActive = speed === opt.value;
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => onSpeedChange(opt.value)}
+                  disabled={disabled || isGenerating}
+                  className={`
+                    flex-1 px-2 py-1.5 text-xs font-medium rounded-lg transition-all duration-200
+                    ${disabled || isGenerating ? "opacity-50" : ""}
+                    ${isActive 
+                      ? "bg-primary/20 text-primary border border-primary/30" 
+                      : "bg-white/[0.03] text-white/40 border border-transparent"
+                    }
+                  `}
+                  title={opt.description}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Generate Button */}
       <button
@@ -339,6 +428,12 @@ export default function VoiceSelector({
                 <div className="w-1.5 h-1.5 rounded-full bg-primary" />
                 <span className="text-primary text-[10px] font-medium">✓ Ses Hazır</span>
               </div>
+            </div>
+            {/* Provider/Voice info */}
+            <div className="mt-2 flex items-center gap-2 text-[10px] text-white/40">
+              <span className="px-1.5 py-0.5 rounded bg-white/5">{provider === "openai" ? "OpenAI" : "Edge TTS"}</span>
+              <span>{voiceType}</span>
+              <span>{speed}x</span>
             </div>
           </div>
         </div>

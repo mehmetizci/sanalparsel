@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
+import { TTSProvider, OpenAIVoice } from "@/types";
 
 export interface ParcelMetadata {
   Il?: string;
@@ -79,6 +80,16 @@ export interface VideoSettingsState {
   height: number;
   listingType: ListingType;
   overlays: VideoOverlaySettings;
+}
+
+// TTS Audio settings - persisted for project
+export interface TTSAudioState {
+  audioUrl: string | null;
+  status: "idle" | "generating" | "ready" | "failed";
+  provider: TTSProvider;
+  voice: OpenAIVoice;
+  speed: number;
+  instructions?: string;
 }
 
 // Enhanced POI types with OSM metadata
@@ -226,6 +237,10 @@ export interface ParcelState {
   // Video settings state
   videoSettings: VideoSettingsState;
   
+  // TTS Audio state - persisted per project
+  ttsAudio: TTSAudioState;
+  currentProjectId: string | null;
+  
   // Actions
   setParcelData: (data: {
     geoJson?: Feature<Polygon | MultiPolygon>;
@@ -245,10 +260,16 @@ export interface ParcelState {
   
   // Initialize from existing project data (from database)
   initFromProject: (project: {
+    id?: string;
     geojson?: Feature<Polygon | MultiPolygon>;
     properties?: ParcelMetadata;
     center_lat?: number;
     center_lon?: number;
+    audio_url?: string | null;
+    audio_status?: string;
+    tts_provider?: string;
+    tts_voice?: string;
+    tts_speed?: number;
   }) => void;
   
   // POI actions
@@ -267,6 +288,17 @@ export interface ParcelState {
   setCameraSequence: (sequence: CameraSequence | null) => void;
   setVideoSettings: (settings: Partial<VideoSettingsState> | ((prev: VideoSettingsState) => VideoSettingsState)) => void;
   clearDroneSettings: () => void;
+  
+  // TTS Audio actions
+  setTTSAudio: (audio: Partial<TTSAudioState>) => void;
+  clearTTSAudio: () => void;
+  updateTTSFromProject: (project: {
+    audio_url?: string | null;
+    audio_status?: string;
+    tts_provider?: string;
+    tts_voice?: string;
+    tts_speed?: number;
+  }) => void;
 }
 
 export const useParcelStore = create<ParcelState>()(
@@ -307,6 +339,15 @@ export const useParcelStore = create<ParcelState>()(
           subtitles: true,
         },
       },
+      // TTS Audio state - defaults
+      ttsAudio: {
+        audioUrl: null,
+        status: "idle",
+        provider: "openai",
+        voice: "nova",
+        speed: 1.55,
+      },
+      currentProjectId: null,
 
       setParcelData: (data) => set((state) => {
         const updates: Partial<ParcelState> = {
@@ -370,6 +411,7 @@ export const useParcelStore = create<ParcelState>()(
         const updates: Partial<ParcelState> = {
           source: "database",
           parcelMetadata: project.properties || null,
+          currentProjectId: project.id || null,
         };
 
         if (project.geojson) {
@@ -385,6 +427,17 @@ export const useParcelStore = create<ParcelState>()(
           updates.parcelCenter = {
             lat: project.center_lat,
             lon: project.center_lon,
+          };
+        }
+
+        // Initialize TTS audio from project
+        if (project.audio_url) {
+          updates.ttsAudio = {
+            audioUrl: project.audio_url,
+            status: (project.audio_status as "idle" | "generating" | "ready" | "failed") || "ready",
+            provider: (project.tts_provider as TTSProvider) || "openai",
+            voice: (project.tts_voice as OpenAIVoice) || "nova",
+            speed: project.tts_speed || 1.55,
           };
         }
 
@@ -441,6 +494,30 @@ export const useParcelStore = create<ParcelState>()(
         },
         cameraSequence: null,
       }),
+      
+      // TTS Audio actions
+      setTTSAudio: (audio) => set((state) => ({
+        ttsAudio: { ...state.ttsAudio, ...audio },
+      })),
+      clearTTSAudio: () => set({
+        ttsAudio: {
+          audioUrl: null,
+          status: "idle",
+          provider: "openai",
+          voice: "nova",
+          speed: 1.55,
+        },
+      }),
+      updateTTSFromProject: (project) => set((state) => ({
+        ttsAudio: {
+          ...state.ttsAudio,
+          audioUrl: project.audio_url || state.ttsAudio.audioUrl,
+          status: (project.audio_status as "idle" | "generating" | "ready" | "failed") || state.ttsAudio.status,
+          provider: (project.tts_provider as TTSProvider) || state.ttsAudio.provider,
+          voice: (project.tts_voice as OpenAIVoice) || state.ttsAudio.voice,
+          speed: project.tts_speed || state.ttsAudio.speed,
+        },
+      })),
     }),
     {
       name: "sanalparsel-parcel", // localStorage key
@@ -461,6 +538,9 @@ export const useParcelStore = create<ParcelState>()(
         cameraSequence: state.cameraSequence,
         // Persist video settings
         videoSettings: state.videoSettings,
+        // Persist TTS audio settings
+        ttsAudio: state.ttsAudio,
+        currentProjectId: state.currentProjectId,
       }),
     }
   )
