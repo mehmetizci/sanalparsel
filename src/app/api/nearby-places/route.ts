@@ -16,6 +16,13 @@ interface POI {
   source: "overpass" | "nominatim" | "fallback";
 }
 
+// Cache data structure with source
+interface CacheData {
+  data: POI[];
+  source: "overpass" | "fallback";
+  createdAt: number;
+}
+
 // Overpass endpoints
 const OVERPASS_ENDPOINTS = [
   "https://lz4.overpass-api.de/api/interpreter",
@@ -23,9 +30,10 @@ const OVERPASS_ENDPOINTS = [
   "https://z.overpass-api.de/api/interpreter",
 ];
 
-// In-memory cache
-const cache = new Map<string, { data: POI[]; timestamp: number }>();
+// In-memory cache with versioned key
+const cache = new Map<string, CacheData>();
 const CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
+const CACHE_VERSION = "v2";
 
 // In-flight requests lock
 const inFlightRequests = new Map<string, Promise<POI[]>>();
@@ -37,24 +45,30 @@ const DEBOUNCE_MS = 2000;
 function getCacheKey(lat: number, lng: number): string {
   const roundedLat = Math.round(lat * 10000) / 10000;
   const roundedLng = Math.round(lng * 10000) / 10000;
-  return `nearby:${roundedLat}:${roundedLng}`;
+  return `nearby:${CACHE_VERSION}:${roundedLat}:${roundedLng}`;
 }
 
-function getFromCache(key: string): POI[] | null {
+function getFromCache(key: string): CacheData | null {
   const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
+  if (cached && Date.now() - cached.createdAt < CACHE_TTL) {
+    return cached;
   }
   cache.delete(key);
   return null;
 }
 
-function setCache(key: string, data: POI[]): void {
+function setCache(key: string, data: POI[], source: "overpass" | "fallback"): void {
+  // Don't cache fallback results
+  if (source === "fallback") {
+    console.log("[NearbyPlaces] Skipping cache for fallback result");
+    return;
+  }
+  
   if (cache.size > 100) {
     const firstKey = cache.keys().next().value as string | undefined;
     if (firstKey) cache.delete(firstKey);
   }
-  cache.set(key, { data, timestamp: Date.now() });
+  cache.set(key, { data, source, createdAt: Date.now() });
 }
 
 function shouldDebounce(key: string): boolean {
@@ -373,14 +387,21 @@ export async function GET(request: NextRequest) {
   // Check cache
   const cached = getFromCache(cacheKey);
   if (cached) {
-    return NextResponse.json({
-      success: true,
-      pois: cached,
-      count: cached.length,
-      center: { lat, lng },
-      source: "cache",
-      parcelKey: cacheKey,
-    });
+    console.log("[NearbyPlaces] Cache source:", cached.source);
+    
+    // Ignore fallback cache, try fresh query
+    if (cached.source === "fallback") {
+      console.log("[NearbyPlaces] Ignoring fallback cache, fetching fresh data");
+    } else {
+      return NextResponse.json({
+        success: true,
+        pois: cached.data,
+        count: cached.data.length,
+        center: { lat, lng },
+        source: "cache",
+        parcelKey: cacheKey,
+      });
+    }
   }
 
   // Check debounce
@@ -460,8 +481,8 @@ export async function GET(request: NextRequest) {
       });
 
       // Cache only real results (not fallback)
-      if (usedSource !== "fallback") {
-        setCache(cacheKey, displayPois);
+      if (usedSource === "overpass") {
+        setCache(cacheKey, displayPois, "overpass");
       }
 
       console.log("[NearbyPlaces] Final result:", {
