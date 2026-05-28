@@ -23,11 +23,11 @@ interface CacheData {
   createdAt: number;
 }
 
-// Overpass endpoints
+// Overpass endpoints - ordered by reliability
 const OVERPASS_ENDPOINTS = [
-  "https://lz4.overpass-api.de/api/interpreter",
   "https://overpass-api.de/api/interpreter",
-  "https://z.overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
 ];
 
 // In-memory cache with versioned key
@@ -162,12 +162,13 @@ async function fetchFromOverpass(query: string): Promise<{ elements: OverpassEle
       console.log(`[NearbyPlaces] Trying endpoint ${i + 1}/${OVERPASS_ENDPOINTS.length}:`, endpoint);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
       
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "User-Agent": "SanalParsel/1.0 (contact: mehmetizcix@gmail.com)",
         },
         body: new URLSearchParams({ data: query }).toString(),
         signal: controller.signal,
@@ -207,14 +208,20 @@ async function fetchFromOverpass(query: string): Promise<{ elements: OverpassEle
       console.log("[NearbyPlaces] No elements from", endpoint);
       
     } catch (err) {
-      console.log("[NearbyPlaces] Error on", endpoint, ":", (err as Error).message);
+      const error = err as Error;
+      console.error("[NearbyPlaces] Fetch failed detail:", {
+        endpoint,
+        message: error.message,
+        cause: error.cause,
+        name: error.name,
+      });
       if (i < OVERPASS_ENDPOINTS.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
     }
   }
   
-  return { elements: [], status: 429 };
+  return { elements: [], status: 0 };
 }
 
 // Parse POIs from Overpass elements
