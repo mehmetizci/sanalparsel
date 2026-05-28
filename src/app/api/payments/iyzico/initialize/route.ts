@@ -277,7 +277,6 @@ async function initializeIyzicoCheckout(params: {
       paymentGroup: "PRODUCT",
       callbackUrl: params.callbackUrl,
       enabledInstallments: [1],
-      paymentSource: "GROW",
       buyer,
       shippingAddress: {
         contactName: `${firstName} ${lastName}`,
@@ -304,13 +303,21 @@ async function initializeIyzicoCheckout(params: {
       ],
     };
 
-    console.log("iyzico initialize payload:", JSON.stringify(requestBody, null, 2));
+    // Use the exact same body string for both logging and signature
+    const bodyString = JSON.stringify(requestBody);
+    console.log("iyzico initialize payload:", bodyString);
 
     // Create IYZWSv2 authorization header
     // Format: Base64(SHA1(apiKey + secretKey + randomString + conversationId))
     const hashInput = `${apiKey}${secretKey}${randomString}${params.orderId}`;
     const hash = createHmac("sha1", secretKey).update(hashInput).digest("base64");
     const authorization = `IYZWSv2 ${apiKey}:${hash}`;
+
+    // Debug: log authorization header prefix
+    console.log("iyzico authorization:", {
+      startsWithIYZWSv2: authorization.startsWith("IYZWSv2"),
+      prefix: authorization.substring(0, 20),
+    });
 
     const endpoint = `${baseUrl}/payment/iyzipos/checkoutform/initialize/auth/ecom`;
     
@@ -321,7 +328,7 @@ async function initializeIyzicoCheckout(params: {
         "Authorization": authorization,
         "x-iyzi-rnd": randomString,
       },
-      body: JSON.stringify(requestBody),
+      body: bodyString,
     });
 
     const data = await response.json();
