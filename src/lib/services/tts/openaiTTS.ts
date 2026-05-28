@@ -3,17 +3,15 @@
  * 
  * Uses OpenAI's Audio Speech API for text-to-speech synthesis.
  * Optimized for Turkish real estate marketing content.
+ * 
+ * IMPORTANT: OpenAI client is initialized lazily inside the function
+ * to avoid build-time errors when OPENAI_API_KEY is not set.
  */
 
 import OpenAI from "openai";
 import fs from "fs";
 import path from "path";
 import os from "os";
-
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 // Default instructions for Turkish real estate narration
 export const DEFAULT_TURKISH_INSTRUCTIONS = `Language: Turkish (Türkiye) — fluent, natural, modern and high-energy Turkish pronunciation.
@@ -101,13 +99,18 @@ export async function generateWithOpenAI(
   console.log("[OpenAI TTS] Starting generation");
   console.log(`[OpenAI TTS] Model: ${model}, Voice: ${voice}, Speed: ${speed}`);
 
-  // Validate API key
+  // Validate API key at runtime
   if (!process.env.OPENAI_API_KEY) {
     console.error("[OpenAI TTS] ERROR: OPENAI_API_KEY missing on backend environment");
     return { success: false, error: "OPENAI_API_KEY missing on backend environment" };
   }
 
   try {
+    // Initialize OpenAI client at runtime (not at file level)
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
     // Call OpenAI Audio Speech API
     console.log("[OpenAI TTS] Calling OpenAI API...");
     const audioResponse = await openai.audio.speech.create({

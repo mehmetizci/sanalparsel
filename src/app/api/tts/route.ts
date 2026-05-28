@@ -17,8 +17,8 @@ interface TTSRequestBody {
   instructions?: string;
 }
 
-// Default values from environment
-const DEFAULT_PROVIDER = (process.env.TTS_PROVIDER as "openai" | "edge-tts") || "openai";
+// Default values from environment - MVP uses Edge TTS
+const DEFAULT_PROVIDER = (process.env.TTS_PROVIDER as "openai" | "edge-tts") || "edge-tts";
 const DEFAULT_VOICE = process.env.OPENAI_TTS_VOICE || "nova";
 const DEFAULT_SPEED = parseFloat(process.env.OPENAI_TTS_SPEED || "1.55");
 
