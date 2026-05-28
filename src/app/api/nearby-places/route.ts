@@ -3,49 +3,53 @@ import { NextRequest, NextResponse } from "next/server";
 // POI types
 interface POI {
   id: string;
-  osmId?: number;
-  osmType?: string;
   category: string;
   label: string;
   name: string;
+  address?: string;
   distanceMeters: number;
   distanceText: string;
   lat: number;
   lng: number;
   selected: boolean;
-  source: "overpass" | "nominatim" | "fallback";
+  source: "mapbox" | "overpass" | "fallback";
 }
 
-// Cache data structure with source
+// Cache data structure
 interface CacheData {
   data: POI[];
-  source: "overpass" | "fallback";
+  source: "mapbox" | "overpass" | "fallback";
   createdAt: number;
 }
 
-// Overpass endpoints - ordered by reliability
-const OVERPASS_ENDPOINTS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://lz4.overpass-api.de/api/interpreter",
+// Mapbox categories
+const MAPBOX_CATEGORIES = [
+  "restaurant",
+  "cafe",
+  "school",
+  "hospital",
+  "pharmacy",
+  "supermarket",
+  "bank",
+  "gas_station",
+  "bus_station",
 ];
 
-// In-memory cache with versioned key
+// In-memory cache
 const cache = new Map<string, CacheData>();
 const CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
-const CACHE_VERSION = "v2";
 
-// In-flight requests lock
+// In-flight requests
 const inFlightRequests = new Map<string, Promise<POI[]>>();
 
-// Debounce tracking
+// Debounce
 const recentRequests = new Map<string, number>();
 const DEBOUNCE_MS = 2000;
 
 function getCacheKey(lat: number, lng: number): string {
   const roundedLat = Math.round(lat * 10000) / 10000;
   const roundedLng = Math.round(lng * 10000) / 10000;
-  return `nearby:${CACHE_VERSION}:${roundedLat}:${roundedLng}`;
+  return `nearby:mapbox:${roundedLat}:${roundedLng}`;
 }
 
 function getFromCache(key: string): CacheData | null {
@@ -57,12 +61,8 @@ function getFromCache(key: string): CacheData | null {
   return null;
 }
 
-function setCache(key: string, data: POI[], source: "overpass" | "fallback"): void {
-  // Don't cache fallback results
-  if (source === "fallback") {
-    console.log("[NearbyPlaces] Skipping cache for fallback result");
-    return;
-  }
+function setCache(key: string, data: POI[], source: "mapbox" | "overpass" | "fallback"): void {
+  if (source === "fallback") return;
   
   if (cache.size > 100) {
     const firstKey = cache.keys().next().value as string | undefined;
@@ -104,41 +104,124 @@ function formatDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)} km mesafede`;
 }
 
-// Get POI name from tags
-function getPoiName(tags: Record<string, string>): string | null {
-  return (
-    tags.name ||
-    tags["name:tr"] ||
-    tags.official_name ||
-    tags.operator ||
-    tags.brand ||
-    tags.alt_name ||
-    null
-  );
+// Category labels
+const CATEGORY_LABELS: Record<string, string> = {
+  restaurant: "Restoran",
+  cafe: "Kafe",
+  school: "Okul",
+  hospital: "Hastane",
+  pharmacy: "Eczane",
+  supermarket: "Market",
+  bank: "Banka",
+  gas_station: "Benzin İstasyonu",
+  bus_station: "Otobüs Terminali",
+  bus_stop: "Otobüs Durağı",
+};
+
+// Mapbox category to POI category mapping
+const CATEGORY_MAP: Record<string, string> = {
+  restaurant: "restaurant",
+  cafe: "cafe",
+  school: "school",
+  hospital: "hospital",
+  pharmacy: "pharmacy",
+  supermarket: "market",
+  bank: "bank",
+  gas_station: "fuel",
+  bus_station: "transport",
+  bus_stop: "transport",
+};
+
+// Fetch from Mapbox
+async function fetchFromMapbox(lat: number, lng: number, token: string): Promise<POI[]> {
+  const pois: POI[] = [];
+  const seenNames = new Set<string>();
+
+  for (const category of MAPBOX_CATEGORIES) {
+    try {
+      const url = `https://api.mapbox.com/search/searchbox/v1/category/${category}?access_token=${token}&limit=5&language=tr&proximity=${lng},${lat}`;
+
+      console.log(`[NearbyPlaces] Mapbox requesting category: ${category}`);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(url, {
+        headers: {
+          "Accept": "application/json",
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.log(`[NearbyPlaces] Mapbox ${category} failed: ${response.status}`);
+        continue;
+      }
+
+      const data = await response.json();
+
+      if (!data.features || data.features.length === 0) {
+        continue;
+      }
+
+      for (const feature of data.features) {
+        const name = feature.properties.name || feature.properties.full_address;
+        if (!name || seenNames.has(name.toLowerCase())) continue;
+        
+        seenNames.add(name.toLowerCase());
+
+        const center = feature.geometry?.coordinates;
+        if (!center) continue;
+
+        const distance = haversineDistance(lat, lng, center[1], center[0]);
+        
+        if (distance > 5000) continue; // Only include within 5km
+
+        const poi: POI = {
+          id: `mapbox_${feature.id || feature.properties.mapbox_id}`,
+          category: CATEGORY_MAP[category] || category,
+          label: CATEGORY_LABELS[category] || category,
+          name,
+          address: feature.properties.full_address || feature.properties.address,
+          distanceMeters: Math.round(distance),
+          distanceText: formatDistance(distance),
+          lat: center[1],
+          lng: center[0],
+          selected: false,
+          source: "mapbox",
+        };
+
+        pois.push(poi);
+      }
+    } catch (err) {
+      console.log(`[NearbyPlaces] Mapbox ${category} error:`, (err as Error).message);
+      continue;
+    }
+  }
+
+  return pois;
 }
 
-// Generate Overpass query
+// Overpass fallback
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
+];
+
 function generateOverpassQuery(lat: number, lng: number, radius: number): string {
   return `
 [out:json][timeout:15];
 (
-  node["amenity"~"school|hospital|clinic|pharmacy|cafe|restaurant|university|fuel|bank"](around:${radius},${lat},${lng});
-  way["amenity"~"school|hospital|clinic|pharmacy|cafe|restaurant|university|fuel|bank"](around:${radius},${lat},${lng});
-
-  node["shop"~"supermarket|convenience|mall|bakery"](around:${radius},${lat},${lng});
-  way["shop"~"supermarket|convenience|mall|bakery"](around:${radius},${lat},${lng});
-
+  node["amenity"~"school|hospital|clinic|pharmacy|restaurant|cafe|bank"](around:${radius},${lat},${lng});
+  way["amenity"~"school|hospital|clinic|pharmacy|restaurant|cafe|bank"](around:${radius},${lat},${lng});
+  node["shop"~"supermarket|convenience"](around:${radius},${lat},${lng});
+  way["shop"~"supermarket|convenience"](around:${radius},${lat},${lng});
   node["highway"="bus_stop"](around:${radius},${lat},${lng});
   way["highway"="bus_stop"](around:${radius},${lat},${lng});
-
-  node["public_transport"="platform"](around:${radius},${lat},${lng});
-  way["public_transport"="platform"](around:${radius},${lat},${lng});
-
-  node["railway"~"station|halt|tram_stop"](around:${radius},${lat},${lng});
-  way["railway"~"station|halt|tram_stop"](around:${radius},${lat},${lng});
-
-  node["healthcare"~"hospital|clinic|doctor|pharmacy"](around:${radius},${lat},${lng});
-  way["healthcare"~"hospital|clinic|doctor|pharmacy"](around:${radius},${lat},${lng});
+  node["railway"~"station|tram_stop"](around:${radius},${lat},${lng});
 );
 out center tags;
   `.trim();
@@ -153,22 +236,21 @@ interface OverpassElement {
   tags?: Record<string, string>;
 }
 
-// Fetch from Overpass
-async function fetchFromOverpass(query: string): Promise<{ elements: OverpassElement[]; status: number }> {
-  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
-    const endpoint = OVERPASS_ENDPOINTS[i];
-    
+async function fetchFromOverpass(lat: number, lng: number, radius: number): Promise<OverpassElement[]> {
+  const query = generateOverpassQuery(lat, lng, radius);
+
+  for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      console.log(`[NearbyPlaces] Trying endpoint ${i + 1}/${OVERPASS_ENDPOINTS.length}:`, endpoint);
-      
+      console.log(`[NearbyPlaces] Overpass trying:`, endpoint);
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
-      
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          "User-Agent": "SanalParsel/1.0 (contact: mehmetizcix@gmail.com)",
+          "User-Agent": "SanalParsel/1.0",
         },
         body: new URLSearchParams({ data: query }).toString(),
         signal: controller.signal,
@@ -176,81 +258,40 @@ async function fetchFromOverpass(query: string): Promise<{ elements: OverpassEle
 
       clearTimeout(timeoutId);
 
-      if (response.status === 400) {
-        const errorText = await response.text();
-        console.error("[NearbyPlaces] Overpass 400 response:", errorText.substring(0, 200));
-        continue;
+      if (response.ok) {
+        const data = await response.json();
+        if (data.elements && data.elements.length > 0) {
+          console.log(`[NearbyPlaces] Overpass success: ${data.elements.length} elements`);
+          return data.elements;
+        }
       }
-
-      if (response.status === 429) {
-        console.log("[NearbyPlaces] Rate limited on", endpoint);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        continue;
-      }
-
-      if (response.status >= 500 || response.status === 406) {
-        console.log(`[NearbyPlaces] HTTP ${response.status} on`, endpoint);
-        continue;
-      }
-
-      if (!response.ok) {
-        console.log("[NearbyPlaces] HTTP error:", response.status);
-        continue;
-      }
-
-      const data = await response.json();
-      
-      if (data.elements && data.elements.length > 0) {
-        console.log("[NearbyPlaces] Success:", data.elements.length, "elements from", endpoint);
-        return { elements: data.elements, status: 200 };
-      }
-      
-      console.log("[NearbyPlaces] No elements from", endpoint);
-      
     } catch (err) {
-      const error = err as Error;
-      console.error("[NearbyPlaces] Fetch failed detail:", {
-        endpoint,
-        message: error.message,
-        cause: error.cause,
-        name: error.name,
-      });
-      if (i < OVERPASS_ENDPOINTS.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
+      console.log(`[NearbyPlaces] Overpass error:`, (err as Error).message);
+      continue;
     }
   }
-  
-  return { elements: [], status: 0 };
+
+  return [];
 }
 
-// Parse POIs from Overpass elements
 function parseOverpassElements(elements: OverpassElement[], lat: number, lng: number): POI[] {
-  const poisByCategory = new Map<string, POI>();
-  let namedCount = 0;
-  let unnamedCount = 0;
+  const pois: POI[] = [];
+  const seenNames = new Set<string>();
 
   for (const el of elements) {
     const elLat = el.lat ?? el.center?.lat;
     const elLng = el.lon ?? el.center?.lon;
-    
     if (!elLat || !elLng) continue;
-    
-    const tags = el.tags || {};
-    const poiName = getPoiName(tags);
-    
-    if (poiName) {
-      namedCount++;
-    } else {
-      unnamedCount++;
-    }
 
-    // Determine category
+    const tags = el.tags || {};
+    const name = tags.name || tags["name:tr"] || tags.official_name || tags.operator || tags.brand;
+    if (!name || seenNames.has(name.toLowerCase())) continue;
+    seenNames.add(name.toLowerCase());
+
     let category = "";
     let label = "";
 
-    if (tags.amenity === "hospital" || tags.amenity === "clinic" || tags.amenity === "doctors" ||
-        tags.healthcare === "hospital" || tags.healthcare === "clinic") {
+    if (tags.amenity === "hospital" || tags.amenity === "clinic") {
       category = "hospital";
       label = "Hastane";
     } else if (tags.amenity === "pharmacy") {
@@ -267,16 +308,14 @@ function parseOverpassElements(elements: OverpassElement[], lat: number, lng: nu
       label = "Restoran";
     } else if (tags.amenity === "bank" || tags.amenity === "atm") {
       category = "bank";
-      label = tags.amenity === "atm" ? "ATM" : "Banka";
+      label = "Banka";
     } else if (tags.amenity === "fuel") {
       category = "fuel";
       label = "Benzin İstasyonu";
-    } else if (tags.shop && /supermarket|convenience|mall|bakery/.test(tags.shop)) {
+    } else if (tags.shop === "supermarket" || tags.shop === "convenience") {
       category = "market";
       label = "Market";
-    } else if (tags.highway === "bus_stop" || tags.public_transport === "platform" ||
-               tags.railway === "station" || tags.railway === "tram_stop" ||
-               tags.amenity === "bus_station") {
+    } else if (tags.highway === "bus_stop" || tags.railway === "station" || tags.railway === "tram_stop") {
       category = "transport";
       label = tags.railway === "station" ? "İstasyon" : "Otobüs Durağı";
     } else {
@@ -284,54 +323,26 @@ function parseOverpassElements(elements: OverpassElement[], lat: number, lng: nu
     }
 
     const distance = haversineDistance(lat, lng, elLat, elLng);
-    
-    // Use name or "Yakındaki [label]" as fallback
-    const name = poiName || `Yakındaki ${label}`;
 
-    const poi: POI = {
-      id: `poi_${el.type}_${el.id}`,
-      osmId: el.id,
-      osmType: el.type,
+    pois.push({
+      id: `ov_${el.type}_${el.id}`,
       category,
       label,
       name,
+      address: tags["addr:street"],
       distanceMeters: Math.round(distance),
       distanceText: formatDistance(distance),
       lat: elLat,
       lng: elLng,
       selected: false,
       source: "overpass",
-    };
-
-    // Prefer named POI or closer POI
-    const existing = poisByCategory.get(category);
-    if (!existing) {
-      poisByCategory.set(category, poi);
-    } else {
-      const existingNamed = existing.name.startsWith("Yakındaki") === false;
-      const newNamed = !name.startsWith("Yakındaki");
-      
-      if (newNamed && !existingNamed) {
-        // Prefer named over unnamed
-        poisByCategory.set(category, poi);
-      } else if (distance < existing.distanceMeters) {
-        // Prefer closer
-        poisByCategory.set(category, poi);
-      }
-    }
+    });
   }
 
-  console.log("[NearbyPlaces] Parsed POIs:", {
-    total: elements.length,
-    named: namedCount,
-    unnamed: unnamedCount,
-    categories: poisByCategory.size,
-  });
-
-  return Array.from(poisByCategory.values());
+  return pois;
 }
 
-// Generate fallback POIs
+// Generate fallback
 function generateFallbackPois(lat: number, lng: number): POI[] {
   console.log("[NearbyPlaces] Generating fallback POIs");
   
@@ -389,37 +400,25 @@ export async function GET(request: NextRequest) {
   }
 
   const cacheKey = getCacheKey(lat, lng);
-  console.log("[NearbyPlaces] Request for:", cacheKey);
 
   // Check cache
   const cached = getFromCache(cacheKey);
-  if (cached) {
-    console.log("[NearbyPlaces] Cache source:", cached.source);
-    
-    // Ignore fallback cache, try fresh query
-    if (cached.source === "fallback") {
-      console.log("[NearbyPlaces] Ignoring fallback cache, fetching fresh data");
-    } else {
-      return NextResponse.json({
-        success: true,
-        pois: cached.data,
-        count: cached.data.length,
-        center: { lat, lng },
-        source: "cache",
-        parcelKey: cacheKey,
-      });
-    }
+  if (cached && cached.source !== "fallback") {
+    console.log("[NearbyPlaces] Cache hit, source:", cached.source);
+    return NextResponse.json({
+      success: true,
+      pois: cached.data,
+      count: cached.data.length,
+      center: { lat, lng },
+      source: cached.source,
+      parcelKey: cacheKey,
+    });
   }
 
-  // Check debounce
   if (shouldDebounce(cacheKey)) {
-    return NextResponse.json(
-      { error: "Çok sık istek atılıyor. Lütfen bekleyin." },
-      { status: 429 }
-    );
+    return NextResponse.json({ error: "Çok sık istek atılıyor" }, { status: 429 });
   }
 
-  // Check in-flight
   const inFlight = getInFlight(cacheKey);
   if (inFlight) {
     const result = await inFlight;
@@ -428,87 +427,83 @@ export async function GET(request: NextRequest) {
       pois: result,
       count: result.length,
       center: { lat, lng },
-      source: "overpass",
+      source: "cache",
       parcelKey: cacheKey,
     });
   }
 
-  // Create and track request
   const fetchPromise = (async () => {
-    try {
-      let allPois: POI[] = [];
-      let usedRadius = 0;
-      let usedSource = "overpass";
+    let allPois: POI[] = [];
+    let usedSource = "fallback";
 
-      // Try radius progression
-      const radiusSteps = [1500, 3000, 5000];
-
-      for (const radius of radiusSteps) {
-        console.log(`[NearbyPlaces] Trying radius ${radius}m...`);
-        
-        const query = generateOverpassQuery(lat, lng, radius);
-        console.log("[NearbyPlaces] Overpass query:", query);
-        
-        const result = await fetchFromOverpass(query);
-        
-        if (result.elements.length > 0) {
-          allPois = parseOverpassElements(result.elements, lat, lng);
-          usedRadius = radius;
-          usedSource = "overpass";
-          console.log(`[NearbyPlaces] Found ${allPois.length} POIs at ${radius}m`);
-          
-          if (allPois.length >= 5) {
-            break;
-          }
-        }
-      }
-
-      // Only use fallback if no real POIs found
-      if (allPois.length === 0) {
-        console.log("[NearbyPlaces] All endpoints failed, using fallback");
-        allPois = generateFallbackPois(lat, lng);
-        usedSource = "fallback";
-        usedRadius = 5000;
-      }
-
-      // Sort by priority then distance
-      allPois.sort((a, b) => {
-        const priorityA = CATEGORY_PRIORITY[a.category] || 999;
-        const priorityB = CATEGORY_PRIORITY[b.category] || 999;
-        if (priorityA !== priorityB) return priorityA - priorityB;
-        return a.distanceMeters - b.distanceMeters;
-      });
-
-      // Limit to max 8 POIs
-      const displayPois = allPois.slice(0, 8);
+    // 1. Try Mapbox
+    const mapboxToken = process.env.MAPBOX_ACCESS_TOKEN;
+    if (mapboxToken) {
+      console.log("[NearbyPlaces] Trying Mapbox...");
+      const mapboxPois = await fetchFromMapbox(lat, lng, mapboxToken);
       
-      // Auto-select first 5 POIs
-      displayPois.forEach((poi, index) => {
-        poi.selected = index < 5;
-      });
-
-      // Cache only real results (not fallback)
-      if (usedSource === "overpass") {
-        setCache(cacheKey, displayPois, "overpass");
+      if (mapboxPois.length > 0) {
+        allPois = mapboxPois;
+        usedSource = "mapbox";
+        console.log("[NearbyPlaces] Mapbox success:", mapboxPois.length, "POIs");
       }
-
-      console.log("[NearbyPlaces] Final result:", {
-        total: displayPois.length,
-        selected: displayPois.filter(p => p.selected).length,
-        source: usedSource,
-        radius: usedRadius,
-      });
-
-      return displayPois;
-    } finally {
-      inFlightRequests.delete(cacheKey);
+    } else {
+      console.log("[NearbyPlaces] MAPBOX_ACCESS_TOKEN not set, skipping Mapbox");
     }
+
+    // 2. Try Overpass if Mapbox failed
+    if (allPois.length === 0) {
+      console.log("[NearbyPlaces] Trying Overpass fallback...");
+      const overpassElements = await fetchFromOverpass(lat, lng, 2000);
+      
+      if (overpassElements.length > 0) {
+        allPois = parseOverpassElements(overpassElements, lat, lng);
+        usedSource = "overpass";
+        console.log("[NearbyPlaces] Overpass success:", overpassElements.length, "elements");
+      }
+    }
+
+    // 3. Generate fallback if both failed
+    if (allPois.length === 0) {
+      console.log("[NearbyPlaces] Both Mapbox and Overpass failed, using fallback");
+      allPois = generateFallbackPois(lat, lng);
+      usedSource = "fallback";
+    }
+
+    // Sort by priority then distance
+    allPois.sort((a, b) => {
+      const priorityA = CATEGORY_PRIORITY[a.category] || 999;
+      const priorityB = CATEGORY_PRIORITY[b.category] || 999;
+      if (priorityA !== priorityB) return priorityA - priorityB;
+      return a.distanceMeters - b.distanceMeters;
+    });
+
+    // Limit to max 8 POIs
+    const displayPois = allPois.slice(0, 8);
+    
+    // Auto-select first 5 POIs
+    displayPois.forEach((poi, index) => {
+      poi.selected = index < 5;
+    });
+
+    // Cache only real results
+    if (usedSource !== "fallback") {
+      setCache(cacheKey, displayPois, usedSource as "mapbox" | "overpass");
+    }
+
+    console.log("[NearbyPlaces] Final result:", {
+      total: displayPois.length,
+      selected: displayPois.filter(p => p.selected).length,
+      source: usedSource,
+      realPoiCount: displayPois.filter(p => p.source !== "fallback").length,
+    });
+
+    return displayPois;
   })();
 
-  // Set in-flight
   inFlightRequests.set(cacheKey, fetchPromise);
+  fetchPromise.finally(() => inFlightRequests.delete(cacheKey));
 
-  // Wait and return
   const allPois = await fetchPromise;
 
   return NextResponse.json({
@@ -516,10 +511,9 @@ export async function GET(request: NextRequest) {
     pois: allPois,
     count: allPois.length,
     center: { lat, lng },
-    source: "overpass",
+    source: "mapbox",
     parcelKey: cacheKey,
     debug: {
-      radius: 0,
       selectedCount: allPois.filter(p => p.selected).length,
     },
   });
