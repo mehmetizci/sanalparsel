@@ -95,14 +95,19 @@ function formatDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)} km mesafede`;
 }
 
-// Get best name from OSM tags
-function getBestName(tags: Record<string, string>, fallbackName: string): string {
+// Get best name from OSM tags - extended fallback chain
+function getBestName(tags: Record<string, string>, categoryLabel: string): string {
+  // Try multiple name sources in priority order
   if (tags["name:tr"] && tags["name:tr"].length > 2) return tags["name:tr"];
   if (tags.official_name && tags.official_name.length > 2) return tags.official_name;
   if (tags.name && tags.name.length > 2) return tags.name;
   if (tags.brand && tags.brand.length > 2) return tags.brand;
   if (tags.operator && tags.operator.length > 2) return tags.operator;
-  return fallbackName;
+  if (tags.alt_name && tags.alt_name.length > 2) return tags.alt_name;
+  if (tags.short_name && tags.short_name.length > 2) return tags.short_name;
+  
+  // If no name found, use "Yakındaki [Category]" format
+  return `Yakındaki ${categoryLabel}`;
 }
 
 // Generate Overpass query for a given radius
@@ -110,15 +115,23 @@ function generateOverpassQuery(lat: number, lng: number, radius: number): string
   return `
 [out:json][timeout:25];
 (
-  // Amenities
+  // Healthcare
   amenity=hospital;
   amenity=clinic;
-  amenity=pharmacy;
+  amenity=doctors;
+  healthcare=hospital;
+  healthcare=clinic;
+  
+  // Education
   amenity=school;
   amenity=university;
+  
+  // Amenities
+  amenity=pharmacy;
   amenity=cafe;
   amenity=restaurant;
   amenity=bank;
+  amenity=atm;
   amenity=fuel;
   
   // Shops
@@ -130,10 +143,11 @@ function generateOverpassQuery(lat: number, lng: number, radius: number): string
   public_transport=platform;
   railway=station;
   railway=tram_stop;
+  amenity=bus_station;
 )->.amenities;
 
 .amenities around:${radius},${lat},${lng};
-out center;
+out center tags;
   `.trim();
 }
 
@@ -224,6 +238,7 @@ function parseOverpassElements(
   radius: number
 ): POI[] {
   const poisByCategory = new Map<string, POI>();
+  const debugLog: Array<{ id: number; category: string; name: string; hasName: boolean }> = [];
 
   for (const el of elements) {
     const elLat = el.lat ?? el.center?.lat;
@@ -241,7 +256,8 @@ function parseOverpassElements(
     let label = "";
     
     // Priority order for categories
-    if (tags.amenity === "hospital" || tags.amenity === "clinic") {
+    if (tags.amenity === "hospital" || tags.amenity === "clinic" || 
+        tags.amenity === "doctors" || tags.healthcare === "hospital" || tags.healthcare === "clinic") {
       category = "hospital";
       label = "Hastane";
     } else if (tags.amenity === "pharmacy") {
@@ -280,7 +296,16 @@ function parseOverpassElements(
 
     // Get name - use category label if no name
     const name = getBestName(tags, label);
+    const hasName = name !== `Yakındaki ${label}`;
     
+    // Debug logging
+    debugLog.push({
+      id: el.id,
+      category,
+      name,
+      hasName,
+    });
+
     const poi: POI = {
       id: `poi_${el.type}_${el.id}`,
       osmId: el.id,
@@ -296,12 +321,28 @@ function parseOverpassElements(
       source: "overpass",
     };
 
-    // Keep closest POI per category
+    // Keep closest POI per category, but prefer named POIs
     const existing = poisByCategory.get(category);
-    if (!existing || distance < existing.distanceMeters) {
+    if (!existing) {
       poisByCategory.set(category, poi);
+    } else {
+      // Replace if: (1) this POI is closer, or (2) this POI has a real name but existing doesn't
+      const existingHasName = existing.name !== `Yakındaki ${existing.label}`;
+      if (distance < existing.distanceMeters || (hasName && !existingHasName)) {
+        poisByCategory.set(category, poi);
+      }
     }
   }
+
+  // Debug log
+  const namedPois = debugLog.filter(p => p.hasName);
+  console.log("[POI Name Debug]:", {
+    totalElements: elements.length,
+    parsedPois: poisByCategory.size,
+    namedPois: namedPois.length,
+    unnamedPois: debugLog.length - namedPois.length,
+    sampleNamed: namedPois.slice(0, 3).map(p => ({ id: p.id, name: p.name, category: p.category })),
+  });
 
   return Array.from(poisByCategory.values());
 }
@@ -329,7 +370,7 @@ function generateFallbackPois(lat: number, lng: number): POI[] {
       id: `fallback_${cat.category}`,
       category: cat.category,
       label: cat.label,
-      name: cat.label,
+      name: `Yakındaki ${cat.label}`,
       distanceMeters: Math.round(distance),
       distanceText: formatDistance(distance),
       lat: lat + (distance / 111000) * Math.cos(angle),
