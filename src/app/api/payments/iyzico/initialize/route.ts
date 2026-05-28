@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-admin";
-import { createHmac, randomBytes } from "crypto";
+import { createHmac } from "crypto";
 
 // Package definitions
 const PACKAGES = {
@@ -230,9 +230,6 @@ async function initializeIyzicoCheckout(params: {
   }
 
   try {
-    // Generate random string for x-iyzi-rnd
-    const randomString = randomBytes(16).toString("hex");
-    
     // Format price as string with 2 decimal places
     const formattedPrice = params.price.toFixed(2);
     
@@ -307,16 +304,29 @@ async function initializeIyzicoCheckout(params: {
     const bodyString = JSON.stringify(requestBody);
     console.log("iyzico initialize payload:", bodyString);
 
-    // Create IYZWSv2 authorization header
-    // Format: Base64(SHA1(apiKey + secretKey + randomString + conversationId))
-    const hashInput = `${apiKey}${secretKey}${randomString}${params.orderId}`;
-    const hash = createHmac("sha1", secretKey).update(hashInput).digest("base64");
-    const authorization = `IYZWSv2 ${apiKey}:${hash}`;
+    // IYZWSv2 Authorization
+    const endpointPath = "/payment/iyzipos/checkoutform/initialize/auth/ecom";
+    const randomKey = Date.now().toString();
+    
+    // Payload for signature: randomKey + endpointPath + bodyString
+    const payload = randomKey + endpointPath + bodyString;
+    
+    // HMAC-SHA256 with secretKey, output as hex
+    const encryptedData = createHmac("sha256", secretKey).update(payload).digest("hex");
+    
+    // Authorization string format
+    const authorizationString = `apiKey:${apiKey}&randomKey:${randomKey}&signature:${encryptedData}`;
+    
+    // Base64 encode the authorization string
+    const authorization = `IYZWSv2 ${Buffer.from(authorizationString).toString("base64")}`;
 
-    // Debug: log authorization header prefix
-    console.log("iyzico authorization:", {
-      startsWithIYZWSv2: authorization.startsWith("IYZWSv2"),
-      prefix: authorization.substring(0, 20),
+    // Debug log
+    console.log("iyzico auth debug:", {
+      endpointPath,
+      randomKey,
+      bodyStringLength: bodyString.length,
+      authorizationStarts: authorization.startsWith("IYZWSv2 "),
+      decodedPreview: Buffer.from(authorization.replace("IYZWSv2 ", ""), "base64").toString("utf8").slice(0, 50),
     });
 
     const endpoint = `${baseUrl}/payment/iyzipos/checkoutform/initialize/auth/ecom`;
@@ -326,7 +336,7 @@ async function initializeIyzicoCheckout(params: {
       headers: {
         "Content-Type": "application/json",
         "Authorization": authorization,
-        "x-iyzi-rnd": randomString,
+        "x-iyzi-rnd": randomKey,
       },
       body: bodyString,
     });
