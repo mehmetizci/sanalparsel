@@ -1,33 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-admin";
+import Iyzipay from "iyzipay";
 
 // Package definitions
 const PACKAGES = {
-  starter: { credits: 1, price: 149, name: "Başlangıç Paketi" },
-  standard: { credits: 5, price: 599, name: "Standart Paket" },
-  pro: { credits: 10, price: 999, name: "Pro Paket" },
+  starter: { credits: 1, price: 149, name: "SanalParsel 1 Video Kredisi" },
+  standard: { credits: 5, price: 599, name: "SanalParsel 5 Video Kredisi" },
+  pro: { credits: 10, price: 999, name: "SanalParsel 10 Video Kredisi" },
 } as const;
 
 type PackageId = keyof typeof PACKAGES;
 
 export async function POST(request: NextRequest) {
   try {
-    // Get user from auth header (set by middleware)
     const authHeader = request.headers.get("authorization");
     if (!authHeader) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Create Supabase client with service role for admin operations
     const supabase = createServerClient();
     
-    // Verify user
     const { data: { user }, error: authError } = await supabase.auth.getUser(
       authHeader.replace("Bearer ", "")
     );
 
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Check user profile completeness
+    const { data: profile, error: profileError } = await supabase
+      .from("user_profiles")
+      .select("full_name, phone, city, district")
+      .eq("user_id", user.id)
+      .single();
+
+    if (profileError || !profile) {
+      return NextResponse.json(
+        { error: "Profil bilgileriniz eksik. Lütfen önce profilinizi tamamlayın.", redirectTo: "/profile" },
+        { status: 400 }
+      );
+    }
+
+    const missingFields: string[] = [];
+    if (!profile.full_name || profile.full_name.trim() === "") missingFields.push("Ad Soyad");
+    if (!profile.phone || profile.phone.trim() === "") missingFields.push("Telefon");
+    if (!profile.city || profile.city.trim() === "") missingFields.push("Şehir");
+    if (!profile.district || profile.district.trim() === "") missingFields.push("İlçe");
+
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        { error: `Profil bilgileriniz eksik: ${missingFields.join(", ")}. Lütfen önce profilinizi tamamlayın.`, redirectTo: "/profile" },
+        { status: 400 }
+      );
     }
 
     // Parse request body
@@ -75,8 +100,10 @@ export async function POST(request: NextRequest) {
       orderId: order.id,
       userId: user.id,
       userEmail: user.email || "",
-      userName: user.user_metadata?.full_name || "Unknown",
-      userPhone: user.user_metadata?.phone || undefined,
+      userFullName: profile.full_name,
+      userPhone: profile.phone,
+      userCity: profile.city,
+      userDistrict: profile.district,
       packageName: pkg.name,
       packageId: packageId,
       price: pkg.price,
@@ -85,7 +112,6 @@ export async function POST(request: NextRequest) {
     });
 
     if (!iyzicoResponse.success || !iyzicoResponse.paymentPageUrl) {
-      // Update order status to failed
       await supabase
         .from("payment_orders")
         .update({ status: "failed" })
@@ -97,7 +123,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update order with iyzico token
     await supabase
       .from("payment_orders")
       .update({ iyzico_token: iyzicoResponse.token })
@@ -128,8 +153,10 @@ async function initializeIyzicoCheckout(params: {
   orderId: string;
   userId: string;
   userEmail: string;
-  userName: string;
-  userPhone?: string;
+  userFullName: string;
+  userPhone: string;
+  userCity: string;
+  userDistrict: string;
   packageName: string;
   packageId: string;
   price: number;
@@ -139,6 +166,17 @@ async function initializeIyzicoCheckout(params: {
   const apiKey = process.env.IYZICO_API_KEY;
   const secretKey = process.env.IYZICO_SECRET_KEY;
   const baseUrl = process.env.IYZICO_BASE_URL || "https://sandbox-api.iyzipay.com";
+
+  const hasApiKey = !!apiKey;
+  const hasSecretKey = !!secretKey;
+  const isSandbox = baseUrl.includes("sandbox");
+
+  console.log("iyzico initialize:", {
+    endpoint: `${baseUrl}/payment/iyzipos/checkoutform/initialize/auth/ecom`,
+    hasApiKey,
+    hasSecretKey,
+    keyMode: isSandbox ? "sandbox" : "production",
+  });
 
   if (!apiKey || !secretKey) {
     console.error("Missing iyzico credentials");
@@ -150,53 +188,52 @@ async function initializeIyzicoCheckout(params: {
     const formattedPrice = params.price.toFixed(2);
     
     // Split user name into first name and surname
-    const nameParts = params.userName.trim().split(/\s+/);
-    const firstName = nameParts[0] || "Musteri";
-    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "Musteri";
+    const nameParts = params.userFullName.trim().split(/\s+/);
+    const firstName = nameParts[0];
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0];
 
-    // Build buyer object - only include gsmNumber if user has a valid phone
-    const buyer: Record<string, string> = {
-      id: params.userId,
-      name: firstName,
-      surname: lastName,
-      email: params.userEmail || "musteri@example.com",
-      identityNumber: "11111111111",
-      registrationAddress: "İstanbul, Türkiye",
-      city: "İstanbul",
-      country: "Türkiye",
-      zipCode: "34000",
-      ip: params.clientIp || "85.34.78.112",
-    };
-    
-    // Only add gsmNumber if user has a valid phone number
-    if (params.userPhone && params.userPhone.length >= 10) {
-      buyer.gsmNumber = params.userPhone.startsWith("+") ? params.userPhone : `+90${params.userPhone}`;
-    }
+    // Initialize iyzico SDK
+    const iyzipay = new Iyzipay({
+      apiKey: apiKey,
+      secretKey: secretKey,
+      uri: baseUrl,
+    });
 
-    // iyzico Checkout Form Initialize request
-    const request = {
-      locale: "tr",
+    const requestPayload = {
+      locale: Iyzipay.LOCALE.TR,
       conversationId: params.orderId,
       price: formattedPrice,
       paidPrice: formattedPrice,
-      currency: "TRY",
+      currency: Iyzipay.CURRENCY.TRY,
       basketId: params.orderId,
-      paymentGroup: "PRODUCT",
+      paymentGroup: Iyzipay.PAYMENT_GROUP.PRODUCT,
       callbackUrl: params.callbackUrl,
       enabledInstallments: [1],
-      buyer,
+      buyer: {
+        id: params.userId,
+        name: firstName,
+        surname: lastName,
+        email: params.userEmail,
+        gsmNumber: params.userPhone.startsWith("+") ? params.userPhone : `+90${params.userPhone}`,
+        identityNumber: "11111111111",
+        registrationAddress: `${params.userDistrict}, ${params.userCity}, Turkey`,
+        city: params.userCity,
+        country: "Turkey",
+        zipCode: "34000",
+        ip: params.clientIp,
+      },
       shippingAddress: {
         contactName: `${firstName} ${lastName}`,
-        city: "İstanbul",
-        country: "Türkiye",
-        address: "İstanbul, Türkiye",
+        city: params.userCity,
+        country: "Turkey",
+        address: `${params.userDistrict}, ${params.userCity}, Turkey`,
         zipCode: "34000",
       },
       billingAddress: {
         contactName: `${firstName} ${lastName}`,
-        city: "İstanbul",
-        country: "Türkiye",
-        address: "İstanbul, Türkiye",
+        city: params.userCity,
+        country: "Turkey",
+        address: `${params.userDistrict}, ${params.userCity}, Turkey`,
         zipCode: "34000",
       },
       basketItems: [
@@ -204,59 +241,51 @@ async function initializeIyzicoCheckout(params: {
           id: params.packageId,
           name: params.packageName,
           category1: "Video Kredisi",
-          itemType: "VIRTUAL",
+          itemType: Iyzipay.BASKET_ITEM_TYPE.VIRTUAL,
           price: formattedPrice,
         },
       ],
     };
 
-    // Log request payload with masked sensitive data (never log secret key)
-    const maskedRequest = {
-      ...request,
-      // Don't log any sensitive data
-    };
-    console.log("iyzico initialize payload", JSON.stringify(maskedRequest, null, 2));
+    console.log("iyzico initialize payload:", JSON.stringify(requestPayload, null, 2));
 
-    // Using fetch directly since iyzico-iyzipay SDK might have different API
-    const auth = Buffer.from(`${apiKey}:${secretKey}`).toString("base64");
+    return new Promise((resolve) => {
+      iyzipay.checkoutFormInitialize.create(
+        {
+          ...requestPayload,
+          paymentSource: Iyzipay.PAYMENT_SOURCE.GROW,
+        },
+        (err: Error | null, result: Record<string, unknown>) => {
+          console.log("iyzico initialize response:", {
+            status: result?.status,
+            errorCode: result?.errorCode,
+            errorMessage: result?.errorMessage,
+            checkoutFormToken: result?.checkoutFormToken ? "[TOKEN_HIDDEN]" : undefined,
+          } as Record<string, unknown>);
 
-    const response = await fetch(`${baseUrl}/payment/iyzipos/checkoutform/initialize/auth`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Basic ${auth}`,
-      },
-      body: JSON.stringify(request),
+          if (err) {
+            console.error("iyzico API error:", err);
+            resolve({ success: false, error: "Ödeme sistemi hatası" });
+            return;
+          }
+
+          if (result.status === "success" && result.checkoutFormToken) {
+            resolve({
+              success: true,
+              token: String(result.checkoutFormToken),
+              paymentPageUrl: `${baseUrl}/payment/iyzipos/checkoutform/auth/${result.checkoutFormToken}`,
+            });
+          } else {
+            resolve({
+              success: false,
+              error: String(result.errorMessage || result.message || "Ödeme başlatılamadı"),
+            });
+          }
+        }
+      );
     });
-
-    const data = await response.json();
-    
-    // Log response (masked)
-    console.log("iyzico initialize response", {
-      status: data.status,
-      errorCode: data.errorCode,
-      errorMessage: data.errorMessage,
-      checkoutFormToken: data.checkoutFormToken ? "[TOKEN_HIDDEN]" : undefined,
-    });
-
-    if (data.status === "success" && data.checkoutFormToken) {
-      return {
-        success: true,
-        token: data.checkoutFormToken,
-        paymentPageUrl: `${baseUrl}/payment/iyzipos/checkoutform/auth/${data.checkoutFormToken}`,
-      };
-    } else {
-      console.error("iyzico error:", data);
-      return {
-        success: false,
-        error: data.errorMessage || data.message || "Ödeme başlatılamadı",
-      };
-    }
   } catch (error) {
     console.error("iyzico API error:", error);
-    return {
-      success: false,
-      error: "Ödeme sistemi hatası",
-    };
+    return { success: false, error: "Ödeme sistemi hatası" };
   }
 }
