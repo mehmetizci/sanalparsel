@@ -15,13 +15,13 @@
     "build:remotion": "remotion render All --config=remotion.config.ts --no-browser"
   },
   "dependencies": {
-    "@remotion/bundler": "^4.0.0",
-    "@remotion/cli": "^4.0.0",
-    "@remotion/media-utils": "^4.0.0",
-    "@remotion/player": "^4.0.0",
-    "@remotion/renderer": "^4.0.0",
-    "@remotion/studio": "^4.0.0",
-    "@remotion/zod-types": "^4.0.0",
+    "@remotion/bundler": "4.0.468",
+    "@remotion/cli": "4.0.468",
+    "@remotion/media-utils": "4.0.468",
+    "@remotion/player": "4.0.468",
+    "@remotion/renderer": "4.0.468",
+    "@remotion/studio": "4.0.468",
+    "@remotion/zod-types": "4.0.468",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.1",
     "framer-motion": "^12.40.0",
@@ -32,7 +32,7 @@
     "openai": "^6.39.0",
     "react": "^18",
     "react-dom": "^18",
-    "zod": "^3.24.0",
+    "zod": "4.3.6",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

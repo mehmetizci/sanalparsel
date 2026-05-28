@@ -29,7 +29,7 @@ const RenderRequestSchema = z.object({
       z.tuple([z.number(), z.number()]),
       z.tuple([z.number(), z.number()]),
     ]),
-    geoJson: z.record(z.unknown()),
+    geoJson: z.record(z.string(), z.unknown()),
     duration: z.number(),
     cameraModes: z.array(z.string()),
     cameraFeel: z.enum(["soft", "cinematic", "dynamic"]),
