@@ -16,7 +16,6 @@
     "@supabase/supabase-js": "^2.106.1",
     "framer-motion": "^12.40.0",
     "iyzico-iyzipay": "^0.1.15",
-    "iyzipay": "^2.0.67",
     "mapbox-gl": "^3.24.0",
     "maplibre-gl": "^4.1.0",
     "next": "14.2.35",

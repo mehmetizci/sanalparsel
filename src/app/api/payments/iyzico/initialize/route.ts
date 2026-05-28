@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-admin";
-import Iyzipay from "iyzipay";
+import { createHmac, randomBytes } from "crypto";
 
 // Package definitions
 const PACKAGES = {
@@ -184,6 +184,9 @@ async function initializeIyzicoCheckout(params: {
   }
 
   try {
+    // Generate random string for x-iyzi-rnd
+    const randomString = randomBytes(16).toString("hex");
+    
     // Format price as string with 2 decimal places
     const formattedPrice = params.price.toFixed(2);
     
@@ -192,23 +195,18 @@ async function initializeIyzicoCheckout(params: {
     const firstName = nameParts[0];
     const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0];
 
-    // Initialize iyzico SDK
-    const iyzipay = new Iyzipay({
-      apiKey: apiKey,
-      secretKey: secretKey,
-      uri: baseUrl,
-    });
-
-    const requestPayload = {
-      locale: Iyzipay.LOCALE.TR,
+    // Build request body
+    const requestBody = {
+      locale: "tr",
       conversationId: params.orderId,
       price: formattedPrice,
       paidPrice: formattedPrice,
-      currency: Iyzipay.CURRENCY.TRY,
+      currency: "TRY",
       basketId: params.orderId,
-      paymentGroup: Iyzipay.PAYMENT_GROUP.PRODUCT,
+      paymentGroup: "PRODUCT",
       callbackUrl: params.callbackUrl,
       enabledInstallments: [1],
+      paymentSource: "GROW",
       buyer: {
         id: params.userId,
         name: firstName,
@@ -241,49 +239,53 @@ async function initializeIyzicoCheckout(params: {
           id: params.packageId,
           name: params.packageName,
           category1: "Video Kredisi",
-          itemType: Iyzipay.BASKET_ITEM_TYPE.VIRTUAL,
+          itemType: "VIRTUAL",
           price: formattedPrice,
         },
       ],
     };
 
-    console.log("iyzico initialize payload:", JSON.stringify(requestPayload, null, 2));
+    // Create IYZWSv2 authorization header
+    // Format: Base64(SHA1(apiKey + secretKey + randomString + conversationId))
+    const hashInput = `${apiKey}${secretKey}${randomString}${params.orderId}`;
+    const hash = createHmac("sha1", secretKey).update(hashInput).digest("base64");
+    const authorization = `IYZWSv2 ${apiKey}:${hash}`;
 
-    return new Promise((resolve) => {
-      iyzipay.checkoutFormInitialize.create(
-        {
-          ...requestPayload,
-          paymentSource: Iyzipay.PAYMENT_SOURCE.GROW,
-        },
-        (err: Error | null, result: Record<string, unknown>) => {
-          console.log("iyzico initialize response:", {
-            status: result?.status,
-            errorCode: result?.errorCode,
-            errorMessage: result?.errorMessage,
-            checkoutFormToken: result?.checkoutFormToken ? "[TOKEN_HIDDEN]" : undefined,
-          } as Record<string, unknown>);
+    console.log("iyzico initialize payload:", JSON.stringify(requestBody, null, 2));
 
-          if (err) {
-            console.error("iyzico API error:", err);
-            resolve({ success: false, error: "Ödeme sistemi hatası" });
-            return;
-          }
-
-          if (result.status === "success" && result.checkoutFormToken) {
-            resolve({
-              success: true,
-              token: String(result.checkoutFormToken),
-              paymentPageUrl: `${baseUrl}/payment/iyzipos/checkoutform/auth/${result.checkoutFormToken}`,
-            });
-          } else {
-            resolve({
-              success: false,
-              error: String(result.errorMessage || result.message || "Ödeme başlatılamadı"),
-            });
-          }
-        }
-      );
+    const endpoint = `${baseUrl}/payment/iyzipos/checkoutform/initialize/auth/ecom`;
+    
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": authorization,
+        "x-iyzi-rnd": randomString,
+      },
+      body: JSON.stringify(requestBody),
     });
+
+    const data = await response.json();
+    
+    console.log("iyzico initialize response:", {
+      status: data.status,
+      errorCode: data.errorCode,
+      errorMessage: data.errorMessage,
+      checkoutFormToken: data.checkoutFormToken ? "[TOKEN_HIDDEN]" : undefined,
+    });
+
+    if (data.status === "success" && data.checkoutFormToken) {
+      return {
+        success: true,
+        token: String(data.checkoutFormToken),
+        paymentPageUrl: `${baseUrl}/payment/iyzipos/checkoutform/auth/${data.checkoutFormToken}`,
+      };
+    } else {
+      return {
+        success: false,
+        error: String(data.errorMessage || data.message || "Ödeme başlatılamadı"),
+      };
+    }
   } catch (error) {
     console.error("iyzico API error:", error);
     return { success: false, error: "Ödeme sistemi hatası" };
