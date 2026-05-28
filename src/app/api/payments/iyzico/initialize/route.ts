@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
       clientIp,
     });
 
-    if (!iyzicoResponse.success || !iyzicoResponse.paymentPageUrl) {
+    if (!iyzicoResponse.success) {
       await supabase
         .from("payment_orders")
         .update({ status: "failed" })
@@ -168,14 +168,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await supabase
-      .from("payment_orders")
-      .update({ iyzico_token: iyzicoResponse.token })
-      .eq("id", order.id);
+    // Save token to payment_orders
+    if (iyzicoResponse.token) {
+      await supabase
+        .from("payment_orders")
+        .update({ iyzico_token: iyzicoResponse.token })
+        .eq("id", order.id);
+    }
 
     return NextResponse.json({
       success: true,
+      token: iyzicoResponse.token,
       paymentPageUrl: iyzicoResponse.paymentPageUrl,
+      checkoutFormContent: iyzicoResponse.checkoutFormContent,
       orderId: order.id,
     });
   } catch (error) {
@@ -191,6 +196,7 @@ interface IyzicoInitResponse {
   success: boolean;
   token?: string;
   paymentPageUrl?: string;
+  checkoutFormContent?: string;
   error?: string;
 }
 
@@ -343,18 +349,18 @@ async function initializeIyzicoCheckout(params: {
 
     const data = await response.json();
     
-    console.log("iyzico initialize response:", {
-      status: data.status,
-      errorCode: data.errorCode,
-      errorMessage: data.errorMessage,
-      checkoutFormToken: data.checkoutFormToken ? "[TOKEN_HIDDEN]" : undefined,
-    });
+    console.log("iyzico full response", data);
 
-    if (data.status === "success" && data.checkoutFormToken) {
+    if (data.status === "success") {
+      const token = data.token;
+      const paymentPageUrl = data.paymentPageUrl;
+      const checkoutFormContent = data.checkoutFormContent;
+
       return {
         success: true,
-        token: String(data.checkoutFormToken),
-        paymentPageUrl: `${baseUrl}/payment/iyzipos/checkoutform/auth/${data.checkoutFormToken}`,
+        token: token || undefined,
+        paymentPageUrl: paymentPageUrl || undefined,
+        checkoutFormContent: checkoutFormContent || undefined,
       };
     } else {
       return {

@@ -86,9 +86,20 @@ export default function BillingPage() {
 
       const data = await response.json();
       
-      if (data.success && data.paymentPageUrl) {
-        // Redirect to iyzico checkout form
-        window.location.href = data.paymentPageUrl;
+      if (data.success) {
+        if (data.paymentPageUrl) {
+          // Redirect to iyzico hosted checkout page
+          window.location.href = data.paymentPageUrl;
+        } else if (data.checkoutFormContent) {
+          // Render embedded checkout form
+          const formWindow = window.open("", "_blank", "width=500,height=700");
+          if (formWindow) {
+            formWindow.document.write(data.checkoutFormContent);
+            formWindow.document.close();
+          }
+        } else {
+          alert("Ödeme formu alınamadı. Lütfen tekrar deneyin.");
+        }
       } else {
         console.error("Payment init error:", data.error);
         alert("Ödeme başlatılamadı: " + (data.error || "Bilinmeyen hata"));
