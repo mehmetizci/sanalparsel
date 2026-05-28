@@ -39,6 +39,8 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   // Render state management - completely separate from voice
   const [renderState, setRenderState] = useState<RenderState>("idle");
   const [renderProgress, setRenderProgress] = useState(0);
+  const [renderFileSize, setRenderFileSize] = useState<number | null>(null);
+  const [lastRenderId, setLastRenderId] = useState<string | null>(null);
   
   // Refs for cleanup
   const mountedRef = useRef(true);
@@ -56,9 +58,6 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     return () => {
       mountedRef.current = false;
       abortControllerRef.current?.abort();
-      // Reset states on unmount
-      setRenderState("idle");
-      setRenderProgress(0);
     };
   }, []);
 
@@ -346,6 +345,9 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       console.log("[Render] Render job started:", renderId);
       console.log("[Render] Estimated time:", renderData.estimatedTime, "seconds");
       
+      // Store render ID for video URL
+      setLastRenderId(renderId);
+      
       // Update render state
       setRenderState("generating");
       renderStateRef.current = "generating";
@@ -394,13 +396,23 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
             clearInterval(pollInterval);
             console.log("[Render] ✅ Render completed!");
             console.log("[Render] Output URL:", statusData.outputUrl);
+            console.log("[Render] Local Path:", statusData.localPath);
+            console.log("[Render] File Size:", statusData.fileSize);
+            
+            // Capture file size for UI
+            if (statusData.fileSize) {
+              setRenderFileSize(statusData.fileSize);
+            }
+            
+            // Get video URL - prefer Supabase, fallback to local
+            const videoUrl = statusData.outputUrl || `/api/render/video?id=${renderId}`;
             
             // Update video record in database
             await supabase
               .from("videos")
               .update({
                 status: "completed",
-                output_url: statusData.outputUrl,
+                output_url: videoUrl,
                 metadata: { renderId, ...statusData },
               })
               .eq("id", videoData.id);
@@ -408,12 +420,9 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
             setRenderProgress(100);
             setRenderState("completed");
             
-            // Navigate to download after short delay
-            if (mountedRef.current) {
-              setTimeout(() => {
-                router.push(`/projects/${id}/download`);
-              }, 1500);
-            }
+            // Store the video URL for preview
+            // Instead of redirecting, show inline preview
+            // (The UI will handle showing the completed state)
             
           } else if (statusData.status === "failed") {
             clearInterval(pollInterval);
@@ -469,6 +478,8 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const handleResetRender = () => {
     setRenderState("idle");
     setRenderProgress(0);
+    setRenderFileSize(null);
+    setLastRenderId(null);
     setVideo(null);
   };
 
@@ -583,6 +594,50 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
             >
               ▶ Yeni Video Oluştur
             </button>
+          </div>
+        )}
+
+        {/* Video Completed State - Show preview */}
+        {renderState === "completed" && video && (
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl text-center" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)" }}>
+              <div className="text-3xl mb-2">✅</div>
+              <p className="text-green-400 font-semibold">Video Hazır!</p>
+              <p className="text-white/60 text-sm mt-1">
+                Videonuz başarıyla oluşturuldu
+                {renderFileSize && ` (${(renderFileSize / 1024 / 1024).toFixed(1)} MB)`}
+              </p>
+            </div>
+
+            {/* Video Preview Player */}
+            <div className="rounded-xl overflow-hidden" style={{ background: "rgba(0,0,0,0.4)" }}>
+              <video 
+                src={video.video_url || `/api/render/video?id=${lastRenderId}`}
+                controls 
+                autoPlay
+                className="w-full aspect-[9/16] max-h-[500px]"
+              />
+            </div>
+
+            {/* Download Button */}
+            <div className="flex gap-3">
+              <a
+                href={video.video_url || `/api/render/video?id=${lastRenderId}`}
+                download={`sanalparsel_${lastRenderId}.mp4`}
+                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold text-center flex items-center justify-center gap-2 hover:shadow-lg transition-all"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                MP4 İndir
+              </a>
+              <button
+                onClick={handleResetRender}
+                className="py-3 px-4 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-colors"
+              >
+                ← Yeni Video
+              </button>
+            </div>
           </div>
         )}
 

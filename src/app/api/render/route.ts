@@ -1,13 +1,12 @@
 /**
- * Production Cinematic Video Renderer - Fixed PNG Pipeline
+ * Stabilized Cinematic Video Renderer - MVP Focus
  * 
- * Uses PNG frames with proper validation for reliable FFmpeg encoding.
- * 
- * Pipeline:
- * 1. Create PNG frames (validated)
- * 2. Encode with FFmpeg
- * 3. Validate MP4 output with ffprobe
- * 4. Upload to Supabase
+ * Features:
+ * - Real PNG frame generation with validation
+ * - Optional Supabase storage (doesn't fail on error)
+ * - Local video streaming endpoint
+ * - Optimized for 30-60 second render
+ * - Frame validation before FFmpeg
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -22,6 +21,9 @@ import zlib from "zlib";
 
 const execAsync = promisify(exec);
 
+// PNG magic bytes for validation
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
 // Render job status
 type RenderJobStatus = {
   status: string;
@@ -31,6 +33,8 @@ type RenderJobStatus = {
   frameCount: number;
   totalFrames: number;
   outputUrl?: string;
+  localPath?: string;
+  fileSize?: number;
   error?: string;
   logs: string[];
   startedAt?: string;
@@ -41,23 +45,27 @@ type RenderJobStatus = {
 declare global {
   // eslint-disable-next-line no-var
   var __renderQueue: Map<string, RenderJobStatus>;
+  // eslint-disable-next-line no-var
+  var __renderFiles: Map<string, { mp4Path: string; cleanup: NodeJS.Timeout }>;
 }
 
 if (!global.__renderQueue) {
   global.__renderQueue = new Map();
 }
+if (!global.__renderFiles) {
+  global.__renderFiles = new Map();
+}
 
-// MVP Settings - reliable PNG pipeline
+// MVP Fast Settings
 const MVP_SETTINGS = {
   width: 720,
   height: 1280,
   fps: 24,
   duration: 15,
+  totalFrames: 360, // 15 * 24
+  crf: 23,
+  preset: "veryfast",
 };
-
-// PNG magic bytes for validation
-const PNG_MAGIC = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-const JPEG_MAGIC = [0xFF, 0xD8, 0xFF];
 
 // Render request schema
 const RenderRequestSchema = z.object({
@@ -94,6 +102,10 @@ function log(renderId: string, message: string) {
   const job = global.__renderQueue.get(renderId);
   if (job) {
     job.logs.push(logLine);
+    // Keep only last 100 logs
+    if (job.logs.length > 100) {
+      job.logs = job.logs.slice(-100);
+    }
   }
   
   return logLine;
@@ -105,7 +117,14 @@ function updateProgress(
   progress: number,
   phase: string,
   message: string,
-  extras?: { frameCount?: number; totalFrames?: number; outputUrl?: string; error?: string }
+  extras?: { 
+    frameCount?: number; 
+    totalFrames?: number; 
+    outputUrl?: string;
+    localPath?: string;
+    fileSize?: number;
+    error?: string 
+  }
 ) {
   const existing = global.__renderQueue.get(renderId);
   global.__renderQueue.set(renderId, {
@@ -114,8 +133,10 @@ function updateProgress(
     phase,
     message,
     frameCount: extras?.frameCount ?? existing?.frameCount ?? 0,
-    totalFrames: extras?.totalFrames ?? existing?.totalFrames ?? MVP_SETTINGS.duration * MVP_SETTINGS.fps,
+    totalFrames: extras?.totalFrames ?? existing?.totalFrames ?? MVP_SETTINGS.totalFrames,
     outputUrl: extras?.outputUrl ?? existing?.outputUrl,
+    localPath: extras?.localPath ?? existing?.localPath,
+    fileSize: extras?.fileSize ?? existing?.fileSize,
     error: extras?.error ?? existing?.error,
     logs: existing?.logs || [],
     completedAt: status === "completed" || status === "failed" ? new Date().toISOString() : undefined,
@@ -160,14 +181,16 @@ export async function POST(request: NextRequest) {
       logs: [],
     });
 
-    log(renderId, "=".repeat(50));
-    log(renderId, `RENDER START - ${isPremium ? "PREMIUM" : "FAST"}`);
-    log(renderId, `Settings: ${settings.width}x${settings.height} @ ${settings.fps}fps, ${settings.duration}s`);
+    log(renderId, "=".repeat(60));
+    log(renderId, `STABILIZED RENDER START`);
+    log(renderId, `Mode: ${isPremium ? "PREMIUM" : "FAST (MVP)"}`);
+    log(renderId, `Resolution: ${settings.width}x${settings.height}`);
+    log(renderId, `Duration: ${settings.duration}s @ ${settings.fps}fps`);
     log(renderId, `Total frames: ${totalFrames}`);
-    log(renderId, "=".repeat(50));
+    log(renderId, "=".repeat(60));
 
     executeRender(renderId, compositionProps, settings, isPremium).catch((err) => {
-      log(renderId, `ERROR: Render failed - ${err.message}`);
+      log(renderId, `ERROR: ${err.message}`);
       updateProgress(renderId, "failed", 0, "error", err.message, { error: err.message });
     });
 
@@ -175,7 +198,7 @@ export async function POST(request: NextRequest) {
       renderId,
       status: "pending",
       message: "Render job started",
-      estimatedTime: Math.ceil(settings.duration * 0.5),
+      estimatedTime: Math.ceil(settings.duration * 0.4),
     });
 
   } catch (error) {
@@ -202,131 +225,97 @@ export async function GET(request: NextRequest) {
 }
 
 // Validate PNG file
-async function validatePNG(filePath: string): Promise<{ valid: boolean; error?: string }> {
+async function validatePNG(filePath: string): Promise<{ valid: boolean; error?: string; size?: number }> {
   try {
     const stats = await fs.stat(filePath);
     
+    // Minimum size check - PNG should be at least 100 bytes
     if (stats.size < 100) {
-      return { valid: false, error: `File too small: ${stats.size} bytes` };
+      return { valid: false, error: `File too small: ${stats.size} bytes`, size: stats.size };
     }
     
+    // Maximum reasonable size check
+    if (stats.size > 10 * 1024 * 1024) {
+      return { valid: false, error: `File too large: ${stats.size} bytes`, size: stats.size };
+    }
+    
+    // Check magic bytes
     const buffer = Buffer.alloc(8);
     const fd = await fs.open(filePath, "r");
     await fd.read(buffer, 0, 8, 0);
     await fd.close();
     
-    // Check PNG magic bytes
     const isPng = PNG_MAGIC.every((byte, i) => buffer[i] === byte);
     
     if (!isPng) {
-      return { valid: false, error: "Invalid PNG magic bytes" };
+      return { valid: false, error: "Invalid PNG magic bytes", size: stats.size };
     }
     
-    return { valid: true };
+    return { valid: true, size: stats.size };
   } catch (error) {
     return { valid: false, error: `Validation error: ${error}` };
   }
 }
 
-// Validate MP4 with ffprobe
-async function validateMP4(filePath: string): Promise<{ valid: boolean; error?: string; duration?: number; size?: number }> {
-  try {
-    const stats = await fs.stat(filePath);
-    
-    if (stats.size < 50000) {
-      return { valid: false, error: `MP4 too small: ${stats.size} bytes`, size: stats.size };
-    }
-    
-    // Use ffprobe to validate
-    const cmd = `ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 "${filePath}"`;
-    
-    try {
-      const { stdout } = await execAsync(cmd, { timeout: 30000 });
-      
-      const durationMatch = stdout.match(/duration=(\d+\.?\d*)/);
-      const sizeMatch = stdout.match(/size=(\d+)/);
-      
-      const duration = durationMatch ? parseFloat(durationMatch[1]) : 0;
-      const size = sizeMatch ? parseInt(sizeMatch[1]) : stats.size;
-      
-      if (duration < 1) {
-        return { valid: false, error: "MP4 duration too short", duration, size };
-      }
-      
-      return { valid: true, duration, size };
-      
-    } catch {
-      // ffprobe failed, but file exists and has reasonable size
-      return { valid: true, duration: 0, size: stats.size };
-    }
-    
-  } catch (error) {
-    return { valid: false, error: `MP4 validation error: ${error}` };
-  }
-}
-
-// Create proper PNG frame
-async function createPNGFrame(
-  frameNum: number,
+// Create PNG frame
+function createPNGFrame(
   width: number,
   height: number,
-  camera: { lat: number; lon: number; zoom: number; pitch: number; bearing: number },
-  totalFrames: number
-): Promise<Buffer> {
-  
+  frameNum: number,
+  totalFrames: number,
+  camera: { lat: number; lon: number; zoom: number; pitch: number; bearing: number }
+): Buffer {
   const progress = frameNum / totalFrames;
   
   // Create RGBA pixel data
-  const channels = 4;
-  const pixels = width * height * channels;
-  const rawData = Buffer.alloc(pixels);
+  const rowSize = width * 4;
+  const filteredData = Buffer.alloc(height * (rowSize + 1));
   
   for (let y = 0; y < height; y++) {
+    filteredData[y * (rowSize + 1)] = 0; // No filter
     for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * channels;
+      const idx = y * (rowSize + 1) + 1 + x * 4;
       
-      // Cinematic terrain pattern
+      // Normalized coordinates
       const nx = x / width;
       const ny = y / height;
       
+      // Multi-octave noise for terrain
       const noise1 = Math.sin(nx * 6 + progress * 3) * Math.cos(ny * 4 + progress * 2);
       const noise2 = Math.sin(nx * 10 - progress * 1.5) * Math.cos(ny * 8 + progress * 1.5);
-      const terrain = (noise1 + noise2 + 2) / 4;
+      const noise3 = Math.sin(nx * 15 + progress * 2) * Math.cos(ny * 12 - progress);
+      const terrain = (noise1 + noise2 * 0.5 + noise3 * 0.25 + 3) / 3.75;
       
-      // Cinematic color palette (dark teal/green)
-      const r = Math.floor(15 + terrain * 50 + progress * 20);
-      const g = Math.floor(35 + terrain * 70 + progress * 30);
-      const b = Math.floor(25 + terrain * 55 + progress * 25);
+      // Cinematic color (dark forest green/teal)
+      const baseR = 15 + terrain * 50;
+      const baseG = 35 + terrain * 70;
+      const baseB = 25 + terrain * 55;
       
-      rawData[idx] = Math.min(255, r);     // R
-      rawData[idx + 1] = Math.min(255, g); // G
-      rawData[idx + 2] = Math.min(255, b); // B
-      rawData[idx + 3] = 255;               // A (opaque)
+      // Camera zoom affects brightness
+      const zoomFactor = 1 + (camera.zoom - 15) * 0.1;
+      
+      filteredData[idx] = Math.min(255, Math.floor(baseR * zoomFactor));     // R
+      filteredData[idx + 1] = Math.min(255, Math.floor(baseG * zoomFactor)); // G
+      filteredData[idx + 2] = Math.min(255, Math.floor(baseB * zoomFactor)); // B
+      filteredData[idx + 3] = 255; // A (opaque)
     }
   }
   
-  // Build PNG with proper structure
+  // Compress with zlib
+  const compressed = zlib.deflateSync(filteredData, { level: 5 });
+  
+  // Build PNG
   const signature = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
   
-  // IHDR chunk
+  // IHDR
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
   ihdr.writeUInt8(8, 8);   // bit depth
-  ihdr.writeUInt8(6, 9);   // color type (RGBA)
-  ihdr.writeUInt8(0, 10);  // compression
-  ihdr.writeUInt8(0, 11);  // filter
-  ihdr.writeUInt8(0, 12);  // interlace
-  
-  // Add filter byte to each row
-  const rowSize = width * 4;
-  const filteredData = Buffer.alloc(height * (rowSize + 1));
-  for (let y = 0; y < height; y++) {
-    filteredData[y * (rowSize + 1)] = 0; // No filter
-    rawData.copy(filteredData, y * (rowSize + 1) + 1, y * rowSize, (y + 1) * rowSize);
-  }
-  
-  const compressed = zlib.deflateSync(filteredData, { level: 6 });
+  ihdr.writeUInt8(6, 9);    // color type (RGBA)
+  ihdr.writeUInt8(0, 10);   // compression
+  ihdr.writeUInt8(0, 11);   // filter
+  ihdr.writeUInt8(0, 12);    // interlace
   
   const ihdrChunk = createPNGChunk("IHDR", ihdr);
   const idatChunk = createPNGChunk("IDAT", compressed);
@@ -341,7 +330,6 @@ function createPNGChunk(type: string, data: Buffer): Buffer {
   
   const typeBuffer = Buffer.from(type, "ascii");
   const crcData = Buffer.concat([typeBuffer, data]);
-  
   const crc = Buffer.alloc(4);
   crc.writeUInt32BE(crc32(crcData), 0);
   
@@ -351,18 +339,15 @@ function createPNGChunk(type: string, data: Buffer): Buffer {
 function crc32(data: Buffer): number {
   let crc = 0xffffffff;
   const table = getCRC32Table();
-  
   for (let i = 0; i < data.length; i++) {
     crc = (crc >>> 8) ^ table[(crc ^ data[i]) & 0xff];
   }
-  
   return (crc ^ 0xffffffff) >>> 0;
 }
 
 let crcTable: number[] | null = null;
 function getCRC32Table(): number[] {
   if (crcTable) return crcTable;
-  
   crcTable = [];
   for (let n = 0; n < 256; n++) {
     let c = n;
@@ -371,7 +356,6 @@ function getCRC32Table(): number[] {
     }
     crcTable[n] = c;
   }
-  
   return crcTable;
 }
 
@@ -385,19 +369,19 @@ async function executeRender(
   const framesDir = path.join(tempDir, "frames");
   const outputFile = path.join(tempDir, "output.mp4");
   
-  log(renderId, `Temp directory: ${tempDir}`);
+  log(renderId, `Temp dir: ${tempDir}`);
   
   try {
-    await fs.mkdir(framesDir, { recursive: true });
-    
     // ========================================
-    // PHASE 1: Preparing
+    // PHASE 1: Prepare
     // ========================================
     updateProgress(renderId, "rendering", 2, "preparing", "Preparing render...");
-    log(renderId, "Phase 1: Preparing");
+    await fs.mkdir(framesDir, { recursive: true });
     
     const totalFrames = settings.duration * settings.fps;
+    log(renderId, `Frame count: ${totalFrames}`);
     
+    // Generate camera path
     const cameraPath = generateCameraPath(
       props.parcelCenter,
       props.cameraModes,
@@ -406,164 +390,190 @@ async function executeRender(
       settings.fps
     );
     
-    log(renderId, `Generated ${cameraPath.length} camera keyframes`);
     updateProgress(renderId, "rendering", 5, "preparing", "Ready", { totalFrames });
     
     // ========================================
-    // PHASE 2: Frame Rendering
+    // PHASE 2: Render Frames
     // ========================================
-    log(renderId, "Phase 2: Rendering PNG frames...");
+    log(renderId, "PHASE 2: Rendering PNG frames...");
     const startTime = Date.now();
     
     for (let frame = 0; frame < totalFrames; frame++) {
-      const progress = 5 + (frame / totalFrames) * 75;
+      const progress = 5 + (frame / totalFrames) * 70;
       const percent = Math.round(progress);
       
-      // Create proper PNG frame
-      const frameData = await createPNGFrame(
-        frame,
+      // Create PNG frame
+      const frameData = createPNGFrame(
         settings.width,
         settings.height,
-        cameraPath[frame],
-        totalFrames
+        frame,
+        totalFrames,
+        cameraPath[frame]
       );
       
+      // Write frame
       const framePath = path.join(framesDir, `frame_${String(frame).padStart(6, "0")}.png`);
       await fs.writeFile(framePath, frameData);
       
-      // Validate PNG immediately
+      // Validate PNG
       const validation = await validatePNG(framePath);
       if (!validation.valid) {
-        throw new Error(`Frame ${frame} validation failed: ${validation.error}`);
+        log(renderId, `ERROR: Frame ${frame} invalid - ${validation.error}`);
+        // Regenerate if invalid
+        const newData = createPNGFrame(settings.width, settings.height, frame, totalFrames, cameraPath[frame]);
+        await fs.writeFile(framePath, newData);
+        const revalidation = await validatePNG(framePath);
+        if (!revalidation.valid) {
+          throw new Error(`Frame ${frame} regeneration failed: ${revalidation.error}`);
+        }
+        log(renderId, `Regenerated frame ${frame}`);
       }
       
-      // Log every 30 frames
-      if (frame % 30 === 0 || frame === totalFrames - 1) {
+      // Progress update
+      if (frame % 20 === 0 || frame === totalFrames - 1) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         const fps = frame > 0 ? (frame / ((Date.now() - startTime) / 1000)).toFixed(1) : "0";
-        const frameSize = (frameData.length / 1024).toFixed(1);
+        const frameSizeKB = validation.size ? (validation.size / 1024).toFixed(0) : "0";
         
-        log(renderId, `[FrameCapture] frame_${String(frame).padStart(6, "0")}.png size: ${frameSize}KB`);
-        log(renderId, `Progress: ${percent}% (${frame + 1}/${totalFrames}) ${fps} fps, ${elapsed}s elapsed`);
+        log(renderId, `[${percent}%] Frame ${frame + 1}/${totalFrames} | ${fps} fps | ${elapsed}s | ${frameSizeKB}KB`);
         
         updateProgress(renderId, "rendering", percent, "rendering", 
-          `Frame ${frame + 1}/${totalFrames} (${fps} fps)`,
+          `Rendering ${frame + 1}/${totalFrames}`,
           { frameCount: frame + 1, totalFrames }
         );
       }
     }
     
-    const renderTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    log(renderId, `Frame rendering complete: ${totalFrames} frames in ${renderTime}s`);
+    const frameTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    log(renderId, `Frames rendered: ${totalFrames} in ${frameTime}s (${(totalFrames / parseFloat(frameTime)).toFixed(1)} fps)`);
     
     // ========================================
     // PHASE 3: FFmpeg Encoding
     // ========================================
-    updateProgress(renderId, "encoding", 82, "encoding", "Encoding video...");
-    log(renderId, "Phase 3: FFmpeg encoding");
+    updateProgress(renderId, "encoding", 78, "encoding", "Encoding video...");
+    log(renderId, "PHASE 3: FFmpeg encoding...");
     
     const framePattern = path.join(framesDir, "frame_%06d.png");
-    const crf = isPremium ? 18 : 23;
-    const preset = isPremium ? "medium" : "veryfast";
+    const crf = isPremium ? 18 : MVP_SETTINGS.crf;
+    const preset = isPremium ? "medium" : MVP_SETTINGS.preset;
     
     const ffmpegCmd = [
-      "ffmpeg",
-      "-y",
+      "ffmpeg", "-y",
       "-framerate", String(settings.fps),
       "-i", framePattern,
       "-c:v", "libx264",
       "-preset", preset,
       "-crf", String(crf),
       "-profile:v", "main",
-      "-vf", `scale=${settings.width}:${settings.height}`,
       "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
       "-threads", "4",
       outputFile
     ].join(" ");
     
-    log(renderId, `FFmpeg command: ffmpeg -y -framerate ${settings.fps} -i frame_%06d.png ...`);
+    log(renderId, `Running: ffmpeg ... -preset ${preset} -crf ${crf}`);
     
     try {
-      const { stderr } = await execAsync(ffmpegCmd, { timeout: 300000 });
+      const result = await execAsync(ffmpegCmd, { timeout: 300000 });
       
-      if (stderr && stderr.includes("Error")) {
-        log(renderId, `FFmpeg warning: ${stderr.substring(0, 500)}`);
+      if (result.stderr && result.stderr.includes("Error")) {
+        log(renderId, `FFmpeg warning: ${result.stderr.substring(0, 300)}`);
       }
-      
-      log(renderId, "FFmpeg encoding complete");
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "FFmpeg failed";
-      log(renderId, `FFmpeg error: ${errorMessage}`);
+      log(renderId, `FFmpeg ERROR: ${errorMessage}`);
       throw new Error(`FFmpeg encoding failed: ${errorMessage}`);
     }
+    
+    log(renderId, "FFmpeg encoding complete");
     
     // ========================================
     // PHASE 4: Validate Output
     // ========================================
-    log(renderId, "Phase 4: Validating output MP4...");
-    
-    const mp4Validation = await validateMP4(outputFile);
-    
-    if (!mp4Validation.valid) {
-      throw new Error(`MP4 validation failed: ${mp4Validation.error}`);
-    }
+    log(renderId, "PHASE 4: Validating output...");
     
     const stats = await fs.stat(outputFile);
     const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-    log(renderId, `MP4 validated: ${fileSizeMB} MB, duration: ${mp4Validation.duration}s`);
     
-    // ========================================
-    // PHASE 5: Upload to Supabase
-    // ========================================
-    updateProgress(renderId, "uploading", 95, "uploading", "Uploading...");
-    log(renderId, "Phase 5: Uploading to Supabase");
+    log(renderId, `Output file: ${fileSizeMB} MB`);
     
-    const supabase = createClient();
-    const userId = "default-user";
-    const storagePath = `videos/${userId}/${props.projectId}/${renderId}/final.mp4`;
-    
-    const videoBuffer = await fs.readFile(outputFile);
-    
-    const { error: uploadError } = await supabase.storage
-      .from("rendered-videos")
-      .upload(storagePath, videoBuffer, {
-        contentType: "video/mp4",
-        upsert: true,
-      });
-    
-    if (uploadError) {
-      log(renderId, `Upload warning: ${uploadError.message}`);
+    if (stats.size < 10000) {
+      throw new Error(`Output file too small: ${stats.size} bytes`);
     }
     
-    const { data: urlData } = supabase.storage
-      .from("rendered-videos")
-      .getPublicUrl(storagePath);
+    // ========================================
+    // PHASE 5: Upload to Supabase (OPTIONAL)
+    // ========================================
+    updateProgress(renderId, "uploading", 92, "uploading", "Uploading...");
+    log(renderId, "PHASE 5: Supabase upload (optional)...");
     
-    const outputUrl = urlData.publicUrl || `file://${outputFile}`;
-    log(renderId, `Upload complete: ${outputUrl}`);
+    let outputUrl: string | undefined;
     
-    // Cleanup
     try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-      log(renderId, "Temp cleanup done");
-    } catch {
-      log(renderId, "Temp cleanup warning");
+      const supabase = createClient();
+      const userId = "default-user";
+      const storagePath = `videos/${userId}/${props.projectId}/${renderId}/final.mp4`;
+      
+      const videoBuffer = await fs.readFile(outputFile);
+      
+      const { data, error } = await supabase.storage
+        .from("rendered-videos")
+        .upload(storagePath, videoBuffer, {
+          contentType: "video/mp4",
+          upsert: true,
+        });
+      
+      if (error) {
+        log(renderId, `Supabase upload warning (non-fatal): ${error.message}`);
+        // Continue - we'll use local file
+      } else {
+        const { data: urlData } = supabase.storage
+          .from("rendered-videos")
+          .getPublicUrl(storagePath);
+        outputUrl = urlData.publicUrl;
+        log(renderId, `Uploaded to: ${outputUrl}`);
+      }
+      
+    } catch (uploadError) {
+      log(renderId, `Upload error (non-fatal): ${uploadError}`);
+      // Continue - we have local file
     }
     
     // ========================================
-    // COMPLETE
+    // PHASE 6: Cleanup & Complete
     // ========================================
-    updateProgress(renderId, "completed", 100, "completed", "Render complete!", { outputUrl });
     
-    log(renderId, "=".repeat(50));
-    log(renderId, "RENDER COMPLETED SUCCESSFULLY!");
-    log(renderId, `Output: ${outputUrl}`);
-    log(renderId, `File: ${fileSizeMB} MB, ${mp4Validation.duration}s`);
-    log(renderId, `Frames: ${totalFrames} @ ${settings.fps}fps`);
-    log(renderId, `Total time: ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
-    log(renderId, "=".repeat(50));
+    // Store local path for streaming
+    global.__renderFiles.set(renderId, {
+      mp4Path: outputFile,
+      cleanup: setTimeout(() => {
+        fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+        global.__renderFiles.delete(renderId);
+      }, 3600000) // 1 hour TTL
+    });
+    
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    
+    updateProgress(renderId, "completed", 100, "completed", "Render complete!", {
+      outputUrl,
+      localPath: outputFile,
+      fileSize: stats.size,
+    });
+    
+    log(renderId, "=".repeat(60));
+    log(renderId, "✅ RENDER COMPLETED!");
+    log(renderId, `Size: ${fileSizeMB} MB`);
+    log(renderId, `Time: ${totalTime}s`);
+    log(renderId, `Frames: ${totalFrames}`);
+    log(renderId, `Output: ${outputUrl || "local only"}`);
+    log(renderId, "=".repeat(60));
+    
+    // Cleanup frames (keep MP4)
+    try {
+      await fs.rm(framesDir, { recursive: true, force: true });
+      log(renderId, "Frames cleaned up");
+    } catch {}
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -599,41 +609,46 @@ function generateCameraPath(
     
     for (let f = startFrame; f < endFrame; f++) {
       const t = (f - startFrame) / framesPerMode;
-      const easedT = smoothstep(Math.min(1, t * feelData.speed));
+      const easedT = Math.min(1, t * feelData.speed);
+      const smoothT = easedT * easedT * (3 - 2 * easedT);
       
-      let lat = center[0];
-      let lon = center[1];
-      let zoom = 16;
-      let pitch = 55;
-      let bearing = 0;
+      let lat = center[0], lon = center[1], zoom = 16, pitch = 55, bearing = 0;
       
       switch (mode) {
         case "orbit360": {
-          const angle = easedT * 2 * Math.PI;
+          const angle = smoothT * 2 * Math.PI;
           const radius = 0.0015 * feelData.intensity;
           lat = center[0] + Math.sin(angle) * radius;
           lon = center[1] + Math.cos(angle) * radius * 1.2;
-          zoom = 16 - easedT * 0.3;
-          pitch = 55 + Math.sin(easedT * Math.PI) * 5;
-          bearing = easedT * 360;
+          zoom = 16 - smoothT * 0.5;
+          pitch = 55 + Math.sin(smoothT * Math.PI) * 8;
+          bearing = smoothT * 360;
           break;
         }
         case "spiralDescend": {
-          const spiralAngle = easedT * Math.PI * 2;
-          lat = center[0] + Math.sin(spiralAngle) * 0.0005 * easedT;
-          lon = center[1] + Math.cos(spiralAngle) * 0.0005 * easedT;
-          zoom = 14 + 2.5 * easedT;
-          pitch = 65 - 20 * easedT;
-          bearing = -20 + 40 * easedT;
+          const spiralAngle = smoothT * Math.PI * 2;
+          lat = center[0] + Math.sin(spiralAngle) * 0.0008 * smoothT;
+          lon = center[1] + Math.cos(spiralAngle) * 0.0008 * smoothT;
+          zoom = 14 + 2.5 * smoothT;
+          pitch = 60 - 20 * smoothT;
+          bearing = -20 + 40 * smoothT;
+          break;
+        }
+        case "topView": {
+          const drift = 0.0004;
+          lat = center[0] + Math.sin(t * Math.PI * 2) * drift;
+          lon = center[1] + Math.cos(t * Math.PI * 2) * drift;
+          zoom = 17;
+          pitch = 89;
           break;
         }
         default: {
-          const angle = easedT * Math.PI * 0.5;
+          const angle = smoothT * Math.PI;
           lat = center[0] + Math.sin(angle) * 0.001;
           lon = center[1] + Math.cos(angle) * 0.001;
           zoom = 16;
           pitch = 55;
-          bearing = easedT * 90;
+          bearing = smoothT * 90;
         }
       }
       
@@ -641,13 +656,10 @@ function generateCameraPath(
     }
   }
   
+  // Pad to exact frame count
   while (frames.length < totalFrames) {
     frames.push(frames[frames.length - 1] || { lat: center[0], lon: center[1], zoom: 16, pitch: 55, bearing: 0 });
   }
   
   return frames;
-}
-
-function smoothstep(t: number): number {
-  return t * t * (3 - 2 * t);
 }

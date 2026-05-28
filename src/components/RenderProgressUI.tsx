@@ -30,6 +30,8 @@ interface RenderStatus {
   frameCount: number;
   totalFrames: number;
   outputUrl?: string;
+  localPath?: string;
+  fileSize?: number;
   error?: string;
   logs: string[];
   startedAt?: string;
@@ -63,6 +65,9 @@ export function RenderProgressUI({ renderId, onComplete, onCancel, showDebugPane
   const [error, setError] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
+  // Compute video URL: prefer Supabase URL, fallback to local stream
+  const videoUrl = outputUrl || (status?.status === "completed" ? `/api/render/video?id=${renderId}` : null);
+
   // Scroll logs to bottom when new logs arrive
   useEffect(() => {
     if (showLogs && logsEndRef.current) {
@@ -81,9 +86,11 @@ export function RenderProgressUI({ renderId, onComplete, onCancel, showDebugPane
         setStatus(data);
 
         if (data.status === "completed") {
-          setOutputUrl(data.outputUrl || null);
+          // Prefer Supabase URL, fallback to local stream
+          const finalUrl = data.outputUrl || `/api/render/video?id=${renderId}`;
+          setOutputUrl(finalUrl);
           clearInterval(pollInterval);
-          onComplete?.(data.outputUrl || "");
+          onComplete?.(finalUrl);
         } else if (data.status === "failed") {
           setError(data.error || "Unknown error");
           clearInterval(pollInterval);
@@ -267,7 +274,7 @@ export function RenderProgressUI({ renderId, onComplete, onCancel, showDebugPane
 
       {/* Success state */}
       <AnimatePresence>
-        {isComplete && outputUrl && (
+        {isComplete && videoUrl && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -281,23 +288,26 @@ export function RenderProgressUI({ renderId, onComplete, onCancel, showDebugPane
               </div>
               <div>
                 <p className="text-green-400 font-semibold text-lg">Render Tamamlandı!</p>
-                <p className="text-white/60 text-sm">Videonuz hazır ve indirilmeye uygun</p>
+                <p className="text-white/60 text-sm">
+                  Videonuz hazır 
+                  {status?.fileSize && ` (${(status.fileSize / 1024 / 1024).toFixed(1)} MB)`}
+                </p>
               </div>
             </div>
 
             {/* Video preview */}
             <div className="bg-white/5 rounded-xl overflow-hidden mb-4">
               <video 
-                src={outputUrl} 
+                src={videoUrl} 
                 controls 
-                className="w-full max-h-64"
-                poster={outputUrl.replace('.mp4', '_preview.jpg')}
+                autoPlay
+                className="w-full max-h-80"
               />
             </div>
 
             <div className="flex gap-3">
               <a
-                href={outputUrl}
+                href={videoUrl}
                 download={`sanalparsel_${renderId}.mp4`}
                 className="flex-1 px-6 py-3 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium text-center transition-colors flex items-center justify-center gap-2"
               >
@@ -307,7 +317,7 @@ export function RenderProgressUI({ renderId, onComplete, onCancel, showDebugPane
                 Video İndir (MP4)
               </a>
               <button
-                onClick={() => navigator.clipboard.writeText(outputUrl)}
+                onClick={() => navigator.clipboard.writeText(videoUrl)}
                 className="px-4 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-colors"
                 title="URL'yi kopyala"
               >
