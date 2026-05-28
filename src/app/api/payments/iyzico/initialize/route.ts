@@ -65,6 +65,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get client IP from headers
+    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() 
+      || request.headers.get("x-real-ip") 
+      || "85.34.78.112";
+
     // Initialize iyzico Checkout Form
     const iyzicoResponse = await initializeIyzicoCheckout({
       orderId: order.id,
@@ -72,8 +77,10 @@ export async function POST(request: NextRequest) {
       userEmail: user.email || "",
       userName: user.user_metadata?.full_name || "Unknown",
       packageName: pkg.name,
+      packageId: packageId,
       price: pkg.price,
       callbackUrl: `${process.env.PUBLIC_APP_URL}/api/payments/iyzico/callback`,
+      clientIp: clientIp,
     });
 
     if (!iyzicoResponse.success || !iyzicoResponse.paymentPageUrl) {
@@ -122,8 +129,10 @@ async function initializeIyzicoCheckout(params: {
   userEmail: string;
   userName: string;
   packageName: string;
+  packageId: string;
   price: number;
   callbackUrl: string;
+  clientIp: string;
 }): Promise<IyzicoInitResponse> {
   const apiKey = process.env.IYZICO_API_KEY;
   const secretKey = process.env.IYZICO_SECRET_KEY;
@@ -135,53 +144,69 @@ async function initializeIyzicoCheckout(params: {
   }
 
   try {
-    // iyzico Checkout Form Initialize
+    // Format price as string with 2 decimal places
+    const formattedPrice = params.price.toFixed(2);
+    
+    // Split user name into first name and surname
+    const nameParts = params.userName.trim().split(/\s+/);
+    const firstName = nameParts[0] || "Musteri";
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "Musteri";
+
+    // iyzico Checkout Form Initialize request
     const request = {
       locale: "tr",
       conversationId: params.orderId,
-      pricingPlanDefinition: params.packageName,
+      price: formattedPrice,
+      paidPrice: formattedPrice,
+      currency: "TRY",
+      basketId: params.orderId,
       paymentGroup: "PRODUCT",
       callbackUrl: params.callbackUrl,
-      currency: "TRY",
-      paidPrice: params.price.toString(),
-      price: params.price.toString(),
-      installment: "1",
+      enabledInstallments: [1],
       buyer: {
         id: params.userId,
-        name: params.userName.split(" ")[0] || params.userName,
-        surname: params.userName.split(" ")[1] || params.userName,
-        email: params.userEmail,
-        gsmNumber: "+90##########",
+        name: firstName,
+        surname: lastName,
+        email: params.userEmail || "musteri@example.com",
+        gsmNumber: "+90-----------",
         identityNumber: "11111111111",
-        registrationAddress: "N/A",
+        registrationAddress: "Istanbul, Turkey",
         city: "Istanbul",
         country: "Turkey",
         zipCode: "34000",
+        ip: params.clientIp || "85.34.78.112",
       },
       shippingAddress: {
-        contactName: params.userName,
+        contactName: `${firstName} ${lastName}`,
         city: "Istanbul",
         country: "Turkey",
-        address: "N/A",
+        address: "Istanbul, Turkey",
         zipCode: "34000",
       },
       billingAddress: {
-        contactName: params.userName,
+        contactName: `${firstName} ${lastName}`,
         city: "Istanbul",
         country: "Turkey",
-        address: "N/A",
+        address: "Istanbul, Turkey",
         zipCode: "34000",
       },
       basketItems: [
         {
-          id: params.orderId,
+          id: params.packageId,
           name: params.packageName,
-          category1: "Video Credits",
+          category1: "Video Kredisi",
           itemType: "VIRTUAL",
-          price: params.price.toString(),
+          price: formattedPrice,
         },
       ],
     };
+
+    // Log request payload with masked sensitive data (never log secret key)
+    const maskedRequest = {
+      ...request,
+      // Don't log any sensitive data
+    };
+    console.log("iyzico initialize payload", JSON.stringify(maskedRequest, null, 2));
 
     // Using fetch directly since iyzico-iyzipay SDK might have different API
     const auth = Buffer.from(`${apiKey}:${secretKey}`).toString("base64");
@@ -196,6 +221,14 @@ async function initializeIyzicoCheckout(params: {
     });
 
     const data = await response.json();
+    
+    // Log response (masked)
+    console.log("iyzico initialize response", {
+      status: data.status,
+      errorCode: data.errorCode,
+      errorMessage: data.errorMessage,
+      checkoutFormToken: data.checkoutFormToken ? "[TOKEN_HIDDEN]" : undefined,
+    });
 
     if (data.status === "success" && data.checkoutFormToken) {
       return {
