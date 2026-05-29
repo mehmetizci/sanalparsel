@@ -101,3 +101,44 @@ export const defaultDroneSettings: DroneSettingsState = {
   cameraFeel: "cinematic",
   cameraModes: ["orbit360", "spiralDescend"],
 };
+
+/**
+ * Easing function for smooth camera movement
+ */
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/**
+ * Interpolate camera state for a given step and progress
+ */
+export function interpolateCameraStep(
+  step: CameraSequenceStep,
+  t: number,
+  center: { lat: number; lon: number }
+): { center: [number, number]; zoom: number; pitch: number; bearing: number } {
+  const ease = easeInOutCubic(t);
+  const heightRange = step.startHeight - step.endHeight;
+  const baseZoom = 16 - Math.log2(step.startHeight / 100);
+  const zoomOffset = heightRange / 500 * 0.5;
+  const zoom = baseZoom + zoomOffset * ease;
+  const pitch = step.pitch;
+  
+  // Handle bearing wraparound
+  let bearingDiff = step.bearingTo - step.bearingFrom;
+  if (bearingDiff > 180) bearingDiff -= 360;
+  if (bearingDiff < -180) bearingDiff += 360;
+  const bearing = step.bearingFrom + bearingDiff * ease;
+  
+  // Add subtle circular movement around the center
+  const offsetFactor = 0.0005 * (1 - Math.abs(t - 0.5) * 2);
+  const offsetLon = Math.sin(bearing * Math.PI / 180) * offsetFactor * step.startHeight / 100;
+  const offsetLat = Math.cos(bearing * Math.PI / 180) * offsetFactor * step.startHeight / 100;
+  
+  return {
+    center: [center.lon + offsetLon, center.lat + offsetLat] as [number, number],
+    zoom: Math.min(18, Math.max(14, zoom)),
+    pitch,
+    bearing: (bearing + 360) % 360
+  };
+}

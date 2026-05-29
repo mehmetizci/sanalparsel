@@ -244,6 +244,9 @@ export interface ParcelState {
   // Active recording map instance (for WEBM capture) - NOT persisted
   recordingMapInstance: unknown | null;
   
+  // Recorded video blob URL - NOT persisted (Blob can't be stored)
+  recordedVideoUrl: string | null;
+  
   // Actions
   setParcelData: (data: {
     geoJson?: Feature<Polygon | MultiPolygon>;
@@ -295,6 +298,11 @@ export interface ParcelState {
   // Recording map actions (for WEBM capture)
   setRecordingMap: (map: unknown | null) => void;
   getRecordingMap: () => unknown | null;
+  
+  // Video blob URL actions (for WEBM capture)
+  setRecordedVideoUrl: (url: string | null) => void;
+  getRecordedVideoUrl: () => string | null;
+  clearRecordedVideo: () => void;
   
   // TTS Audio actions
   setTTSAudio: (audio: Partial<TTSAudioState>) => void;
@@ -358,6 +366,9 @@ export const useParcelStore = create<ParcelState>()(
       
       // Recording map instance - NOT persisted
       recordingMapInstance: null,
+      
+      // Recorded video URL - NOT persisted (Blob can't be serialized)
+      recordedVideoUrl: null,
 
       setParcelData: (data) => set((state) => {
         const updates: Partial<ParcelState> = {
@@ -508,6 +519,11 @@ export const useParcelStore = create<ParcelState>()(
       // Recording map actions - NOT persisted (map instance can't be serialized)
       setRecordingMap: (map) => set({ recordingMapInstance: map }),
       getRecordingMap: () => get().recordingMapInstance,
+      
+      // Video blob URL actions - NOT persisted (Blob can't be serialized)
+      setRecordedVideoUrl: (url: string | null) => set({ recordedVideoUrl: url }),
+      getRecordedVideoUrl: () => get().recordedVideoUrl,
+      clearRecordedVideo: () => set({ recordedVideoUrl: null }),
       
       // TTS Audio actions
       setTTSAudio: (audio) => set((state) => ({
