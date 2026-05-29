@@ -22,6 +22,49 @@ const VIDEO_HEIGHT = 1280;
 const VIDEO_FPS = 30;
 const PREPARATION_TIMEOUT_MS = 10000;
 
+// Helper to wait for style to be fully loaded
+async function waitForStyleReady(map: maplibregl.Map, timeoutMs = 10000): Promise<void> {
+  const start = Date.now();
+  
+  return new Promise<void>((resolve, reject) => {
+    const check = () => {
+      try {
+        if (map.isStyleLoaded()) {
+          console.log("[WebRecorder] style ready (isStyleLoaded)");
+          resolve();
+          return;
+        }
+      } catch (err) {
+        console.warn("[WebRecorder] style check failed", err);
+      }
+      
+      if (Date.now() - start > timeoutMs) {
+        console.error("[WebRecorder] style loading timeout after", timeoutMs, "ms");
+        reject(new Error("Mapbox style loading timeout"));
+        return;
+      }
+      
+      setTimeout(check, 100);
+    };
+    
+    map.once("style.load", () => {
+      console.log("[WebRecorder] style.load event fired");
+      setTimeout(() => {
+        if (map.isStyleLoaded()) {
+          console.log("[WebRecorder] style ready after event");
+          resolve();
+        } else {
+          console.log("[WebRecorder] style still loading after event, checking...");
+          check();
+        }
+      }, 500);
+    });
+    
+    // Also check immediately
+    check();
+  });
+}
+
 export default function VideoPreviewPage({ params }: { params: { id: string } }) {
   return (
     <Suspense fallback={
@@ -545,17 +588,14 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
       
       console.log("[WebRecorder] map load event");
       
-      // Ensure style is loaded before adding sources/layers
-      if (!mapRef.current.isStyleLoaded()) {
-        console.log("[WebRecorder] Style not loaded, waiting for style.load event...");
-        await new Promise<void>((resolve) => {
-          mapRef.current!.once("style.load", () => {
-            console.log("[WebRecorder] Style loaded event fired");
-            resolve();
-          });
-          // Fallback timeout
-          setTimeout(resolve, 2000);
-        });
+      // Wait for style to be fully ready using robust helper
+      try {
+        await waitForStyleReady(mapRef.current, 15000);
+      } catch (err) {
+        console.error("[WebRecorder] Style never became ready:", err);
+        setErrorMessage("Harita stili yüklenemedi. Lütfen tekrar deneyin."); 
+        setRenderState("error"); 
+        return;
       }
       
       // Add GeoJSON source
