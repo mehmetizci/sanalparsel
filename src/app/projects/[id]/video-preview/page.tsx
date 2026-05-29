@@ -2,20 +2,36 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
 import { Project, Narration, Video, TTSProvider, OpenAIVoice } from "@/types";
+import { useParcelStore, CameraSequenceStep } from "@/lib/parcel-store";
+import { buildCinematicStyle, CINEMATIC_EASING } from "@/lib/cinematic-renderer";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import VoiceSelector from "@/components/VoiceSelector";
 import type { VoiceState } from "@/components/VoiceSelector";
 
-type RenderState = "idle" | "preparing" | "generating" | "completed" | "error" | "cancelled";
+type RenderState = "idle" | "preparing" | "recording" | "processing" | "completed" | "error" | "cancelled";
+
+// Video output settings
+const VIDEO_WIDTH = 720;
+const VIDEO_HEIGHT = 1280;
+const VIDEO_FPS = 30;
 
 export default function VideoPreviewPage({ params }: { params: { id: string } }) {
   const { id } = params;
   const router = useRouter();
-  
+
+  // Store state
+  const uploadedGeoJson = useParcelStore((state) => state.uploadedGeoJson);
+  const droneSettings = useParcelStore((state) => state.droneSettings);
+  const cameraSequence = useParcelStore((state) => state.cameraSequence);
+  const parcelCenter = useParcelStore((state) => state.parcelCenter);
+  const parcelBounds = useParcelStore((state) => state.parcelBounds);
+
   // State
   const [project, setProject] = useState<Project | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
@@ -23,49 +39,89 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const [voiceType, setVoiceType] = useState<OpenAIVoice>("nova");
   const [loading, setLoading] = useState(true);
   const [textExpanded, setTextExpanded] = useState(false);
-  
+
   // TTS settings state
   const [ttsProvider, setTtsProvider] = useState<TTSProvider>("openai");
   const [ttsSpeed, setTtsSpeed] = useState(1.55);
-  
+
   // TTS metadata from backend response (the actual used provider)
   const [ttsUsedProvider, setTtsUsedProvider] = useState<string | null>(null);
   const [ttsUsedVoice, setTtsUsedVoice] = useState<string | null>(null);
   const [showFallbackWarning, setShowFallbackWarning] = useState(false);
-  
+
   // SEPRATED voiceState - completely independent from renderState
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  
+
   // Render state management - completely separate from voice
   const [renderState, setRenderState] = useState<RenderState>("idle");
   const [renderProgress, setRenderProgress] = useState(0);
-  
+  const [renderElapsed, setRenderElapsed] = useState(0);
+
+  // Video output state
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+
+  // Map refs for recording
+  const recordingContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const animationRef = useRef<number | null>(null);
+
   // Refs for cleanup
   const mountedRef = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
   const renderStateRef = useRef<RenderState>("idle");
+  const isRecordingRef = useRef(false);
 
   // Helper to check render state (uses ref to avoid type narrowing issues)
-  const isRenderActive = () => renderStateRef.current === "generating" || renderStateRef.current === "preparing";
+  const isRenderActive = () => renderStateRef.current === "recording" || renderStateRef.current === "preparing" || renderStateRef.current === "processing";
 
+  // Clean up video URL on unmount
+  useEffect(() => {
+    return () => {
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+      }
+    };
+  }, [videoUrl]);
 
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
-    
+
     return () => {
       mountedRef.current = false;
       abortControllerRef.current?.abort();
-      // Reset states on unmount
+      cleanupRecording();
       setRenderState("idle");
       setRenderProgress(0);
     };
   }, []);
 
+  // Cleanup recording resources
+  const cleanupRecording = useCallback(() => {
+    isRecordingRef.current = false;
+
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+    }
+
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+  }, []);
+
   // Fetch data with proper cleanup
   useEffect(() => {
     let cancelled = false;
-    
+
     const fetchData = async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -134,7 +190,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     };
 
     fetchData();
-    
+
     return () => {
       cancelled = true;
     };
@@ -157,13 +213,13 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
 
     abortControllerRef.current = new AbortController();
     setVoiceState("generating");
-    
+
     try {
       console.log("[TTS] === Starting voice generation ===");
       console.log("[TTS] Selected provider:", ttsProvider);
       console.log("[TTS] Selected voice:", voiceType);
       console.log("[TTS] Selected speed:", ttsSpeed);
-      
+
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -182,30 +238,30 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         console.log("[TTS] Component unmounted, aborting");
         return;
       }
-      
+
       console.log("[TTS] Response status:", response.status);
-      
+
       // Always parse response - even on error
       const data = await response.json().catch(() => null);
-      
+
       console.log("[TTS] Response data:", JSON.stringify(data, null, 2));
-      
+
       // Check if OpenAI failed and fallback was used
       if (data?.fallbackUsed && data?.provider !== "openai") {
         console.warn("[TTS] ⚠️ OpenAI failed, fallback was used!");
         console.warn(`[TTS] Requested: openai, Actual: ${data?.provider}`);
       }
-      
+
       if (!response.ok || !data?.success || !data?.audioUrl) {
         console.error("[TTS] API error:", data);
         const errorMsg = data?.error || "Ses oluşturulamadı";
         throw new Error(errorMsg);
       }
-      
+
       console.log("[TTS] ✓ Audio generation successful");
       console.log(`[TTS] Provider: ${data?.provider}, Voice: ${data?.voice}, Speed: ${data?.speed}`);
       console.log("[TTS] Audio URL:", data?.audioUrl);
-      
+
       // Use the provider from backend response (not local state)
       // This ensures the UI shows exactly what was used
       if (data?.provider) {
@@ -213,7 +269,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         setTtsUsedProvider(data.provider);
         setTtsUsedVoice(data.voice);
       }
-      
+
       // Show fallback warning if OpenAI failed
       if (data?.fallbackUsed && data?.provider !== "openai") {
         console.warn("[TTS] ⚠️ Showing fallback warning to user");
@@ -221,151 +277,411 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       } else {
         setShowFallbackWarning(false);
       }
-      
+
       console.log("[TTS] Saving to database...");
       const supabase = createClient();
-      const { error: dbError } = await supabase.from("narrations").upsert({
-        project_id: id,
-        text: narration.text,
-        voice_type: voiceType,
-        audio_url: data.audioUrl,
-        duration: data.duration || null,
-      }, {
-        onConflict: "project_id",
-      });
-      
+      const { error: dbError } = await supabase
+        .from("narrations")
+        .update({
+          audio_url: data.audioUrl,
+          audio_status: "ready",
+          voice_type: data.voice,
+          tts_provider: data.provider,
+          tts_speed: data.speed,
+        })
+        .eq("project_id", id);
+
       if (dbError) {
-        console.error("[TTS] Database error:", dbError);
-      } else {
-        console.log("[TTS] Database saved successfully");
+        console.error("[TTS] DB save error:", dbError);
       }
-      
+
+      // Update local narration state
       if (mountedRef.current) {
-        console.log("[TTS] Setting state to ready");
-        setNarration((prev) => prev ? { ...prev, audio_url: data.audioUrl } : null);
+        setNarration(prev => prev ? {
+          ...prev,
+          audio_url: data.audioUrl,
+          audio_status: "ready",
+        } : null);
         setVoiceState("ready");
       }
+
     } catch (err) {
       if ((err as Error).name === "AbortError") {
-        console.log("[TTS] Request aborted");
+        console.log("[TTS] Generation cancelled by user");
         if (mountedRef.current) setVoiceState("idle");
       } else if (mountedRef.current) {
-        console.error("[TTS] Voice generation error:", err);
+        console.error("[TTS] Generation error:", err);
         setVoiceState("error");
       }
     }
-  }, [narration?.text, voiceType, id, project?.user_id, ttsProvider, ttsSpeed]);
+  }, [narration?.text, project?.user_id, id, ttsProvider, voiceType, ttsSpeed]);
 
+  // Retry voice generation
   const handleVoiceRetry = useCallback(() => {
     setVoiceState("idle");
-    // Trigger regenerate after state reset
-    setTimeout(() => {
-      handleGenerateVoice();
-    }, 50);
+    setTimeout(() => handleGenerateVoice(), 100);
   }, [handleGenerateVoice]);
 
-  // Video creation with cancellation support
-  const handleCreateVideo = useCallback(async () => {
-    if (!mountedRef.current) return;
-    if (renderStateRef.current === "generating") return;
+  // Easing function for camera animation
+  const easeInOutCubic = (t: number): number => {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  };
 
-    abortControllerRef.current = new AbortController();
-    setRenderState("generating");
-    renderStateRef.current = "generating";
-    setRenderProgress(0);
-    
-    try {
-      const supabase = createClient();
-      
-      // Check for existing video first
-      const { data: existingVideo } = await supabase
-        .from("videos")
-        .select("*")
-        .eq("project_id", id)
-        .single();
+  // Interpolate camera for a single step
+  const interpolateCameraStep = useCallback((
+    step: CameraSequenceStep,
+    t: number,
+    center: { lat: number; lon: number }
+  ): { center: [number, number]; zoom: number; pitch: number; bearing: number } => {
+    const ease = easeInOutCubic(t);
 
-      let videoData;
-      
-      if (existingVideo && existingVideo.status !== "completed") {
-        // Resume existing render
-        videoData = existingVideo;
-      } else {
-        // Create new video
-        const { data } = await supabase
-          .from("videos")
-          .insert({
-            project_id: id,
-            user_id: project?.user_id,
-            status: "preparing",
-            format: "reels",
-            duration: 30,
-          })
-          .select()
-          .single();
-        videoData = data;
-      }
+    // Calculate zoom based on height
+    const baseZoom = 16 - Math.log2(step.startHeight / 100);
+    const heightRange = step.startHeight - step.endHeight;
+    const zoomOffset = (heightRange / 500) * 0.5;
+    const zoom = baseZoom + zoomOffset * ease;
 
-      if (videoData && mountedRef.current) {
-        setVideo(videoData as Video);
-        
-        // Simulate render progress with cleanup support
-        const progressSteps: { progress: number; state: RenderState; delay: number }[] = [
-          { progress: 10, state: "preparing", delay: 500 },
-          { progress: 30, state: "generating", delay: 1000 },
-          { progress: 60, state: "generating", delay: 1500 },
-          { progress: 85, state: "generating", delay: 2000 },
-          { progress: 100, state: "completed", delay: 2500 },
-        ];
+    // Interpolate pitch
+    const pitch = step.pitch;
 
-        for (const step of progressSteps) {
-          if (!mountedRef.current || abortControllerRef.current?.signal.aborted) {
-            setRenderState("cancelled");
-            return;
-          }
-          await new Promise(resolve => setTimeout(resolve, step.delay));
-          if (mountedRef.current) {
-            setRenderProgress(step.progress);
-            const newState = step.state;
-            setRenderState(newState);
-            renderStateRef.current = newState;
-          }
-        }
+    // Interpolate bearing (handle circular wraparound)
+    let bearingDiff = step.bearingTo - step.bearingFrom;
+    if (bearingDiff > 180) bearingDiff -= 360;
+    if (bearingDiff < -180) bearingDiff += 360;
+    const bearing = step.bearingFrom + bearingDiff * ease;
 
-        // Navigate to download if completed - use local variable to avoid narrowing
-        const didComplete = progressSteps[progressSteps.length - 1].progress === 100;
-        if (mountedRef.current && didComplete) {
-          router.push(`/projects/${id}/download`);
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name === "AbortError") {
-        if (mountedRef.current) setRenderState("cancelled");
-      } else if (mountedRef.current) {
-        console.error("Video creation error:", err);
-        setRenderState("error");
+    // Slight offset from center based on bearing
+    const offsetFactor = 0.0005 * (1 - Math.abs(t - 0.5) * 2);
+    const offsetLon = Math.sin(bearing * Math.PI / 180) * offsetFactor * step.startHeight / 100;
+    const offsetLat = Math.cos(bearing * Math.PI / 180) * offsetFactor * step.startHeight / 100;
+
+    return {
+      center: [center.lon + offsetLon, center.lat + offsetLat] as [number, number],
+      zoom: Math.min(18, Math.max(14, zoom)),
+      pitch,
+      bearing: (bearing + 360) % 360,
+    };
+  }, []);
+
+  // Initialize recording map
+  const initializeRecordingMap = useCallback(() => {
+    if (!recordingContainerRef.current || !uploadedGeoJson) return null;
+
+    const positions = uploadedGeoJson.geometry.coordinates[0] || [];
+    if (!positions.length) return null;
+
+    // Compute center from coordinates
+    let lon = 0, lat = 0, count = 0;
+    for (const p of positions) {
+      if (Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number") {
+        lon += p[0];
+        lat += p[1];
+        count += 1;
       }
     }
-  }, [id, project?.user_id, router]);
+    if (!count) return null;
+    const center = { lat: lat / count, lon: lon / count };
+
+    // Compute bounds
+    let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+    for (const p of positions) {
+      if (!Array.isArray(p) || typeof p[0] !== "number" || typeof p[1] !== "number") continue;
+      if (p[0] < minLon) minLon = p[0];
+      if (p[0] > maxLon) maxLon = p[0];
+      if (p[1] < minLat) minLat = p[1];
+      if (p[1] > maxLat) maxLat = p[1];
+    }
+    if (!Number.isFinite(minLon)) return null;
+
+    console.log("[WebRecorder] Initializing map with center:", center);
+
+    // Build cinematic style
+    const style = buildCinematicStyle({
+      contrast: 1.15,
+      saturation: 1.2,
+      fogColor: [0.78, 0.85, 0.94, 0.3],
+      fogAttenuation: 0.15,
+      antialias: true,
+    });
+
+    // Create map with 720x1280 container dimensions
+    const map = new maplibregl.Map({
+      container: recordingContainerRef.current,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      style: style as any,
+      center: [center.lon, center.lat],
+      zoom: 15,
+      pitch: 60,
+      bearing: -20,
+      maxZoom: 22,
+      antialias: true,
+      renderWorldCopies: false,
+      preserveDrawingBuffer: true,
+      attributionControl: false,
+    });
+
+    mapRef.current = map;
+
+    map.on("load", () => {
+      console.log("[WebRecorder] Map loaded, adding parcel layer");
+
+      // Add parcel source and layers
+      map.addSource("parcel", { type: "geojson", data: uploadedGeoJson });
+
+      map.addLayer({
+        id: "parcel-fill",
+        type: "fill",
+        source: "parcel",
+        paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 },
+      });
+
+      map.addLayer({
+        id: "parcel-outline",
+        type: "line",
+        source: "parcel",
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 },
+      });
+
+      // Initial fly-in animation
+      const cinematicPitch = 55 + Math.random() * 10;
+      map.fitBounds(
+        [[minLon, minLat], [maxLon, maxLat]],
+        {
+          padding: 60,
+          maxZoom: 18,
+          pitch: cinematicPitch,
+          bearing: -20,
+          duration: 2000,
+          easing: CINEMATIC_EASING.flyTo,
+        }
+      );
+    });
+
+    return map;
+  }, [uploadedGeoJson]);
+
+  // Start client-side video recording
+  const startRecording = useCallback(async () => {
+    if (!mountedRef.current) return;
+    if (isRecordingRef.current) return;
+    if (!uploadedGeoJson) {
+      console.error("[VideoPreview] No GeoJSON available for recording");
+      return;
+    }
+
+    console.log("[VideoPreview] Starting client-side recording");
+    console.log("[VideoPreview] Drone settings:", droneSettings);
+    console.log("[VideoPreview] Camera sequence:", cameraSequence);
+
+    // Initialize map
+    const map = initializeRecordingMap();
+    if (!map) {
+      console.error("[VideoPreview] Failed to initialize map");
+      return;
+    }
+
+    // Wait for map to be ready
+    const waitForMapReady = new Promise<void>((resolve) => {
+      const checkReady = () => {
+        if (mapRef.current?.loaded()) {
+          resolve();
+        } else {
+          setTimeout(checkReady, 100);
+        }
+      };
+      checkReady();
+    });
+
+    setRenderState("preparing");
+    renderStateRef.current = "preparing";
+    setRenderProgress(10);
+    setRenderElapsed(0);
+
+    await waitForMapReady;
+
+    // Check if map is ready
+    if (!mapRef.current) {
+      console.error("[VideoPreview] Map not initialized");
+      return;
+    }
+
+    // Clear previous chunks
+    chunksRef.current = [];
+
+    // Start recording from map canvas
+    const canvas = mapRef.current.getCanvas();
+    const stream = canvas.captureStream(VIDEO_FPS);
+
+    // Determine mime type
+    let mimeType = "video/webm;codecs=vp9";
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = "video/webm;codecs=vp8";
+    }
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = "video/webm";
+    }
+
+    console.log("[VideoPreview] Using mime type:", mimeType);
+
+    const recorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: 8000000, // 8 Mbps
+    });
+    recorderRef.current = recorder;
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        chunksRef.current.push(e.data);
+      }
+    };
+
+    recorder.onstop = () => {
+      console.log("[VideoPreview] Recording stopped, processing...");
+
+      // Combine chunks
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      console.log("[VideoPreview] Final blob size:", blob.size);
+
+      // Create URL for preview
+      const url = URL.createObjectURL(blob);
+      setVideoBlob(blob);
+      setVideoUrl(url);
+      setRenderState("completed");
+      renderStateRef.current = "completed";
+    };
+
+    // Start recording
+    recorder.start(100); // Collect data every 100ms
+    isRecordingRef.current = true;
+
+    setRenderState("recording");
+    renderStateRef.current = "recording";
+    setRenderProgress(15);
+    setRenderElapsed(0);
+
+    // Calculate duration from drone settings
+    const duration = (droneSettings?.duration || 30) * 1000; // Convert to ms
+    const startTime = performance.now();
+
+    // Calculate parcel center for animation
+    const positions = uploadedGeoJson.geometry.coordinates[0] || [];
+    let lon = 0, lat = 0, count = 0;
+    for (const p of positions) {
+      if (Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number") {
+        lon += p[0];
+        lat += p[1];
+        count += 1;
+      }
+    }
+    const center = count > 0 ? { lat: lat / count, lon: lon / count } : parcelCenter;
+    if (!center) {
+      console.error("[VideoPreview] No center available");
+      return;
+    }
+
+    // Animation loop
+    const animate = (now: number) => {
+      if (!isRecordingRef.current) return;
+
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Update UI
+      setRenderElapsed(Math.floor(elapsed / 1000));
+      setRenderProgress(Math.round(15 + progress * 75));
+
+      if (progress >= 1) {
+        // Stop recording
+        recorderRef.current?.stop();
+        isRecordingRef.current = false;
+        return;
+      }
+
+      // Calculate which step we're in
+      const steps = cameraSequence?.steps || [];
+      let accumulatedTime = 0;
+      let currentStep: CameraSequenceStep | null = null;
+      let stepProgress = 0;
+
+      for (let i = 0; i < steps.length; i++) {
+        if (elapsed * 1000 < accumulatedTime + steps[i].duration * 1000) {
+          currentStep = steps[i];
+          stepProgress = (elapsed * 1000 - accumulatedTime) / (steps[i].duration * 1000);
+          break;
+        }
+        accumulatedTime += steps[i].duration * 1000;
+      }
+
+      if (currentStep && mapRef.current) {
+        const camera = interpolateCameraStep(currentStep, stepProgress, center);
+        mapRef.current.jumpTo({
+          center: camera.center,
+          zoom: camera.zoom,
+          pitch: camera.pitch,
+          bearing: camera.bearing,
+        });
+      }
+
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    // Start animation after initial fly-in (2 seconds)
+    setTimeout(() => {
+      animationRef.current = requestAnimationFrame(animate);
+    }, 2000);
+
+  }, [uploadedGeoJson, droneSettings, cameraSequence, parcelCenter, initializeRecordingMap, interpolateCameraStep]);
 
   // Cancel render
-  const handleCancelRender = () => {
-    abortControllerRef.current?.abort();
-    setRenderState("idle");
+  const handleCancelRender = useCallback(() => {
+    console.log("[VideoPreview] Cancelling recording");
+    cleanupRecording();
+    setRenderState("cancelled");
+    renderStateRef.current = "cancelled";
     setRenderProgress(0);
-    // Optionally delete the video record
-    if (video) {
-      const supabase = createClient();
-      supabase.from("videos").delete().eq("id", video.id);
-      setVideo(null);
-    }
-  };
+    setRenderElapsed(0);
+  }, [cleanupRecording]);
 
   // Reset to idle
-  const handleResetRender = () => {
+  const handleResetRender = useCallback(() => {
+    cleanupRecording();
     setRenderState("idle");
+    renderStateRef.current = "idle";
     setRenderProgress(0);
-    setVideo(null);
-  };
+    setRenderElapsed(0);
+    setVideoBlob(null);
+    if (videoUrl) {
+      URL.revokeObjectURL(videoUrl);
+      setVideoUrl(null);
+    }
+  }, [cleanupRecording, videoUrl]);
+
+  // Download video
+  const handleDownload = useCallback(() => {
+    if (!videoBlob) return;
+
+    const url = URL.createObjectURL(videoBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sanalparsel-${id}-${Date.now()}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [videoBlob, id]);
+
+  // Handle create video button
+  const handleCreateVideo = useCallback(async () => {
+    if (!mountedRef.current) return;
+    if (isRenderActive()) return;
+
+    // Clean up any previous recording
+    cleanupRecording();
+
+    // Start client-side recording
+    await startRecording();
+  }, [mountedRef, isRenderActive, cleanupRecording, startRecording]);
 
   if (loading) {
     return (
@@ -390,38 +706,64 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           description="Seslendirme ve video önizleme"
         />
 
-        {/* Render Progress State */}
-        {(renderState === "generating" || renderState === "preparing") && (
+        {/* Hidden recording container */}
+        <div
+          className="fixed opacity-0 pointer-events-none"
+          style={{ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, overflow: "hidden" }}
+        >
+          <div
+            ref={recordingContainerRef}
+            className="w-full h-full"
+            style={{ width: VIDEO_WIDTH, height: VIDEO_HEIGHT }}
+          />
+        </div>
+
+        {/* Render/Recording Progress State */}
+        {(renderState === "preparing" || renderState === "recording" || renderState === "processing") && (
           <div className="mb-4">
-            <div 
+            <div
               className="rounded-xl p-5 text-center"
-              style={{ 
+              style={{
                 background: "linear-gradient(135deg, rgba(37,99,235,0.15) 0%, rgba(124,58,237,0.08) 100%)",
                 border: "1px solid rgba(255,255,255,0.08)"
               }}
             >
               {/* Animated icon */}
               <div className="w-14 h-14 mx-auto mb-4 relative">
-                <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-ping" />
-                <div className="absolute inset-2 rounded-full border-2 border-primary/50" />
-                <div className="absolute inset-4 rounded-full bg-primary flex items-center justify-center">
-                  <svg className="w-6 h-6 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                </div>
+                {renderState === "recording" ? (
+                  <>
+                    <div className="absolute inset-0 rounded-full border-2 border-red-500/30 animate-ping" />
+                    <div className="absolute inset-2 rounded-full border-2 border-red-500/50" />
+                    <div className="absolute inset-4 rounded-full bg-red-500 flex items-center justify-center">
+                      <div className="w-3 h-3 bg-white rounded-full" />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-ping" />
+                    <div className="absolute inset-2 rounded-full border-2 border-primary/50" />
+                    <div className="absolute inset-4 rounded-full bg-primary flex items-center justify-center">
+                      <svg className="w-6 h-6 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Progress bar */}
               <div className="mb-3">
                 <div className="flex justify-between text-xs mb-2">
                   <span className="text-white/60">
-                    {renderState === "preparing" ? "Hazırlanıyor..." : "Video oluşturuluyor..."}
+                    {renderState === "preparing" && "Hazırlanıyor..."}
+                    {renderState === "recording" && "Video oluşturuluyor..."}
+                    {renderState === "processing" && "Video işleniyor..."}
                   </span>
                   <span className="text-primary font-medium">{renderProgress}%</span>
                 </div>
                 <div className="h-1.5 bg-white/[0.1] rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-gradient-to-r from-primary to-blue-400 transition-all duration-500"
                     style={{ width: `${renderProgress}%` }}
                   />
@@ -430,7 +772,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
 
               {/* Render steps */}
               <div className="flex justify-center gap-6 text-xs">
-                {["Hazırlık", "İşleme", "Bitirme"].map((step, i) => {
+                {["Hazırlık", "Kayıt", "İşleme"].map((step, i) => {
                   const stepProgress = i === 0 ? 33 : i === 1 ? 66 : 100;
                   const isActive = renderProgress >= stepProgress;
                   return (
@@ -441,6 +783,13 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                   );
                 })}
               </div>
+
+              {/* Time display for recording */}
+              {renderState === "recording" && (
+                <p className="text-white/60 text-xs mt-3">
+                  {renderElapsed}s / {droneSettings?.duration || 30}s
+                </p>
+              )}
 
               {/* Cancel button */}
               <button
@@ -466,11 +815,11 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           </div>
         )}
 
-        {/* Cancelled/Resumable State - Only show if we were actively rendering */}
-        {(renderState === "cancelled" || renderState === "error") && (
+        {/* Cancelled State */}
+        {renderState === "cancelled" && (
           <div className="mb-4 p-4 rounded-xl text-center" style={{ background: "rgba(15,23,42,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>
             <p className="text-white/60 text-sm mb-3">
-              {renderState === "cancelled" ? "Video oluşturma iptal edildi" : "Video oluşturma hatası"}
+              Video oluşturma iptal edildi
             </p>
             <button
               onClick={handleResetRender}
@@ -481,7 +830,58 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
           </div>
         )}
 
-        {/* Main Content - Only show when not rendering */}
+        {/* Completed State - Video Player */}
+        {renderState === "completed" && videoUrl && (
+          <div className="mb-4">
+            <div
+              className="rounded-xl overflow-hidden"
+              style={{
+                background: "rgba(15,23,42,0.8)",
+                border: "1px solid rgba(255,255,255,0.08)"
+              }}
+            >
+              {/* Video player */}
+              <video
+                src={videoUrl}
+                controls
+                autoPlay
+                className="w-full aspect-[9/16] bg-black"
+                style={{ maxHeight: "400px" }}
+              />
+
+              {/* Action buttons */}
+              <div className="p-4 flex gap-3">
+                <button
+                  onClick={handleDownload}
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-primary to-blue-500 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-primary/20 transition-all"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  WEBM İndir
+                </button>
+                <button
+                  onClick={handleResetRender}
+                  className="flex-1 py-3 rounded-xl border border-white/[0.1] text-white/70 font-semibold text-sm flex items-center justify-center gap-2 hover:bg-white/[0.05] transition-all"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Yeniden Oluştur
+                </button>
+              </div>
+
+              {/* Video info */}
+              <div className="px-4 pb-4 text-center">
+                <p className="text-white/50 text-xs">
+                  720×1280 • WEBM • {(droneSettings?.duration || 30)}s
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Main Content - Only show when idle */}
         {renderState === "idle" && (
           <>
             {/* Fallback Warning */}
@@ -545,6 +945,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 onClick={() => {
                   // Cleanup before navigating
                   abortControllerRef.current?.abort();
+                  cleanupRecording();
                   setRenderState("idle");
                   router.push(`/projects/${id}/narration`);
                 }}
@@ -558,7 +959,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 className={`
                   flex-1 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all
                   ${hasAudio && !isRenderActive()
-                    ? "bg-gradient-to-r from-primary to-blue-500 text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30" 
+                    ? "bg-gradient-to-r from-primary to-blue-500 text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30"
                     : "bg-white/[0.05] text-white/30 border border-white/[0.05]"
                   }
                 `}
@@ -574,7 +975,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
-                <span>{project?.short_title || "Proje"} • 30 sn • Reels 1080×1920</span>
+                <span>{project?.short_title || "Proje"} • {droneSettings?.duration || 30} sn • WEBM 720×1280</span>
               </div>
             </div>
           </>
