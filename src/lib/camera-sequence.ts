@@ -28,6 +28,9 @@ function getEasing(feel: CameraFeel): (t: number) => number {
  */
 function getPitchRange(feel: CameraFeel, mode: CameraSequenceMode): { start: number; end: number } {
   switch (mode) {
+    case "heroZoom":
+      // Start shallow, end steep looking down
+      return { start: 25, end: 60 };
     case "orbit360":
       // High angle, cinematic view
       return { start: feel === "dynamic" ? 62 : feel === "soft" ? 50 : 57, end: feel === "dynamic" ? 62 : feel === "soft" ? 50 : 57 };
@@ -53,6 +56,9 @@ function getZoomRange(feel: CameraFeel, mode: CameraSequenceMode, baseHeight: nu
   const baseZoom = 16 - Math.log2(baseHeight / 100);
   
   switch (mode) {
+    case "heroZoom":
+      // Dramatic zoom in from far
+      return { from: baseZoom - 2.0, to: baseZoom + 0.5 };
     case "orbit360":
       // Zoom stays relatively stable
       return { from: baseZoom - 0.5, to: baseZoom + 0.3 };
@@ -78,6 +84,9 @@ function getBearingRange(mode: CameraSequenceMode, feel: CameraFeel, startBearin
   const rotationAmount = feel === "dynamic" ? 420 : feel === "soft" ? 300 : 360;
   
   switch (mode) {
+    case "heroZoom":
+      // Subtle rotation for dramatic effect
+      return { from: startBearing, to: startBearing + 15 };
     case "orbit360":
       // Full 360 rotation
       return { from: startBearing, to: startBearing + rotationAmount };
@@ -213,7 +222,7 @@ export const defaultDroneSettings: DroneSettingsState = {
   duration: 30,
   startHeight: 300,
   cameraFeel: "cinematic",
-  cameraModes: ["orbit360", "spiralDescend"],
+  cameraModes: ["heroZoom", "orbit360", "spiralDescend", "topView"],
 };
 
 /**
@@ -240,6 +249,26 @@ export function interpolateCameraStep(
   let bearing: number;
 
   switch (step.mode) {
+    case "heroZoom": {
+      // Dramatic zoom from far high altitude to close view
+      const progress = easedT;
+      
+      // Start from far offset (simulating high altitude)
+      const startRadius = 0.015 * (1 - progress * 0.8); // Shrink towards center
+      const angle = -progress * Math.PI * 0.3; // Slight arc movement
+      
+      centerOffset = {
+        lon: Math.sin(angle) * startRadius,
+        lat: Math.cos(angle) * startRadius * 0.5, // Less vertical movement
+      };
+      
+      // Dramatic zoom and pitch change
+      zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * Math.pow(progress, 0.7);
+      pitch = step.pitch + (step.pitchEnd - step.pitch) * Math.pow(progress, 0.6);
+      bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * progress;
+      break;
+    }
+
     case "orbit360": {
       // Simple circular orbit around center
       const orbitRadius = 0.0005 * (step.startHeight / 100);

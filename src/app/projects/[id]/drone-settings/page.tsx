@@ -13,6 +13,7 @@ import { buildCameraSequence } from "@/lib/camera-sequence";
 
 // Map old camera modes to new sequence modes
 const MODE_MAP: Record<string, CameraSequenceMode> = {
+  "hero_zoom": "heroZoom",
   "orbit_360": "orbit360",
   "spiral_descent": "spiralDescend",
   "top_view": "topView",
@@ -35,9 +36,10 @@ interface CameraModeOption {
 }
 
 const CAMERA_MODE_OPTIONS: CameraModeOption[] = [
+  { mode: "hero_zoom", label: "Hero Zoom", selected: true },
   { mode: "orbit_360", label: "Orbit 360", selected: true },
   { mode: "spiral_descent", label: "Spiral Alçalış", selected: true },
-  { mode: "top_view", label: "Tepe Görünüm", selected: false },
+  { mode: "top_view", label: "Tepe Görünüm", selected: true },
   { mode: "low_fly", label: "Alçak Geçiş", selected: false },
   { mode: "four_corners", label: "4 Köşe", selected: false },
 ];

@@ -34,7 +34,7 @@ export interface ParcelCoordinates {
 }
 
 // Drone settings types
-export type CameraSequenceMode = "orbit360" | "spiralDescend" | "topView" | "lowPass" | "fourCorners";
+export type CameraSequenceMode = "heroZoom" | "orbit360" | "spiralDescend" | "topView" | "lowPass" | "fourCorners";
 export type CameraFeel = "soft" | "cinematic" | "dynamic";
 
 export interface DroneSettingsState {
@@ -519,7 +519,7 @@ export const useParcelStore = create<ParcelState>()(
           duration: 30,
           startHeight: 300,
           cameraFeel: "cinematic",
-          cameraModes: ["orbit360", "spiralDescend"],
+          cameraModes: ["heroZoom", "orbit360", "spiralDescend", "topView"],
         },
         cameraSequence: null,
       }),

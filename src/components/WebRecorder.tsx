@@ -144,10 +144,88 @@ export default function WebRecorder({
     };
   }, []);
 
-  const startRecording = useCallback(() => {
+  // Helper to wait for map to be fully loaded before recording
+  const waitForMapReady = useCallback((): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const map = mapRef.current;
+      if (!map) {
+        console.log("[WebRecorder] No map instance");
+        resolve(false);
+        return;
+      }
+
+      // Check if map is already loaded
+      if (map.loaded() && map.isStyleLoaded()) {
+        console.log("[WebRecorder] Map already loaded, waiting for tiles...");
+        
+        // Check if tiles are already loaded
+        if (map.areTilesLoaded()) {
+          console.log("[WebRecorder] All tiles loaded");
+          resolve(true);
+          return;
+        }
+
+        // Wait for tiles to load
+        const tileChecker = setInterval(() => {
+          if (map.areTilesLoaded()) {
+            clearInterval(tileChecker);
+            console.log("[WebRecorder] All tiles loaded (via checker)");
+            resolve(true);
+          }
+        }, 100);
+
+        // Timeout after 30 seconds
+        setTimeout(() => {
+          clearInterval(tileChecker);
+          console.log("[WebRecorder] Tile load timeout, proceeding anyway");
+          resolve(true);
+        }, 30000);
+      } else {
+        // Wait for map to load
+        const loadHandler = () => {
+          map.off("load", loadHandler);
+          console.log("[WebRecorder] Map style loaded");
+          
+          // Now wait for tiles
+          const tileChecker = setInterval(() => {
+            if (map.areTilesLoaded()) {
+              clearInterval(tileChecker);
+              console.log("[WebRecorder] All tiles loaded (after load event)");
+              resolve(true);
+            }
+          }, 100);
+
+          setTimeout(() => {
+            clearInterval(tileChecker);
+            console.log("[WebRecorder] Tile load timeout, proceeding anyway");
+            resolve(true);
+          }, 30000);
+        };
+
+        map.on("load", loadHandler);
+      }
+    });
+  }, []);
+
+  const startRecording = useCallback(async () => {
     if (isRecordingRef.current || !mapRef.current) return;
 
-    console.log("[WebRecorder] Starting recording");
+    // Log selected camera modes and settings
+    console.log("[WebRecorder] selected camera modes:", cameraSequence?.steps.map(s => s.mode) || []);
+    console.log("[WebRecorder] camera feeling:", cameraSequence?.steps[0]?.easing || "unknown");
+    console.log("[WebRecorder] scene count:", cameraSequence?.steps.length || 0);
+
+    // Wait for map to be fully ready
+    console.log("[WebRecorder] Waiting for map to be ready...");
+    const isMapReady = await waitForMapReady();
+    if (!isMapReady) {
+      console.error("[WebRecorder] Map not ready");
+      onError?.(new Error("Map not ready"));
+      return;
+    }
+    console.log("[WebRecorder] Map ready, starting recording");
+    console.log("[WebRecorder] recording started");
+    
     isRecordingRef.current = true;
     chunksRef.current = [];
     startTimeRef.current = performance.now();
@@ -283,7 +361,7 @@ export default function WebRecorder({
       isRecordingRef.current = false;
       onError?.(err as Error);
     }
-  }, [parcel, cameraSequence, fps, onProgress, onComplete, onError, updateState]);
+  }, [parcel, cameraSequence, fps, onProgress, onComplete, onError, updateState, waitForMapReady]);
 
   const stopRecording = useCallback(() => {
     console.log("[WebRecorder] Stopping recording");
@@ -348,19 +426,39 @@ export default function WebRecorder({
       // Add parcel source and layers
       map.addSource("parcel", { type: "geojson", data: parcel });
       
+      // Red fill with transparency
       map.addLayer({
         id: "parcel-fill",
         type: "fill",
         source: "parcel",
-        paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 },
+        paint: { "fill-color": "#ff2d55", "fill-opacity": 0.15 },
       });
 
+      // Red outline with glow effect
+      map.addLayer({
+        id: "parcel-outline-glow",
+        type: "line",
+        source: "parcel",
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": "#ff2d55",
+          "line-width": 8,
+          "line-opacity": 0.4,
+          "line-blur": 4,
+        },
+      });
+
+      // Main red outline
       map.addLayer({
         id: "parcel-outline",
         type: "line",
         source: "parcel",
         layout: { "line-join": "round", "line-cap": "round" },
-        paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 },
+        paint: {
+          "line-color": "#ff2d55",
+          "line-width": 3,
+          "line-opacity": 1,
+        },
       });
 
       // Initial fly-in

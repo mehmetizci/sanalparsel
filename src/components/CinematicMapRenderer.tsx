@@ -393,19 +393,39 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
       // Add parcel polygon
       map.addSource("parcel", { type: "geojson", data: parcel });
       
+      // Red fill with transparency
       map.addLayer({
         id: "parcel-fill",
         type: "fill",
         source: "parcel",
-        paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 },
+        paint: { "fill-color": "#ff2d55", "fill-opacity": 0.15 },
       });
 
+      // Red outline with glow effect
+      map.addLayer({
+        id: "parcel-outline-glow",
+        type: "line",
+        source: "parcel",
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": "#ff2d55",
+          "line-width": 8,
+          "line-opacity": 0.4,
+          "line-blur": 4,
+        },
+      });
+
+      // Main red outline
       map.addLayer({
         id: "parcel-outline",
         type: "line",
         source: "parcel",
         layout: { "line-join": "round", "line-cap": "round" },
-        paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 },
+        paint: {
+          "line-color": "#ff2d55",
+          "line-width": 3,
+          "line-opacity": 1,
+        },
       });
 
       // Cinematic fly-in animation
