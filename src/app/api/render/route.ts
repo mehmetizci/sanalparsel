@@ -229,6 +229,9 @@ async function executeRender(
     // Use [lng, lat] format for Mapbox
     const mapCenter: [number, number] = [props.parcelCenter[1], props.parcelCenter[0]];
     
+    // Create debug directory for frame capture testing
+    const debugDir = path.join(tempDir, "debug");
+    
     mapCapture = new MapboxFrameCapture({
       center: mapCenter,
       zoom: 15,
@@ -239,12 +242,53 @@ async function executeRender(
       style: "mapbox://styles/mapbox/satellite-v9",
     });
     
+    // Set debug directory for frame capture
+    mapCapture.setDebugDir(debugDir);
+    
     await mapCapture.initialize(MAPBOX_TOKEN);
     global.__renderMapboxInstances.set(renderId, mapCapture);
     
     // Check map info
     const mapInfo = await mapCapture.getMapInfo();
     log(renderId, `Map loaded: ${JSON.stringify(mapInfo)}`);
+    
+    // Validate initial frame is real Mapbox content
+    log(renderId, "Validating Mapbox content is visible...");
+    const testCapture = await mapCapture.captureFrameAtPosition(
+      mapCenter,
+      15,
+      55,
+      0
+    );
+    
+    if (testCapture.success && testCapture.data) {
+      const sizeKB = testCapture.data.length / 1024;
+      log(renderId, `Test frame size: ${sizeKB.toFixed(1)} KB`);
+      
+      if (sizeKB < 50) {
+        // Frame too small = likely blank/loading tiles
+        log(renderId, `ERROR: Test frame is only ${sizeKB.toFixed(1)}KB - tiles may not be loaded!`);
+        
+        // Check if we have debug frames saved
+        try {
+          const debugFiles = await fs.readdir(debugDir);
+          log(renderId, `Debug files: ${debugFiles.join(", ")}`);
+        } catch (e) {
+          log(renderId, "No debug files found");
+        }
+        
+        // Save test frame for inspection
+        const testFramePath = path.join(tempDir, "test_frame.png");
+        await fs.writeFile(testFramePath, testCapture.data);
+        log(renderId, `Test frame saved to: ${testFramePath}`);
+        
+        throw new Error(`Mapbox tiles failed to load. Test frame only ${sizeKB.toFixed(1)}KB. Check logs for details.`);
+      }
+      
+      log(renderId, `Test frame valid: ${sizeKB.toFixed(1)} KB - Mapbox satellite visible!`);
+    } else {
+      throw new Error(`Failed to capture test frame: ${testCapture.error}`);
+    }
     
     updateProgress(renderId, "rendering", 5, "initializing", "Mapbox ready", { totalFrames: settings.totalFrames });
     
@@ -278,13 +322,19 @@ async function executeRender(
         keyframe.bearing
       );
       
-      if (!result.success) {
+      if (!result.success || !result.data) {
         log(renderId, `[Frame ${frame}] Capture failed: ${result.error}`);
         // Use previous frame or skip
         if (frame > 0) {
           log(renderId, `[Frame ${frame}] Using previous frame`);
         }
         continue;
+      }
+      
+      // Validate frame has meaningful content
+      const frameSizeKB = result.data.length / 1024;
+      if (frameSizeKB < 30) {
+        log(renderId, `[Frame ${frame}] WARNING: Frame only ${frameSizeKB.toFixed(1)}KB - may be blank`);
       }
       
       // Write frame
