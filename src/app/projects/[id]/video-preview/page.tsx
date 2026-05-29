@@ -653,9 +653,9 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
         }, 2200);
       } catch (e) {
         const err = e as Error;
-        console.error("[VIDEO RECORD ERROR]", err?.message || err);
+        console.error("[WebRecorder ERROR]", err?.message || err);
         setErrorMessage(err?.message || "Harita katmanları oluşturulamadı."); 
-        setRenderState("error"); 
+        setRenderState("error");
         return;
       }
     };
@@ -765,11 +765,11 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
     return (
       <AppShell>
         <div className="px-4 py-5 max-w-2xl mx-auto">
-          <StepHeader step={8} totalSteps={10} title="Video Oluşturuluyor" description="Drone görüntüleri ve seslendirme" />
+          <StepHeader step={9} totalSteps={10} title="Video Oluşturuluyor" description="Drone görüntüleri ve seslendirme hazırlanıyor" />
           
-          {/* Full capture preview */}
+          {/* Full capture preview - 720x1280 aspect ratio */}
           <div className="mb-6">
-            <div className="text-sm text-white/60 mb-2">Önizleme</div>
+            <div className="text-sm text-white/60 mb-2">Canlı Önizleme</div>
             <div 
               className="rounded-lg overflow-hidden border border-white/20 bg-black/50 mx-auto"
               style={{ width: 180, height: 320 }}
@@ -793,7 +793,7 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
               </div>
               <div className="mb-3">
                 <div className="flex justify-between text-xs mb-2">
-                  <span className="text-white/60">{renderState === "preparing" && "Hazırlanıyor..."}{renderState === "recording" && "Video oluşturuluyor..."}{renderState === "processing" && "Video işleniyor..."}</span>
+                  <span className="text-white/60">{renderState === "preparing" && "Hazırlık"}{renderState === "recording" && "Kayıt"}{renderState === "processing" && "İşleme"}</span>
                   <span className="text-primary font-medium">{renderProgress}%</span>
                 </div>
                 <div className="h-1.5 bg-white/[0.1] rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-primary to-blue-400 transition-all duration-500" style={{ width: `${renderProgress}%` }} /></div>
@@ -807,6 +807,39 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
               </div>
               {renderState === "recording" && <p className="text-white/60 text-xs mt-3">{renderElapsed}s / {droneSettings?.duration || 30}s</p>}
               <button onClick={handleCancelRender} className="mt-4 px-4 py-2 text-xs text-white/50 hover:text-white/70 transition-colors">İptal</button>
+            </div>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  // Show completed view (step 10/10)
+  if (renderState === "completed" && videoUrl) {
+    return (
+      <AppShell>
+        <div className="px-4 py-5 max-w-2xl mx-auto">
+          <StepHeader step={10} totalSteps={10} title="Video Hazır" description="Video başarıyla oluşturuldu" />
+          
+          {/* Video Player */}
+          <div className="mb-4">
+            <div className="rounded-xl overflow-hidden" style={{ background: "rgba(15,23,42,0.8)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <video src={videoUrl} controls autoPlay className="w-full aspect-[9/16] bg-black" style={{ maxHeight: "400px" }} />
+              <div className="p-4 flex flex-col gap-3">
+                <button onClick={handleDownload} className="w-full py-3 rounded-xl bg-gradient-to-r from-primary to-blue-500 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-primary/20 transition-all">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  WEBM İndir
+                </button>
+                <button onClick={handleResetRender} className="w-full py-3 rounded-xl border border-white/[0.1] text-white/70 font-semibold text-sm flex items-center justify-center gap-2 hover:bg-white/[0.05] transition-all">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  Yeniden Oluştur
+                </button>
+                <button onClick={() => router.push(`/projects/${id}`)} className="w-full py-3 rounded-xl border border-white/[0.1] text-white/50 text-sm flex items-center justify-center gap-2 hover:bg-white/[0.05] transition-all">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                  Videolarıma Git
+                </button>
+              </div>
+              <div className="px-4 pb-4 text-center"><p className="text-white/50 text-xs">720×1280 • WEBM • {(droneSettings?.duration || 30)}s</p></div>
             </div>
           </div>
         </div>
