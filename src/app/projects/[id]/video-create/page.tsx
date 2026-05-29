@@ -100,13 +100,17 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
   // Initialize Mapbox map
   const initializeMap = useCallback(() => {
-    if (!mapContainerRef.current || !uploadedGeoJson || !parcelCenter) return;
+    if (!mapContainerRef.current || !uploadedGeoJson || !parcelCenter) {
+      console.log("[VideoCreate] Cannot initialize: missing container, geojson, or center");
+      return;
+    }
 
     console.log("[VideoCreate] Initializing Mapbox map");
 
     // Set Mapbox token
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) {
+      console.error("[VideoCreate] No Mapbox token found");
       setErrorMessage("Harita API anahtarı bulunamadı");
       setRenderState("error");
       return;
@@ -126,54 +130,240 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
     mapRef.current = map;
 
-    map.on("load", () => {
-      if (!mountedRef.current) return;
+    // Track preparation steps
+    let styleLoaded = false;
+    let geojsonAdded = false;
+    let tilesLoaded = false;
+    let animationScheduled = false;
 
-      // Add parcel polygon
-      map.addSource("parcel", {
-        type: "geojson",
-        data: uploadedGeoJson as GeoJSON.Feature,
+    const checkAllReady = () => {
+      if (!mountedRef.current || animationScheduled) return;
+      
+      console.log("[VideoCreate] Checking readiness:", {
+        styleLoaded,
+        geojsonAdded,
+        tilesLoaded,
+        mapLoaded: map.loaded(),
+        isStyleLoaded: map.isStyleLoaded(),
+        areTilesLoaded: map.areTilesLoaded(),
       });
 
-      map.addLayer({
-        id: "parcel-fill",
-        type: "fill",
-        source: "parcel",
-        paint: {
-          "fill-color": "#3B82F6",
-          "fill-opacity": 0.3,
-        },
-      });
+      // Check all conditions
+      if (!styleLoaded || !map.loaded() || !map.isStyleLoaded() || !geojsonAdded) {
+        return; // Not ready yet
+      }
 
-      map.addLayer({
-        id: "parcel-outline",
-        type: "line",
-        source: "parcel",
-        paint: {
-          "line-color": "#3B82F6",
-          "line-width": 3,
-        },
-      });
+      // For tiles, we need to wait for them or timeout
+      // map.areTilesLoaded() returns true when no tiles are pending
+      if (!tilesLoaded) {
+        // Wait for tiles or timeout after 5 seconds from style load
+        const timeSinceStyleLoad = Date.now() - styleLoadTime;
+        if (timeSinceStyleLoad < 5000) {
+          console.log("[VideoCreate] Waiting for tiles to load...");
+          return;
+        }
+        // Timeout - proceed anyway
+        console.log("[VideoCreate] Tile loading timeout - proceeding");
+        tilesLoaded = true;
+      }
 
-      // Store map instance for recording
-      setRecordingMap(map);
+      // All ready - schedule recording start
+      animationScheduled = true;
+      console.log("[VideoCreate] All resources loaded - scheduling recording start in 1s");
 
-      console.log("[VideoCreate] Map loaded and ready");
-
-      // Start recording after short delay
       preparationTimeoutRef.current = setTimeout(() => {
-        startRecording(map, parcelCenter);
+        if (mountedRef.current) {
+          startRecordingWhenReady(map, parcelCenter);
+        }
       }, 1000);
+    };
+
+    let styleLoadTime = 0;
+
+    map.on("style.load", () => {
+      if (!mountedRef.current) return;
+      console.log("[VideoCreate] Style loaded");
+      styleLoadTime = Date.now();
+      styleLoaded = true;
+
+      // Add parcel polygon after style loads
+      try {
+        // Remove existing layers/sources if any (for potential re-runs)
+        if (map.getLayer("parcel-fill")) map.removeLayer("parcel-fill");
+        if (map.getLayer("parcel-outline")) map.removeLayer("parcel-outline");
+        if (map.getSource("parcel")) map.removeSource("parcel");
+
+        map.addSource("parcel", {
+          type: "geojson",
+          data: uploadedGeoJson as GeoJSON.Feature,
+        });
+
+        map.addLayer({
+          id: "parcel-fill",
+          type: "fill",
+          source: "parcel",
+          paint: {
+            "fill-color": "#3B82F6",
+            "fill-opacity": 0.3,
+          },
+        });
+
+        map.addLayer({
+          id: "parcel-outline",
+          type: "line",
+          source: "parcel",
+          paint: {
+            "line-color": "#3B82F6",
+            "line-width": 3,
+          },
+        });
+
+        console.log("[VideoCreate] GeoJSON layers added");
+        geojsonAdded = true;
+
+        // Fit bounds to show parcel
+        const bounds = map.getBounds();
+        if (bounds) {
+          map.fitBounds(bounds, {
+            padding: 60,
+            maxZoom: 18,
+            pitch: 55,
+            bearing: -20,
+            duration: 1500,
+          });
+        } else {
+          console.warn("[VideoCreate] Could not get map bounds");
+        }
+
+        // Store map instance for recording
+        setRecordingMap(map);
+
+        console.log("[VideoCreate] Map setup complete, checking readiness...");
+        checkAllReady();
+      } catch (err) {
+        console.error("[VideoCreate] Error adding layers:", err);
+        setErrorMessage("Harita katmanları yüklenemedi");
+        setRenderState("error");
+      }
     });
+
+    // Also handle map's load event (fires after style.load)
+    map.on("load", () => {
+      console.log("[VideoCreate] Map load event fired");
+      if (!styleLoaded) {
+        styleLoaded = true;
+        styleLoadTime = Date.now();
+      }
+    });
+
+    // Check for tiles loaded periodically
+    const tileCheckInterval = setInterval(() => {
+      if (!mountedRef.current || !mapRef.current) {
+        clearInterval(tileCheckInterval);
+        return;
+      }
+      
+      if (map.areTilesLoaded() && !tilesLoaded) {
+        console.log("[VideoCreate] Tiles loaded detected");
+        tilesLoaded = true;
+        clearInterval(tileCheckInterval);
+        checkAllReady();
+      }
+    }, 500);
+
+    // Fallback: force tiles check after 8 seconds
+    setTimeout(() => {
+      if (!tilesLoaded) {
+        console.log("[VideoCreate] Forcing tiles check after timeout");
+        tilesLoaded = true;
+        clearInterval(tileCheckInterval);
+        checkAllReady();
+      }
+    }, 8000);
 
     map.on("error", (e) => {
       console.error("[VideoCreate] Map error:", e);
       if (mountedRef.current) {
-        setErrorMessage("Harita yüklenirken hata oluştu");
+        setErrorMessage("Harita yüklenirken hata oluştu: " + (e.error?.message || "Bilinmeyen hata"));
         setRenderState("error");
       }
     });
+
+    // Timeout for entire preparation
+    preparationTimeoutRef.current = setTimeout(() => {
+      if (mountedRef.current && renderState === "preparing") {
+        console.log("[VideoCreate] Preparation timeout reached");
+        setErrorMessage("Harita hazırlanması çok uzun sürüyor. Lütfen tekrar deneyin.");
+        setRenderState("error");
+      }
+    }, 15000);
   }, [uploadedGeoJson, parcelCenter, setRecordingMap]);
+
+  // Start recording only when map is fully ready
+  const startRecordingWhenReady = useCallback((map: mapboxgl.Map, center: { lat: number; lon: number }) => {
+    if (!mountedRef.current) return;
+
+    console.log("[VideoCreate] Checking map visibility and readiness...");
+
+    // Final checks before recording
+    const isLoaded = map.loaded();
+    const isStyleLoaded = map.isStyleLoaded();
+    const areTilesLoaded = map.areTilesLoaded();
+
+    console.log("[VideoCreate] Final readiness check:", {
+      mapLoaded: isLoaded,
+      styleLoaded: isStyleLoaded,
+      tilesLoaded: areTilesLoaded,
+      hasCanvas: !!map.getCanvas(),
+      canvasSize: map.getCanvas()?.width + "x" + map.getCanvas()?.height,
+    });
+
+    // Check if all resources are loaded
+    if (!isLoaded || !isStyleLoaded) {
+      console.error("[VideoCreate] Map not fully loaded - cancelling recording");
+      setErrorMessage("Harita tamamen yüklenemedi. Lütfen tekrar deneyin.");
+      setRenderState("error");
+      return;
+    }
+
+    // Check canvas visibility
+    const canvas = map.getCanvas();
+    if (!canvas) {
+      console.error("[VideoCreate] Canvas not available");
+      setErrorMessage("Canvas alınamadı");
+      setRenderState("error");
+      return;
+    }
+
+    // Check if canvas has content (not all black/empty)
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let nonBlackPixels = 0;
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        // Check if pixel is not near black (satellite imagery won't be black)
+        if (imageData.data[i] > 20 || imageData.data[i + 1] > 20 || imageData.data[i + 2] > 20) {
+          nonBlackPixels++;
+        }
+      }
+      const nonBlackRatio = nonBlackPixels / (canvas.width * canvas.height);
+      console.log("[VideoCreate] Canvas content check:", {
+        nonBlackRatio: (nonBlackRatio * 100).toFixed(2) + "%",
+        hasContent: nonBlackRatio > 0.1,
+      });
+
+      if (nonBlackRatio < 0.1) {
+        console.error("[VideoCreate] Canvas appears empty - cancelling recording");
+        setErrorMessage("Harita içeriği görünmüyor. Lütfen tekrar deneyin.");
+        setRenderState("error");
+        return;
+      }
+    }
+
+    // All checks passed - start recording
+    console.log("[VideoCreate] All checks passed - starting recording");
+    startRecording(map, center);
+  }, []);
 
   // Start recording with canvas capture
   const startRecording = useCallback((map: mapboxgl.Map, center: { lat: number; lon: number }) => {
