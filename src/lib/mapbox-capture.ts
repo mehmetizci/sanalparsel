@@ -78,24 +78,86 @@ export class MapboxFrameCapture {
 
   async initialize(mapboxToken: string): Promise<void> {
     console.log("[MapboxCapture] Initializing Puppeteer...");
+    
+    // Set cache directory
+    const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+    console.log(`[MapboxCapture] Puppeteer cache dir: ${cacheDir}`);
 
     // Create debug directory
     if (this.debugDir) {
       await fs.mkdir(this.debugDir, { recursive: true });
     }
 
-    this.browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--disable-gpu",
-        "--disable-web-security",
-        "--allow-file-access-from-files",
-      ],
-    });
+    console.log("[MapboxCapture] Launching Chrome...");
+    
+    let browser;
+    try {
+      // First try: auto-detect Chrome (works on local dev)
+      browser = await puppeteer.launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--single-process",
+          "--disable-web-security",
+          "--disable-features=IsolateOrigins,site-per-process",
+        ],
+      });
+    } catch (firstError) {
+      console.log(`[MapboxCapture] First launch failed: ${firstError}`);
+      
+      // Second try: use system Chrome if available
+      const systemChromePaths = [
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/google-chrome",
+        "/opt/render/.cache/puppeteer/chrome/linux-1312.0.22/chrome-linux64/chrome",
+      ];
+      
+      let foundPath: string | null = null;
+      for (const p of systemChromePaths) {
+        try {
+          await fs.access(p);
+          foundPath = p;
+          console.log(`[MapboxCapture] Found system Chrome: ${p}`);
+          break;
+        } catch {
+          // Try next path
+        }
+      }
+      
+      if (foundPath) {
+        console.log("[MapboxCapture] Trying system Chrome...");
+        browser = await puppeteer.launch({
+          executablePath: foundPath,
+          headless: true,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--single-process",
+          ],
+        });
+      } else {
+        // Third try: try PUPPETEER_EXECUTABLE_PATH
+        if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+          console.log(`[MapboxCapture] Trying PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
+          browser = await puppeteer.launch({
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+          });
+        } else {
+          throw firstError;
+        }
+      }
+    }
+    
+    this.browser = browser;
+    console.log("[MapboxCapture] Chrome launched successfully!");
 
     this.page = await this.browser.newPage();
 
