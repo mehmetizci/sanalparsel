@@ -7,7 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
 import { Project, Narration, ParcelGeoJson, TTSProvider, OpenAIVoice } from "@/types";
 import { useParcelStore, CameraSequenceStep, ParcelMetadata } from "@/lib/parcel-store";
-import { buildCinematicStyle, CINEMATIC_EASING } from "@/lib/cinematic-renderer";
+import { buildCinematicStyle } from "@/lib/cinematic-renderer";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
@@ -428,57 +428,57 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
     // Read directly from store to get the latest value
     const uploadedGeoJson = useParcelStore.getState().uploadedGeoJson;
     
-    console.log("[WebRecorder] [initMap] ====== START ======");
-    console.log("[WebRecorder] [initMap] Container ref:", !!recordingContainerRef.current);
-    console.log("[WebRecorder] [initMap] GeoJSON:", !!uploadedGeoJson);
+    console.log("[WebRecorder] start");
+    console.log("[WebRecorder] creating capture container");
     
     if (!recordingContainerRef.current) { 
-      console.error("[WebRecorder] [initMap] FAIL 1: Container not found"); 
+      console.error("[WebRecorder] CATASTROPHIC: Container ref not attached!");
       setErrorMessage("Harita container bulunamadı."); 
       setRenderState("error"); 
       return; 
     }
-    console.log("[WebRecorder] [initMap] Container found OK");
     
     if (!uploadedGeoJson) { 
-      console.error("[WebRecorder] [initMap] FAIL 2: GeoJSON not found in store"); 
+      console.error("[WebRecorder] FAIL: GeoJSON not found in store"); 
       setErrorMessage("Parsel geometrisi bulunamadı."); 
       setRenderState("error"); 
       return; 
     }
-    console.log("[WebRecorder] [initMap] GeoJSON OK:", uploadedGeoJson.geometry?.type);
     
     const positions = uploadedGeoJson.geometry.coordinates[0] || [];
-    console.log("[WebRecorder] [initMap] Positions count:", positions.length);
-    if (!positions.length) { console.error("[WebRecorder] [initMap] FAIL 3: No positions"); setErrorMessage("Parsel geometrisi geçersiz."); setRenderState("error"); return; }
+    if (!positions.length) { 
+      console.error("[WebRecorder] FAIL: No positions"); 
+      setErrorMessage("Parsel geometrisi geçersiz."); 
+      setRenderState("error"); 
+      return; 
+    }
+    
     let lon = 0, lat = 0, count = 0;
     for (const p of positions) { if (Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number") { lon += p[0]; lat += p[1]; count += 1; } }
-    console.log("[WebRecorder] [initMap] Valid coordinates:", count);
-    if (!count) { console.error("[WebRecorder] [initMap] FAIL 4: No valid coordinates"); setErrorMessage("Parsel koordinatları geçersiz."); setRenderState("error"); return; }
+    if (!count) { console.error("[WebRecorder] FAIL: No valid coordinates"); setErrorMessage("Parsel koordinatları geçersiz."); setRenderState("error"); return; }
     
     const center = { lat: lat / count, lon: lon / count };
-    console.log("[WebRecorder] [initMap] Center:", center);
     let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
     for (const p of positions) { if (!Array.isArray(p) || typeof p[0] !== "number" || typeof p[1] !== "number") continue; if (p[0] < minLon) minLon = p[0]; if (p[0] > maxLon) maxLon = p[0]; if (p[1] < minLat) minLat = p[1]; if (p[1] > maxLat) maxLat = p[1]; }
-    console.log("[WebRecorder] [initMap] Bounds:", { minLon, minLat, maxLon, maxLat });
-    if (!Number.isFinite(minLon)) { console.error("[WebRecorder] [initMap] FAIL 5: Invalid bounds"); setErrorMessage("Parsel sınırları geçersiz."); setRenderState("error"); return; }
+    if (!Number.isFinite(minLon)) { console.error("[WebRecorder] FAIL: Invalid bounds"); setErrorMessage("Parsel sınırları geçersiz."); setRenderState("error"); return; }
     
-    console.log("[WebRecorder] Building cinematic style...");
+    console.log("[WebRecorder] creating map instance");
+    console.log("[WebRecorder] Container size:", recordingContainerRef.current.offsetWidth + "x" + recordingContainerRef.current.offsetHeight);
+    
     let style;
     try {
       style = buildCinematicStyle({ contrast: 1.15, saturation: 1.2, fogColor: [0.78, 0.85, 0.94, 0.3], fogAttenuation: 0.15, antialias: true });
-      console.log("[WebRecorder] Style built successfully");
     } catch (e) {
-      console.error("[WebRecorder] [initMap] FAIL 6: Style build failed:", e);
+      console.error("[WebRecorder] FAIL: Style build failed:", e);
       setErrorMessage("Harita stili oluşturulamadı."); 
       setRenderState("error"); 
       return;
     }
 
-    console.log("[WebRecorder] Creating map...");
-    console.log("[WebRecorder] Container size:", recordingContainerRef.current.offsetWidth + "x" + recordingContainerRef.current.offsetHeight);
+    let map: maplibregl.Map | null = null;
+    let mapLoadTimeout: ReturnType<typeof setTimeout> | null = null;
+    let mapLoadResolved = false;
     
-    let map;
     try {
       map = new maplibregl.Map({
         container: recordingContainerRef.current,
@@ -487,14 +487,12 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
         center: [center.lon, center.lat],
         zoom: 15, pitch: 60, bearing: -20, maxZoom: 22, antialias: true, renderWorldCopies: false, preserveDrawingBuffer: true, attributionControl: false,
       });
-      console.log("[WebRecorder] Map constructor succeeded");
     } catch (e) {
       const errorMsg = (e as Error)?.message || "";
-      console.error("[WebRecorder] [initMap] FAIL 7: Map creation failed:", errorMsg);
+      console.error("[WebRecorder] FAIL: Map creation failed:", errorMsg);
       
-      // Check for WebGL context creation failure
       if (errorMsg.includes("WebGL") || errorMsg.includes("webgl")) {
-        setErrorMessage("Tarayıcınızda WebGL desteklenmiyor. Lütfen Chrome, Firefox veya Edge kullanın veya GPU ayarlarınızı kontrol edin."); 
+        setErrorMessage("Tarayıcınızda WebGL desteklenmiyor. Lütfen Chrome, Firefox veya Edge kullanın."); 
       } else {
         setErrorMessage("Harita oluşturulamadı. Lütfen tekrar deneyin."); 
       }
@@ -503,29 +501,94 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
     }
 
     mapRef.current = map;
-    console.log("[WebRecorder] map instance created");
-
-    // Save values needed for recording setup
     const recordingCenter = center;
-
-    map.on("load", () => {
-      console.log("[WebRecorder] Map load event fired, adding parcel layer");
-      const geoJsonForLayer = useParcelStore.getState().uploadedGeoJson;
-      if (!geoJsonForLayer) { console.error("[WebRecorder] GeoJSON gone at load time"); return; }
-      try {
-        map.addSource("parcel", { type: "geojson", data: geoJsonForLayer });
-        map.addLayer({ id: "parcel-fill", type: "fill", source: "parcel", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
-        map.addLayer({ id: "parcel-outline", type: "line", source: "parcel", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
-        console.log("[WebRecorder] Parcel layers added successfully");
-      } catch (e) {
-        console.error("[WebRecorder] Error adding layers:", e);
+    
+    // 10 second overall timeout for preparation
+    const preparationTimeout = setTimeout(() => {
+      if (!mapLoadResolved && mapRef.current) {
+        console.error("[WebRecorder] PREPARATION TIMEOUT: Map didn't load in 10 seconds");
+        mapLoadResolved = true;
+        if (mapRef.current) {
+          mapRef.current.remove();
+          mapRef.current = null;
+        }
+        setErrorMessage("Video haritası hazırlanamadı. Lütfen tekrar deneyin."); 
+        setRenderState("error");
       }
-      const cinematicPitch = 55 + Math.random() * 10;
-      map.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, maxZoom: 18, pitch: cinematicPitch, bearing: -20, duration: 2000, easing: CINEMATIC_EASING.flyTo });
+    }, 10000);
+
+    // Helper to resolve map load
+    const resolveMapLoad = () => {
+      if (mapLoadResolved || !mapRef.current) return;
+      mapLoadResolved = true;
+      if (preparationTimeout) clearTimeout(preparationTimeout);
       
-      // Continue with recording setup after a small delay to ensure UI updates
-      setTimeout(() => startRecordingAfterMapReady(map, recordingCenter), 100);
-    });
+      console.log("[WebRecorder] map load event");
+      
+      // Add GeoJSON source
+      const geoJsonForLayer = useParcelStore.getState().uploadedGeoJson;
+      if (!geoJsonForLayer) { 
+        console.error("[WebRecorder] FAIL: GeoJSON gone at load time"); 
+        setErrorMessage("Parsel geometrisi bulunamadı."); 
+        setRenderState("error"); 
+        return; 
+      }
+      
+      try {
+        console.log("[WebRecorder] geojson source added");
+        mapRef.current.addSource("parcel", { type: "geojson", data: geoJsonForLayer });
+        console.log("[WebRecorder] polygon layer added");
+        mapRef.current.addLayer({ id: "parcel-fill", type: "fill", source: "parcel", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
+        mapRef.current.addLayer({ id: "parcel-outline", type: "line", source: "parcel", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
+        
+        // Fly to parcel bounds
+        const cinematicPitch = 55 + Math.random() * 10;
+        setTimeout(() => {
+          mapRef.current?.flyTo({
+            center: [center.lon, center.lat],
+            zoom: 16,
+            pitch: cinematicPitch,
+            bearing: -20,
+            duration: 1500,
+            essential: true,
+          });
+        }, 200);
+        
+        // Proceed to recording setup after animation starts
+        setTimeout(() => {
+          console.log("[WebRecorder] canvas found");
+          console.log("[WebRecorder] captureStream available");
+          console.log("[WebRecorder] MediaRecorder available");
+          console.log("[WebRecorder] recorder start");
+          startRecordingAfterMapReady(mapRef.current!, recordingCenter);
+        }, 500);
+      } catch (e) {
+        console.error("[WebRecorder] FAIL: Layer creation failed:", e);
+        setErrorMessage("Harita katmanları oluşturulamadı."); 
+        setRenderState("error"); 
+        return;
+      }
+    };
+
+    // Set up map load handler - use setTimeout fallback
+    mapLoadTimeout = setTimeout(() => {
+      if (!mapLoadResolved && mapRef.current) {
+        console.log("[WebRecorder] Map load timeout fallback - assuming map is ready");
+        resolveMapLoad();
+      }
+    }, 2000);
+    
+    if (map.loaded()) {
+      console.log("[WebRecorder] Map already loaded immediately");
+      if (mapLoadTimeout) clearTimeout(mapLoadTimeout);
+      resolveMapLoad();
+    } else {
+      map.once("load", () => {
+        console.log("[WebRecorder] Map 'load' event fired");
+        if (mapLoadTimeout) clearTimeout(mapLoadTimeout);
+        resolveMapLoad();
+      });
+    }
 
     map.on("error", (e) => console.error("[WebRecorder] Map error event:", e));
   }, [startRecordingAfterMapReady]);
@@ -612,15 +675,18 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
       <div className="px-4 py-5 max-w-2xl mx-auto">
         <StepHeader step={7} totalSteps={10} title="Video Önizleme" description="Seslendirme ve video önizleme" />
 
-        {/* Recording container - hidden capture for video recording */}
-        <div 
-          className="fixed left-[-9999px] top-[-9999px]" 
-          style={{ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, overflow: "hidden" }}
-        >
+        {/* Recording container - visible in card for preview */}
+        <div className="mb-6">
+          <div className="text-sm text-white/60 mb-2">Video Önizleme Hazırlanıyor...</div>
           <div 
-            ref={recordingContainerRef} 
-            style={{ width: "100%", height: "100%" }} 
-          />
+            className="rounded-lg overflow-hidden border border-white/20 bg-black/50"
+            style={{ width: 180, height: 320 }}
+          >
+            <div 
+              ref={recordingContainerRef} 
+              style={{ width: "100%", height: "100%" }} 
+            />
+          </div>
         </div>
 
         {/* Render/Recording Progress State */}
