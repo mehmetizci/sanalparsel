@@ -241,6 +241,9 @@ export interface ParcelState {
   ttsAudio: TTSAudioState;
   currentProjectId: string | null;
   
+  // Active recording map instance (for WEBM capture) - NOT persisted
+  recordingMapInstance: unknown | null;
+  
   // Actions
   setParcelData: (data: {
     geoJson?: Feature<Polygon | MultiPolygon>;
@@ -289,6 +292,10 @@ export interface ParcelState {
   setVideoSettings: (settings: Partial<VideoSettingsState> | ((prev: VideoSettingsState) => VideoSettingsState)) => void;
   clearDroneSettings: () => void;
   
+  // Recording map actions (for WEBM capture)
+  setRecordingMap: (map: unknown | null) => void;
+  getRecordingMap: () => unknown | null;
+  
   // TTS Audio actions
   setTTSAudio: (audio: Partial<TTSAudioState>) => void;
   clearTTSAudio: () => void;
@@ -303,7 +310,7 @@ export interface ParcelState {
 
 export const useParcelStore = create<ParcelState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       uploadedGeoJson: null,
       parcelMetadata: null,
       parcelBounds: null,
@@ -348,6 +355,9 @@ export const useParcelStore = create<ParcelState>()(
         speed: 1.55,
       },
       currentProjectId: null,
+      
+      // Recording map instance - NOT persisted
+      recordingMapInstance: null,
 
       setParcelData: (data) => set((state) => {
         const updates: Partial<ParcelState> = {
@@ -494,6 +504,10 @@ export const useParcelStore = create<ParcelState>()(
         },
         cameraSequence: null,
       }),
+      
+      // Recording map actions - NOT persisted (map instance can't be serialized)
+      setRecordingMap: (map) => set({ recordingMapInstance: map }),
+      getRecordingMap: () => get().recordingMapInstance,
       
       // TTS Audio actions
       setTTSAudio: (audio) => set((state) => ({
