@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useParcelStore } from "@/lib/parcel-store";
-import { interpolateCameraStep } from "@/lib/camera-sequence";
+import { buildCameraSequence, interpolateCameraStep } from "@/lib/camera-sequence";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 
@@ -55,103 +55,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   const preparationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const startTimeRef = useRef<number>(0);
-
-  // Build camera sequence from drone settings if not available
-  const cameraSequence = useCallback(() => {
-    // Log drone settings being used
-    console.log("[WebRecorder] drone settings used:", JSON.stringify(droneSettings, null, 2));
-    
-    if (!droneSettings) {
-      console.log("[WebRecorder] No drone settings found - using defaults");
-      // Return default sequence
-      return {
-        steps: [{
-          mode: "orbit360" as const,
-          duration: 30,
-          startHeight: 300,
-          endHeight: 200,
-          pitch: 55,
-          bearingFrom: 0,
-          bearingTo: 360,
-          easing: "cinematic" as const,
-        }],
-        totalDuration: 30,
-      };
-    }
-    
-    // Build camera sequence from drone settings
-    const { duration, startHeight, cameraFeel, cameraModes } = droneSettings;
-    
-    if (!cameraModes || cameraModes.length === 0) {
-      console.log("[WebRecorder] No camera modes selected - using default orbit360");
-      return {
-        steps: [{
-          mode: "orbit360" as const,
-          duration: duration || 30,
-          startHeight: startHeight || 300,
-          endHeight: (startHeight || 300) - 100,
-          pitch: cameraFeel === "dynamic" ? 62 : cameraFeel === "soft" ? 47 : 57,
-          bearingFrom: 0,
-          bearingTo: 360,
-          easing: cameraFeel || "cinematic",
-        }],
-        totalDuration: duration || 30,
-      };
-    }
-    
-    // Distribute duration among modes
-    const numModes = cameraModes.length;
-    const durationPerMode = Math.floor((duration || 30) / numModes);
-    
-    // Get pitch range based on camera feel
-    const pitchRanges = {
-      soft: { min: 45, max: 50 },
-      cinematic: { min: 55, max: 60 },
-      dynamic: { min: 60, max: 65 },
-    };
-    const pitchRange = pitchRanges[cameraFeel || "cinematic"];
-    
-    // Calculate height descent
-    const totalHeightDrop = (startHeight || 300) - 50;
-    const heightDropPerMode = Math.floor(totalHeightDrop / numModes);
-    
-    // Bearing ranges per mode
-    const bearingRanges: Record<string, { from: number; to: number }> = {
-      orbit360: { from: 0, to: cameraFeel === "dynamic" ? 420 : 360 },
-      spiralDescend: { from: 0, to: cameraFeel === "dynamic" ? 180 : 90 },
-      topView: { from: 0, to: 0 },
-      lowPass: { from: 0, to: cameraFeel === "dynamic" ? 270 : 180 },
-      fourCorners: { from: 0, to: 360 },
-    };
-    
-    const steps = cameraModes.map((mode, index) => {
-      const range = bearingRanges[mode] || { from: 0, to: 180 };
-      const currentStartHeight = (startHeight || 300) - (heightDropPerMode * index);
-      const currentEndHeight = currentStartHeight - heightDropPerMode;
-      
-      // Add variation to pitch
-      const pitchVariation = (pitchRange.max - pitchRange.min) * 0.1;
-      const pitch = pitchRange.min + Math.random() * pitchVariation;
-      
-      console.log(`[WebRecorder] Camera step ${index}: mode=${mode}, height=${currentStartHeight}m→${currentEndHeight}m, pitch=${pitch}°, bearing=${range.from}°→${range.to}°`);
-      
-      return {
-        mode,
-        duration: durationPerMode,
-        startHeight: currentStartHeight,
-        endHeight: currentEndHeight,
-        pitch: Math.round(pitch),
-        bearingFrom: range.from,
-        bearingTo: range.to,
-        easing: cameraFeel || "cinematic",
-      };
-    });
-    
-    return {
-      steps,
-      totalDuration: steps.reduce((sum, step) => sum + step.duration, 0),
-    };
-  }, [droneSettings]);
+  const cameraSequenceRef = useRef<ReturnType<typeof buildCameraSequence> | null>(null);
 
   const totalDuration = droneSettings?.duration || 30;
 
@@ -456,10 +360,29 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
       }
     }
 
-    // All checks passed - start recording
-    console.log("[VideoCreate] All checks passed - starting recording");
+    // All checks passed - build camera sequence and start recording
+    console.log("[VideoCreate] All checks passed - building camera sequence");
+    
+    // Build camera sequence from drone settings
+    if (!droneSettings) {
+      console.log("[WebRecorder] No drone settings found - using defaults");
+    } else {
+      console.log("[WebRecorder] drone settings used:", JSON.stringify(droneSettings, null, 2));
+    }
+    
+    cameraSequenceRef.current = buildCameraSequence(
+      droneSettings || {
+        duration: 30,
+        startHeight: 300,
+        cameraFeel: "cinematic",
+        cameraModes: ["orbit360"],
+      },
+      uploadedGeoJson || undefined
+    );
+    
+    console.log("[VideoCreate] Starting recording with camera sequence");
     startRecording(map, center);
-  }, []);
+  }, [droneSettings, uploadedGeoJson, parcelCenter]);
 
   // Start recording with canvas capture
   const startRecording = useCallback((map: mapboxgl.Map, center: { lat: number; lon: number }) => {
@@ -533,11 +456,11 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
     const progress = Math.min(elapsed / totalDuration, 1);
     setRenderProgress(Math.round(progress * 80));
 
-    // Get current sequence (rebuilt each frame to get fresh values)
-    const sequence = cameraSequence();
+    // Get sequence from ref
+    const sequence = cameraSequenceRef.current;
     
     // Get current step and interpolation
-    if (sequence.steps.length > 0) {
+    if (sequence && sequence.steps.length > 0) {
       let accumulatedTime = 0;
       
       for (const step of sequence.steps) {
@@ -547,7 +470,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
           
           // Log camera state for debugging
           if (Math.floor(elapsed) % 5 === 0 && Math.floor(elapsed) > 0) {
-            console.log(`[WebRecorder] Camera: zoom=${camera.zoom.toFixed(2)}, pitch=${camera.pitch}°, bearing=${camera.bearing.toFixed(0)}°, center=[${camera.center[0].toFixed(5)}, ${camera.center[1].toFixed(5)}]`);
+            console.log(`[WebRecorder] Mode: ${step.mode}, zoom=${camera.zoom.toFixed(2)}, pitch=${camera.pitch.toFixed(1)}°, bearing=${camera.bearing.toFixed(0)}°`);
           }
           
           map.jumpTo({

@@ -44,15 +44,23 @@ export interface DroneSettingsState {
   cameraModes: CameraSequenceMode[];
 }
 
+// Extended step type with mode-specific parameters
 export interface CameraSequenceStep {
   mode: CameraSequenceMode;
   duration: number;
   startHeight: number;
   endHeight: number;
   pitch: number;
+  pitchEnd: number; // For modes that change pitch (e.g., spiralDescend, topView)
   bearingFrom: number;
   bearingTo: number;
+  zoomFrom: number;
+  zoomTo: number;
   easing: CameraFeel;
+  // For fourCorners mode: array of corner coordinates
+  corners?: Array<{ lon: number; lat: number }>;
+  // Pause at start for dramatic effect
+  pauseAtStart?: number;
 }
 
 export interface CameraSequence {
