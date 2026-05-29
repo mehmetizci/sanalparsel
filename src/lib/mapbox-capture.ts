@@ -89,35 +89,18 @@ export class MapboxFrameCapture {
     }
 
     console.log("[MapboxCapture] Launching Chrome...");
+    console.log(`[MapboxCapture] Puppeteer executable path: ${puppeteer.executablePath()}`);
     
-    let browser;
-    
-    // Try PUPPETEER_EXECUTABLE_PATH first if set
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-      console.log(`[MapboxCapture] Using PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
-      browser = await puppeteer.launch({
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-        ],
-      });
-    } else {
-      // Default: Puppeteer finds Chrome automatically from cache
-      console.log("[MapboxCapture] Using default Chrome detection...");
-      browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-        ],
-      });
-    }
+    // Puppeteer will find Chrome automatically from its bundled browser cache
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
     
     this.browser = browser;
     console.log("[MapboxCapture] Chrome launched successfully!");
