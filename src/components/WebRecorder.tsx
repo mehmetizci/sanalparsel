@@ -117,7 +117,7 @@ export default function WebRecorder({
     
     // Calculate zoom based on height (higher = zoom out)
     const heightRange = step.startHeight - step.endHeight;
-    const heightProgress = (step.startHeight - (step.startHeight - heightRange * ease)) / step.startHeight;
+
     const baseZoom = 16 - Math.log2(step.startHeight / 100);
     const zoomOffset = heightRange / 500 * 0.5;
     const zoom = baseZoom + (zoomOffset * ease);

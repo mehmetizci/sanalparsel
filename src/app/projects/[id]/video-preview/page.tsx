@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
-import { Project, Narration, Video, TTSProvider, OpenAIVoice } from "@/types";
+import { Project, Narration, TTSProvider, OpenAIVoice } from "@/types";
 import { useParcelStore, CameraSequenceStep } from "@/lib/parcel-store";
 import { buildCinematicStyle, CINEMATIC_EASING } from "@/lib/cinematic-renderer";
 import AppShell from "@/components/AppShell";
@@ -30,12 +30,12 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
   const droneSettings = useParcelStore((state) => state.droneSettings);
   const cameraSequence = useParcelStore((state) => state.cameraSequence);
   const parcelCenter = useParcelStore((state) => state.parcelCenter);
-  const parcelBounds = useParcelStore((state) => state.parcelBounds);
+
 
   // State
   const [project, setProject] = useState<Project | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
-  const [video, setVideo] = useState<Video | null>(null);
+
   const [voiceType, setVoiceType] = useState<OpenAIVoice>("nova");
   const [loading, setLoading] = useState(true);
   const [textExpanded, setTextExpanded] = useState(false);
@@ -175,7 +175,6 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         .single();
 
       if (!cancelled && videoData) {
-        setVideo(videoData as Video);
         // Only show preparing state if there's a COMPLETED render to resume
         // Not just any video record - this prevents stale state from showing
         if (videoData.status === "completed") {
