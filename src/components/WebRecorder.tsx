@@ -447,7 +447,7 @@ export default function WebRecorder({
             {state.phase === "recording" && (
               <div className="mb-4 flex items-center justify-center gap-3">
                 <div className="w-4 h-4 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-red-400 font-medium">Kayıt Yapılıyor</span>
+                <span className="text-red-400 font-medium">Video Oluşturuluyor</span>
               </div>
             )}
 
@@ -470,12 +470,8 @@ export default function WebRecorder({
 
             {/* Time and progress */}
             <p className="text-white/60 text-sm">
-              {state.phase === "recording" && (
-                <>
-                  {state.elapsed}/{Math.floor(state.duration / 1000)} sn • %{state.progress}
-                </>
-              )}
-              {state.phase === "preparing" && `Yükleniyor: %{state.progress}`}
+              {state.phase === "recording" && `${state.elapsed}/${Math.floor(state.duration / 1000)} sn`}
+              {state.phase === "preparing" && `Yükleniyor`}
               {state.phase === "processing" && "Video hazırlanıyor..."}
             </p>
           </div>

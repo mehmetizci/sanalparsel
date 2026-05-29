@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useRef, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/lib/supabase";
-import { Project, Narration, TTSProvider, OpenAIVoice } from "@/types";
-import { useParcelStore, CameraSequenceStep } from "@/lib/parcel-store";
+import { Project, Narration, ParcelGeoJson, TTSProvider, OpenAIVoice } from "@/types";
+import { useParcelStore, CameraSequenceStep, ParcelMetadata } from "@/lib/parcel-store";
 import { buildCinematicStyle, CINEMATIC_EASING } from "@/lib/cinematic-renderer";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
@@ -23,14 +23,31 @@ const VIDEO_FPS = 30;
 const PREPARATION_TIMEOUT_MS = 10000;
 
 export default function VideoPreviewPage({ params }: { params: { id: string } }) {
+  return (
+    <Suspense fallback={
+      <AppShell>
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+        </div>
+      </AppShell>
+    }>
+      <VideoPreviewPageInner params={params} />
+    </Suspense>
+  );
+}
+
+function VideoPreviewPageInner({ params }: { params: { id: string } }) {
   const { id } = params;
   const router = useRouter();
+
+  // Demo mode: Check URL params for demo mode
+  const searchParams = useSearchParams();
+  const isDemo = searchParams?.get("demo") === "true";
 
   // Store state
   const uploadedGeoJson = useParcelStore((state) => state.uploadedGeoJson);
   const droneSettings = useParcelStore((state) => state.droneSettings);
   const cameraSequence = useParcelStore((state) => state.cameraSequence);
-  const parcelCenter = useParcelStore((state) => state.parcelCenter);
 
   // State
   const [project, setProject] = useState<Project | null>(null);
@@ -119,6 +136,87 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     const fetchData = async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
+      
+      // Demo mode: Skip auth check if demo=true in URL
+      if (isDemo) {
+        console.log("[WebRecorder] Demo mode - skipping auth");
+        
+        // Initialize demo store data if not set
+        if (!uploadedGeoJson) {
+          const demoGeoJson: ParcelGeoJson = {
+            type: "Feature",
+            properties: {
+              Il: "İzmir",
+              Ilce: "Çiğli",
+              Mahalle: "Harmandalı",
+              Ada: "2406",
+              ParselNo: "9",
+              Alan: "1234",
+              Nitelik: "Arsa",
+            },
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [27.1418, 38.4228],
+                  [27.1438, 38.4228],
+                  [27.1438, 38.4248],
+                  [27.1418, 38.4248],
+                  [27.1418, 38.4228],
+                ],
+              ],
+            },
+          };
+          useParcelStore.getState().setFromParsed({
+            geoJson: demoGeoJson,
+            metadata: demoGeoJson.properties as ParcelMetadata,
+          });
+        }
+        
+        // Set demo narration with audio URL (simulated for testing)
+        const demoNarration: Narration = {
+          id: "demo-narration",
+          project_id: id,
+          text: "İzmir Çiğli ilçesinde, Harmandalı mahallesinde yer alan bu 1234 metrekarelik arsa, konut yapılaşması için ideal bir lokasyonda bulunmaktadır. Çevresinde cadde ve sokak yolları mevcut olup, altyapı hizmetlerine yakın mesafededir.",
+          audio_url: "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=", // Placeholder for demo
+          audio_status: "ready",
+          voice_type: "nova",
+          tts_provider: "demo",
+          tts_speed: 1.55,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        
+        setNarration(demoNarration);
+        setVoiceState("ready");
+
+        // Set minimal demo project
+        setProject({
+          id,
+          user_id: "demo",
+          title: searchParams.get("title") || "Demo Proje",
+          short_title: (searchParams.get("title") || "Demo").substring(0, 20),
+          geojson: null,
+          properties: null,
+          city: "İzmir",
+          district: "Çiğli",
+          neighborhood: "Harmandalı",
+          ada: "2406",
+          parsel: "9",
+          area_m2: 1234,
+          drone_settings: null,
+          narration: demoNarration.text,
+          audio_url: null,
+          video_url: null,
+          thumbnail_url: null,
+          custom_note: null,
+          status: "draft",
+          created_at: new Date().toISOString(),
+        });
+        setLoading(false);
+        return;
+      }
+      
       if (!user || !mountedRef.current) { router.push("/login"); return; }
 
       const { data: projectData } = await supabase.from("projects").select("*").eq("id", id).eq("user_id", user.id).single();
@@ -140,7 +238,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     };
     fetchData();
     return () => { cancelled = true; };
-  }, [id, router]);
+  }, [id, router, isDemo, searchParams]);
 
   const handleGenerateVoice = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -201,44 +299,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     return { center: [center.lon + offsetLon, center.lat + offsetLat] as [number, number], zoom: Math.min(18, Math.max(14, zoom)), pitch, bearing: (bearing + 360) % 360 };
   }, []);
 
-  const initializeRecordingMap = useCallback(() => {
-    if (!recordingContainerRef.current || !uploadedGeoJson) { console.log("[WebRecorder] Container or GeoJSON not found"); return null; }
-    const positions = uploadedGeoJson.geometry.coordinates[0] || [];
-    if (!positions.length) { console.log("[WebRecorder] No positions in GeoJSON"); return null; }
-    let lon = 0, lat = 0, count = 0;
-    for (const p of positions) { if (Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number") { lon += p[0]; lat += p[1]; count += 1; } }
-    if (!count) return null;
-    const center = { lat: lat / count, lon: lon / count };
-    let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
-    for (const p of positions) { if (!Array.isArray(p) || typeof p[0] !== "number" || typeof p[1] !== "number") continue; if (p[0] < minLon) minLon = p[0]; if (p[0] > maxLon) maxLon = p[0]; if (p[1] < minLat) minLat = p[1]; if (p[1] > maxLat) maxLat = p[1]; }
-    if (!Number.isFinite(minLon)) return null;
-    console.log("[WebRecorder] Initializing map with center:", center);
-
-    const style = buildCinematicStyle({ contrast: 1.15, saturation: 1.2, fogColor: [0.78, 0.85, 0.94, 0.3], fogAttenuation: 0.15, antialias: true });
-
-    const map = new maplibregl.Map({
-      container: recordingContainerRef.current,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      style: style as any,
-      center: [center.lon, center.lat],
-      zoom: 15, pitch: 60, bearing: -20, maxZoom: 22, antialias: true, renderWorldCopies: false, preserveDrawingBuffer: true, attributionControl: false,
-    });
-
-    mapRef.current = map;
-    console.log("[WebRecorder] map instance created");
-
-    map.on("load", () => {
-      console.log("[WebRecorder] Map loaded, adding parcel layer");
-      map.addSource("parcel", { type: "geojson", data: uploadedGeoJson });
-      map.addLayer({ id: "parcel-fill", type: "fill", source: "parcel", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
-      map.addLayer({ id: "parcel-outline", type: "line", source: "parcel", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
-      map.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, maxZoom: 18, pitch: 55 + Math.random() * 10, bearing: -20, duration: 2000, easing: CINEMATIC_EASING.flyTo });
-    });
-
-    map.on("error", (e) => console.error("[WebRecorder] Map error:", e));
-    return map;
-  }, [uploadedGeoJson]);
-
+  // Define checkMediaRecorderSupport first since it's needed by other functions
   const checkMediaRecorderSupport = useCallback((): { supported: boolean; mimeType: string; error?: string } => {
     console.log("[WebRecorder] Checking MediaRecorder support...");
     if (typeof MediaRecorder === "undefined") { console.log("[WebRecorder] MediaRecorder not supported"); return { supported: false, mimeType: "", error: "Tarayıcınız video kaydını desteklemiyor. Chrome veya Edge ile deneyin." }; }
@@ -248,61 +309,27 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
     return { supported: true, mimeType };
   }, []);
 
-  const startRecording = useCallback(async () => {
-    if (!mountedRef.current) return;
-    if (isRecordingRef.current) return;
-
-    console.log("[WebRecorder] start clicked");
-
-    if (!uploadedGeoJson) { console.error("[WebRecorder] No GeoJSON available"); setErrorMessage("Parsel verisi bulunamadı. Lütfen parsel önizleme ekranına dönüp tekrar deneyin."); setRenderState("error"); return; }
-
-    const mediaSupport = checkMediaRecorderSupport();
-    if (!mediaSupport.supported) { setErrorMessage(mediaSupport.error || "Tarayıcınız video kaydını desteklemiyor."); setRenderState("error"); return; }
-
-    setRenderState("preparing");
-    renderStateRef.current = "preparing";
-    setRenderProgress(5);
-    setRenderElapsed(0);
-    setErrorMessage(null);
-
-    console.log("[WebRecorder] Initializing map...");
-    const map = initializeRecordingMap();
-    if (!map) { setErrorMessage("Harita hazır değil. Lütfen önce parsel önizleme ekranına dönüp tekrar deneyin."); setRenderState("error"); return; }
-    console.log("[WebRecorder] map instance found");
+  const startRecordingAfterMapReady = useCallback(async (map: maplibregl.Map, center: { lat: number; lon: number }) => {
     setRenderProgress(10);
 
-    const waitForMapReady = new Promise<boolean>((resolve) => {
-      let elapsed = 0;
-      const checkReady = () => {
-        if (!mountedRef.current || !mapRef.current) { resolve(false); return; }
-        if (mapRef.current.loaded()) { console.log("[WebRecorder] Map loaded and ready"); resolve(true); return; }
-        elapsed += 100;
-        if (elapsed >= PREPARATION_TIMEOUT_MS) { console.log("[WebRecorder] Map preparation timeout"); resolve(false); return; }
-        setTimeout(checkReady, 100);
-      };
-      checkReady();
-    });
-
+    console.log("[WebRecorder] Starting recording setup after map ready");
+    
     preparationTimeoutRef.current = setTimeout(() => {
-      if (renderStateRef.current === "preparing") { console.log("[WebRecorder] Preparation timeout reached"); setErrorMessage("Harita hazırlanması çok uzun sürüyor. Lütfen önce parsel önizleme ekranına dönüp tekrar deneyin."); setRenderState("error"); }
+      if (renderStateRef.current === "preparing") { console.log("[WebRecorder] Preparation timeout reached"); setErrorMessage("Harita hazırlanması çok uzun sürüyor. Lütfen tekrar deneyin."); setRenderState("error"); }
     }, PREPARATION_TIMEOUT_MS);
 
-    const mapReady = await waitForMapReady;
-
-    if (preparationTimeoutRef.current) { clearTimeout(preparationTimeoutRef.current); preparationTimeoutRef.current = null; }
-
-    if (!mapReady || !mapRef.current) { console.log("[WebRecorder] Map not ready"); setErrorMessage("Harita hazır değil. Lütfen önce parsel önizleme ekranına dönüp tekrar deneyin."); setRenderState("error"); return; }
+    if (!mapRef.current) { console.log("[WebRecorder] Map not ready"); setErrorMessage("Harita hazırlanması tamamlanamadı. Lütfen tekrar deneyin."); setRenderState("error"); return; }
 
     const canvas = mapRef.current.getCanvas();
-    console.log("[WebRecorder] canvas found");
-    if (!canvas) { setErrorMessage("Harita hazır değil. Lütfen önce parsel önizleme ekranına dönüp tekrar deneyin."); setRenderState("error"); return; }
+    console.log("[WebRecorder] canvas found, size:", canvas?.width + "x" + canvas?.height);
+    if (!canvas) { setErrorMessage("Canvas alınamadı. Lütfen tarayıcınızı yenileyin."); setRenderState("error"); return; }
 
     if (typeof canvas.captureStream !== "function") { console.log("[WebRecorder] captureStream not supported"); setErrorMessage("Tarayıcınız video kaydını desteklemiyor. Chrome veya Edge ile deneyin."); setRenderState("error"); return; }
     console.log("[WebRecorder] captureStream supported");
 
     const stream = canvas.captureStream(VIDEO_FPS);
     console.log("[WebRecorder] stream created from canvas");
-    const mimeType = mediaSupport.mimeType;
+    const mimeType = checkMediaRecorderSupport().mimeType;
     console.log("[WebRecorder] Using mime type:", mimeType);
 
     try {
@@ -326,7 +353,12 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       recorder.onerror = (e) => { console.error("[WebRecorder] Recorder error:", e); setErrorMessage("Video kaydı sırasında bir hata oluştu. Lütfen tekrar deneyin."); setRenderState("error"); };
 
       recorder.start(100);
-      console.log("[WebRecorder] recorder started");
+      console.log("[WebRecorder] recorder started", { 
+        fps: VIDEO_FPS,
+        dimensions: `${VIDEO_WIDTH}x${VIDEO_HEIGHT}`,
+        duration: (droneSettings?.duration || 30) * 1000,
+        quality: "8Mbps"
+      });
 
       isRecordingRef.current = true;
       setRenderState("recording");
@@ -337,11 +369,18 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       const duration = (droneSettings?.duration || 30) * 1000;
       const startTime = performance.now();
 
-      const positions = uploadedGeoJson.geometry.coordinates[0] || [];
-      let lon = 0, lat = 0, count = 0;
-      for (const p of positions) { if (Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number") { lon += p[0]; lat += p[1]; count += 1; } }
-      const center = count > 0 ? { lat: lat / count, lon: lon / count } : parcelCenter;
-      if (!center) { console.error("[WebRecorder] No center available"); setErrorMessage("Parsel merkezi bulunamadı."); setRenderState("error"); return; }
+      console.log("[WebRecorder] drone settings loaded", {
+        duration: droneSettings?.duration || 30,
+        cameraMode: droneSettings?.camera_mode || "orbit",
+        height: droneSettings?.height || 100,
+        pitch: droneSettings?.pitch || 55,
+        steps: cameraSequence?.steps?.length || 0
+      });
+
+      const geoJson = useParcelStore.getState().uploadedGeoJson;
+      if (!geoJson) { console.error("[WebRecorder] No GeoJSON for animation"); setErrorMessage("Parsel geometrisi bulunamadı."); setRenderState("error"); return; }
+      
+      const recordingCenter = center;
 
       const animate = (now: number) => {
         if (!isRecordingRef.current) return;
@@ -363,7 +402,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
         }
 
         if (currentStep && mapRef.current) {
-          const camera = interpolateCameraStep(currentStep, stepProgress, center);
+          const camera = interpolateCameraStep(currentStep, stepProgress, recordingCenter);
           mapRef.current.jumpTo({ center: camera.center, zoom: camera.zoom, pitch: camera.pitch, bearing: camera.bearing });
         }
 
@@ -373,12 +412,148 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       setTimeout(() => { animationRef.current = requestAnimationFrame(animate); }, 2000);
 
     } catch (err) {
-      console.error("[WebRecorder] Recording initialization error:", err);
+      console.error("[WebRecorder] Recording initialization error:", err, "Error name:", (err as Error)?.name, "Error message:", (err as Error)?.message);
       setErrorMessage("Video kaydı başlatılamadı. Lütfen tekrar deneyin.");
       setRenderState("error");
     }
 
-  }, [uploadedGeoJson, droneSettings, cameraSequence, parcelCenter, initializeRecordingMap, interpolateCameraStep, checkMediaRecorderSupport]);
+  }, [droneSettings, cameraSequence, interpolateCameraStep, checkMediaRecorderSupport]);
+
+  const initializeRecordingMap = useCallback(() => {
+    // Read directly from store to get the latest value
+    const uploadedGeoJson = useParcelStore.getState().uploadedGeoJson;
+    
+    console.log("[WebRecorder] [initMap] ====== START ======");
+    console.log("[WebRecorder] [initMap] Container ref:", !!recordingContainerRef.current);
+    console.log("[WebRecorder] [initMap] GeoJSON:", !!uploadedGeoJson);
+    
+    if (!recordingContainerRef.current) { 
+      console.error("[WebRecorder] [initMap] FAIL 1: Container not found"); 
+      setErrorMessage("Harita container bulunamadı."); 
+      setRenderState("error"); 
+      return; 
+    }
+    console.log("[WebRecorder] [initMap] Container found OK");
+    
+    if (!uploadedGeoJson) { 
+      console.error("[WebRecorder] [initMap] FAIL 2: GeoJSON not found in store"); 
+      setErrorMessage("Parsel geometrisi bulunamadı."); 
+      setRenderState("error"); 
+      return; 
+    }
+    console.log("[WebRecorder] [initMap] GeoJSON OK:", uploadedGeoJson.geometry?.type);
+    
+    const positions = uploadedGeoJson.geometry.coordinates[0] || [];
+    console.log("[WebRecorder] [initMap] Positions count:", positions.length);
+    if (!positions.length) { console.error("[WebRecorder] [initMap] FAIL 3: No positions"); setErrorMessage("Parsel geometrisi geçersiz."); setRenderState("error"); return; }
+    let lon = 0, lat = 0, count = 0;
+    for (const p of positions) { if (Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number") { lon += p[0]; lat += p[1]; count += 1; } }
+    console.log("[WebRecorder] [initMap] Valid coordinates:", count);
+    if (!count) { console.error("[WebRecorder] [initMap] FAIL 4: No valid coordinates"); setErrorMessage("Parsel koordinatları geçersiz."); setRenderState("error"); return; }
+    
+    const center = { lat: lat / count, lon: lon / count };
+    console.log("[WebRecorder] [initMap] Center:", center);
+    let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+    for (const p of positions) { if (!Array.isArray(p) || typeof p[0] !== "number" || typeof p[1] !== "number") continue; if (p[0] < minLon) minLon = p[0]; if (p[0] > maxLon) maxLon = p[0]; if (p[1] < minLat) minLat = p[1]; if (p[1] > maxLat) maxLat = p[1]; }
+    console.log("[WebRecorder] [initMap] Bounds:", { minLon, minLat, maxLon, maxLat });
+    if (!Number.isFinite(minLon)) { console.error("[WebRecorder] [initMap] FAIL 5: Invalid bounds"); setErrorMessage("Parsel sınırları geçersiz."); setRenderState("error"); return; }
+    
+    console.log("[WebRecorder] Building cinematic style...");
+    let style;
+    try {
+      style = buildCinematicStyle({ contrast: 1.15, saturation: 1.2, fogColor: [0.78, 0.85, 0.94, 0.3], fogAttenuation: 0.15, antialias: true });
+      console.log("[WebRecorder] Style built successfully");
+    } catch (e) {
+      console.error("[WebRecorder] [initMap] FAIL 6: Style build failed:", e);
+      setErrorMessage("Harita stili oluşturulamadı."); 
+      setRenderState("error"); 
+      return;
+    }
+
+    console.log("[WebRecorder] Creating map...");
+    console.log("[WebRecorder] Container size:", recordingContainerRef.current.offsetWidth + "x" + recordingContainerRef.current.offsetHeight);
+    
+    let map;
+    try {
+      map = new maplibregl.Map({
+        container: recordingContainerRef.current,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        style: style as any,
+        center: [center.lon, center.lat],
+        zoom: 15, pitch: 60, bearing: -20, maxZoom: 22, antialias: true, renderWorldCopies: false, preserveDrawingBuffer: true, attributionControl: false,
+      });
+      console.log("[WebRecorder] Map constructor succeeded");
+    } catch (e) {
+      const errorMsg = (e as Error)?.message || "";
+      console.error("[WebRecorder] [initMap] FAIL 7: Map creation failed:", errorMsg);
+      
+      // Check for WebGL context creation failure
+      if (errorMsg.includes("WebGL") || errorMsg.includes("webgl")) {
+        setErrorMessage("Tarayıcınızda WebGL desteklenmiyor. Lütfen Chrome, Firefox veya Edge kullanın veya GPU ayarlarınızı kontrol edin."); 
+      } else {
+        setErrorMessage("Harita oluşturulamadı. Lütfen tekrar deneyin."); 
+      }
+      setRenderState("error"); 
+      return;
+    }
+
+    mapRef.current = map;
+    console.log("[WebRecorder] map instance created");
+
+    // Save values needed for recording setup
+    const recordingCenter = center;
+
+    map.on("load", () => {
+      console.log("[WebRecorder] Map load event fired, adding parcel layer");
+      const geoJsonForLayer = useParcelStore.getState().uploadedGeoJson;
+      if (!geoJsonForLayer) { console.error("[WebRecorder] GeoJSON gone at load time"); return; }
+      try {
+        map.addSource("parcel", { type: "geojson", data: geoJsonForLayer });
+        map.addLayer({ id: "parcel-fill", type: "fill", source: "parcel", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
+        map.addLayer({ id: "parcel-outline", type: "line", source: "parcel", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
+        console.log("[WebRecorder] Parcel layers added successfully");
+      } catch (e) {
+        console.error("[WebRecorder] Error adding layers:", e);
+      }
+      const cinematicPitch = 55 + Math.random() * 10;
+      map.fitBounds([[minLon, minLat], [maxLon, maxLat]], { padding: 60, maxZoom: 18, pitch: cinematicPitch, bearing: -20, duration: 2000, easing: CINEMATIC_EASING.flyTo });
+      
+      // Continue with recording setup after a small delay to ensure UI updates
+      setTimeout(() => startRecordingAfterMapReady(map, recordingCenter), 100);
+    });
+
+    map.on("error", (e) => console.error("[WebRecorder] Map error event:", e));
+  }, [startRecordingAfterMapReady]);
+
+  const startRecording = useCallback(async () => {
+    if (!mountedRef.current) return;
+    if (isRecordingRef.current) return;
+
+    console.log("[WebRecorder] start clicked");
+
+    // Read directly from store to get latest value (important for demo mode)
+    const geoJson = useParcelStore.getState().uploadedGeoJson;
+    if (!geoJson) { console.error("[WebRecorder] No GeoJSON available"); setErrorMessage("Parsel geometrisi bulunamadı. Lütfen sayfayı yenileyin veya parsel seçimini kontrol edin."); setRenderState("error"); return; }
+
+    const mediaSupport = checkMediaRecorderSupport();
+    if (!mediaSupport.supported) { setErrorMessage(mediaSupport.error || "Tarayıcınız video kaydını desteklemiyor."); setRenderState("error"); return; }
+
+    setRenderState("preparing");
+    renderStateRef.current = "preparing";
+    setRenderProgress(5);
+    setRenderElapsed(0);
+    setErrorMessage(null);
+
+    // Defer map initialization to after React renders
+    // This is necessary because the container ref won't be attached until after the render
+    console.log("[WebRecorder] Scheduling map initialization after render...");
+    
+    // Use setTimeout(0) to defer to next tick after React renders
+    setTimeout(() => {
+      console.log("[WebRecorder] Deferred callback - initializing map");
+      initializeRecordingMap();
+    }, 0);
+  }, [initializeRecordingMap]);
 
   const handleCancelRender = useCallback(() => {
     console.log("[WebRecorder] Cancelling recording");
@@ -432,9 +607,15 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
       <div className="px-4 py-5 max-w-2xl mx-auto">
         <StepHeader step={7} totalSteps={10} title="Video Önizleme" description="Seslendirme ve video önizleme" />
 
-        {/* Hidden recording container */}
-        <div className="fixed opacity-0 pointer-events-none" style={{ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, overflow: "hidden" }}>
-          <div ref={recordingContainerRef} className="w-full h-full" style={{ width: VIDEO_WIDTH, height: VIDEO_HEIGHT }} />
+        {/* Recording container - hidden capture for video recording */}
+        <div 
+          className="fixed left-[-9999px] top-[-9999px]" 
+          style={{ width: VIDEO_WIDTH, height: VIDEO_HEIGHT, overflow: "hidden" }}
+        >
+          <div 
+            ref={recordingContainerRef} 
+            style={{ width: "100%", height: "100%" }} 
+          />
         </div>
 
         {/* Render/Recording Progress State */}
@@ -530,7 +711,7 @@ export default function VideoPreviewPage({ params }: { params: { id: string } })
             )}
 
             <div className="flex gap-3 mb-4">
-              <button onClick={() => { abortControllerRef.current?.abort(); cleanupRecording(); setRenderState("idle"); router.push(`/projects/${id}/narration`); }} className="flex-1 py-3 rounded-xl border border-white/[0.1] text-white/70 text-sm hover:bg-white/[0.05] transition-all font-medium">Geri</button>
+              <button onClick={() => { abortControllerRef.current?.abort(); cleanupRecording(); setRenderState("idle"); router.push(`/projects/${id}/preview${isDemo ? '?demo=true' : ''}`); }} className="flex-1 py-3 rounded-xl border border-white/[0.1] text-white/70 text-sm hover:bg-white/[0.05] transition-all font-medium">Geri</button>
               <button disabled={!hasAudio || isRenderActive()} onClick={handleCreateVideo} className={`flex-1 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${hasAudio && !isRenderActive() ? "bg-gradient-to-r from-primary to-blue-500 text-white shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30" : "bg-white/[0.05] text-white/30 border border-white/[0.05]"}`}>
                 <span>🎬</span><span>Sinematik Video Oluştur</span>
               </button>
