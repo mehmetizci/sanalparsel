@@ -518,28 +518,53 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
     }, 10000);
 
     // Helper to resolve map load
-    const resolveMapLoad = () => {
+    const resolveMapLoad = async () => {
       if (mapLoadResolved || !mapRef.current) return;
       mapLoadResolved = true;
       if (preparationTimeout) clearTimeout(preparationTimeout);
       
       console.log("[WebRecorder] map load event");
       
+      // Ensure style is loaded before adding sources/layers
+      if (!mapRef.current.isStyleLoaded()) {
+        console.log("[WebRecorder] Style not loaded, waiting for style.load event...");
+        await new Promise<void>((resolve) => {
+          mapRef.current!.once("style.load", () => {
+            console.log("[WebRecorder] Style loaded event fired");
+            resolve();
+          });
+          // Fallback timeout
+          setTimeout(resolve, 2000);
+        });
+      }
+      
       // Add GeoJSON source
       const geoJsonForLayer = useParcelStore.getState().uploadedGeoJson;
+      console.log("[WebRecorder] geojson exists:", !!geoJsonForLayer);
+      console.log("[WebRecorder] geojson type:", geoJsonForLayer?.type);
+      console.log("[WebRecorder] geometry type:", geoJsonForLayer?.geometry?.type);
+      console.log("[WebRecorder] coordinates count:", geoJsonForLayer?.geometry?.coordinates?.[0]?.length);
+      
       if (!geoJsonForLayer) { 
-        console.error("[WebRecorder] FAIL: GeoJSON gone at load time"); 
+        console.error("[WebRecorder] FAIL: GeoJSON not found in store"); 
         setErrorMessage("Parsel geometrisi bulunamadı."); 
         setRenderState("error"); 
         return; 
       }
       
       try {
+        // Remove any existing layers/sources first (duplicate protection)
+        if (mapRef.current.getLayer("parcel-fill")) { mapRef.current.removeLayer("parcel-fill"); console.log("[WebRecorder] removed existing parcel-fill layer"); }
+        if (mapRef.current.getLayer("parcel-outline")) { mapRef.current.removeLayer("parcel-outline"); console.log("[WebRecorder] removed existing parcel-outline layer"); }
+        if (mapRef.current.getSource("parcel-source")) { mapRef.current.removeSource("parcel-source"); console.log("[WebRecorder] removed existing parcel-source source"); }
+        
+        console.log("[WebRecorder] geojson source adding...");
+        mapRef.current.addSource("parcel-source", { type: "geojson", data: geoJsonForLayer });
         console.log("[WebRecorder] geojson source added");
-        mapRef.current.addSource("parcel", { type: "geojson", data: geoJsonForLayer });
+        console.log("[WebRecorder] polygon layer adding...");
+        mapRef.current.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-source", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
+        mapRef.current.addLayer({ id: "parcel-outline", type: "line", source: "parcel-source", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
         console.log("[WebRecorder] polygon layer added");
-        mapRef.current.addLayer({ id: "parcel-fill", type: "fill", source: "parcel", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
-        mapRef.current.addLayer({ id: "parcel-outline", type: "line", source: "parcel", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
         
         // Fly to parcel bounds
         const cinematicPitch = 55 + Math.random() * 10;
