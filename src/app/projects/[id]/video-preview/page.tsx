@@ -670,27 +670,28 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
   const hasAudio = !!narration?.audio_url;
   const textPreview = narration?.text || "";
 
-  return (
-    <AppShell>
-      <div className="px-4 py-5 max-w-2xl mx-auto">
-        <StepHeader step={7} totalSteps={10} title="Video Önizleme" description="Seslendirme ve video önizleme" />
-
-        {/* Recording container - visible in card for preview */}
-        <div className="mb-6">
-          <div className="text-sm text-white/60 mb-2">Video Önizleme Hazırlanıyor...</div>
-          <div 
-            className="rounded-lg overflow-hidden border border-white/20 bg-black/50"
-            style={{ width: 180, height: 320 }}
-          >
+  // Show capture-only view during recording process
+  if (renderState === "preparing" || renderState === "recording" || renderState === "processing") {
+    return (
+      <AppShell>
+        <div className="px-4 py-5 max-w-2xl mx-auto">
+          <StepHeader step={8} totalSteps={10} title="Video Oluşturuluyor" description="Drone görüntüleri ve seslendirme" />
+          
+          {/* Full capture preview */}
+          <div className="mb-6">
+            <div className="text-sm text-white/60 mb-2">Önizleme</div>
             <div 
-              ref={recordingContainerRef} 
-              style={{ width: "100%", height: "100%" }} 
-            />
+              className="rounded-lg overflow-hidden border border-white/20 bg-black/50 mx-auto"
+              style={{ width: 180, height: 320 }}
+            >
+              <div 
+                ref={recordingContainerRef} 
+                style={{ width: "100%", height: "100%" }} 
+              />
+            </div>
           </div>
-        </div>
 
-        {/* Render/Recording Progress State */}
-        {(renderState === "preparing" || renderState === "recording" || renderState === "processing") && (
+          {/* Progress UI */}
           <div className="mb-4">
             <div className="rounded-xl p-5 text-center" style={{ background: "linear-gradient(135deg, rgba(37,99,235,0.15) 0%, rgba(124,58,237,0.08) 100%)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <div className="w-14 h-14 mx-auto mb-4 relative">
@@ -718,7 +719,15 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
               <button onClick={handleCancelRender} className="mt-4 px-4 py-2 text-xs text-white/50 hover:text-white/70 transition-colors">İptal</button>
             </div>
           </div>
-        )}
+        </div>
+      </AppShell>
+    );
+  }
+
+  return (
+    <AppShell>
+      <div className="px-4 py-5 max-w-2xl mx-auto">
+        <StepHeader step={7} totalSteps={10} title="Video Önizleme" description="Seslendirme ve video önizleme" />
 
         {/* Error State */}
         {renderState === "error" && (
