@@ -178,13 +178,13 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
           id: "demo-narration",
           project_id: id,
           text: "İzmir Çiğli ilçesinde, Harmandalı mahallesinde yer alan bu 1234 metrekarelik arsa, konut yapılaşması için ideal bir lokasyonda bulunmaktadır. Çevresinde cadde ve sokak yolları mevcut olup, altyapı hizmetlerine yakın mesafededir.",
-          audio_url: "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=", // Placeholder for demo
-          audio_status: "ready",
+          tone: "premium",
           voice_type: "nova",
-          tts_provider: "demo",
+          audio_url: "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=",
+          duration: 15,
+          tts_provider: "openai",
+          tts_voice: "nova",
           tts_speed: 1.55,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
         };
         
         setNarration(demoNarration);
@@ -197,18 +197,24 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
           title: searchParams.get("title") || "Demo Proje",
           short_title: (searchParams.get("title") || "Demo").substring(0, 20),
           geojson: null,
-          properties: null,
+          properties: {
+            Il: "İzmir",
+            Ilce: "Çiğli",
+            Mahalle: "Harmandalı",
+            Ada: "2406",
+            ParselNo: "9",
+            Alan: "1234",
+            Nitelik: "Arsa",
+          },
           city: "İzmir",
           district: "Çiğli",
           neighborhood: "Harmandalı",
-          ada: "2406",
-          parsel: "9",
-          area_m2: 1234,
-          drone_settings: null,
-          narration: demoNarration.text,
-          audio_url: null,
-          video_url: null,
-          thumbnail_url: null,
+          block_no: "2406",
+          parcel_no: "9",
+          area: "1234",
+          property_type: "Arsa",
+          center_lat: 38.4238,
+          center_lon: 27.1428,
           custom_note: null,
           status: "draft",
           created_at: new Date().toISOString(),
@@ -371,9 +377,8 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
 
       console.log("[WebRecorder] drone settings loaded", {
         duration: droneSettings?.duration || 30,
-        cameraMode: droneSettings?.camera_mode || "orbit",
-        height: droneSettings?.height || 100,
-        pitch: droneSettings?.pitch || 55,
+        cameraMode: droneSettings?.cameraModes?.[0] || "orbit",
+        startHeight: droneSettings?.startHeight || 100,
         steps: cameraSequence?.steps?.length || 0
       });
 
