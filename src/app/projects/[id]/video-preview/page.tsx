@@ -428,8 +428,33 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
     // Read directly from store to get the latest value
     const uploadedGeoJson = useParcelStore.getState().uploadedGeoJson;
     
+    console.log("[VIDEO]", {
+      projectId: "current-project",
+      uploadedGeoJson,
+      geojsonExists: !!uploadedGeoJson,
+      type: uploadedGeoJson?.type,
+      hasGeometry: !!uploadedGeoJson?.geometry,
+      geometryType: uploadedGeoJson?.geometry?.type,
+      coordinatesCount: uploadedGeoJson?.geometry?.coordinates?.[0]?.length
+    });
+    
     console.log("[WebRecorder] start");
     console.log("[WebRecorder] creating capture container");
+    
+    // Validation checks
+    if (!uploadedGeoJson) {
+      console.error("[VIDEO RECORD ERROR] uploadedGeoJson is null/undefined - GeoJSON not in Zustand store");
+      setErrorMessage("Parsel geometrisi bulunamadı. Lütfen önce parsel seçin veya sayfayı yenileyin."); 
+      setRenderState("error"); 
+      return; 
+    }
+    
+    if (!uploadedGeoJson.geometry) {
+      console.error("[VIDEO RECORD ERROR] uploadedGeoJson.geometry is missing");
+      setErrorMessage("Parsel geometrisi geçersiz veya boş."); 
+      setRenderState("error"); 
+      return; 
+    }
     
     if (!recordingContainerRef.current) { 
       console.error("[WebRecorder] CATASTROPHIC: Container ref not attached!");
@@ -438,16 +463,11 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
       return; 
     }
     
-    if (!uploadedGeoJson) { 
-      console.error("[WebRecorder] FAIL: GeoJSON not found in store"); 
-      setErrorMessage("Parsel geometrisi bulunamadı."); 
-      setRenderState("error"); 
-      return; 
-    }
-    
-    const positions = uploadedGeoJson.geometry.coordinates[0] || [];
+    // Use geometry directly (not .features)
+    const geometry = uploadedGeoJson.geometry;
+    const positions = geometry.coordinates?.[0] || [];
     if (!positions.length) { 
-      console.error("[WebRecorder] FAIL: No positions"); 
+      console.error("[WebRecorder] FAIL: No positions in geometry"); 
       setErrorMessage("Parsel geometrisi geçersiz."); 
       setRenderState("error"); 
       return; 
@@ -540,13 +560,15 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
       
       // Add GeoJSON source
       const geoJsonForLayer = useParcelStore.getState().uploadedGeoJson;
-      console.log("[WebRecorder] geojson exists:", !!geoJsonForLayer);
-      console.log("[WebRecorder] geojson type:", geoJsonForLayer?.type);
-      console.log("[WebRecorder] geometry type:", geoJsonForLayer?.geometry?.type);
-      console.log("[WebRecorder] coordinates count:", geoJsonForLayer?.geometry?.coordinates?.[0]?.length);
+      console.log("[LAYER DATA]", {
+        geoJson: geoJsonForLayer,
+        type: geoJsonForLayer?.type,
+        geometry: geoJsonForLayer?.geometry,
+        coordinates: geoJsonForLayer?.geometry?.coordinates
+      });
       
       if (!geoJsonForLayer) { 
-        console.error("[WebRecorder] FAIL: GeoJSON not found in store"); 
+        console.error("[WebRecorder] FAIL: GeoJSON not found in store at load time"); 
         setErrorMessage("Parsel geometrisi bulunamadı."); 
         setRenderState("error"); 
         return; 
@@ -559,6 +581,7 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
         if (mapRef.current.getSource("parcel-source")) { mapRef.current.removeSource("parcel-source"); console.log("[WebRecorder] removed existing parcel-source source"); }
         
         console.log("[WebRecorder] geojson source adding...");
+        console.log("[WebRecorder] GeoJSON data for source:", JSON.stringify(geoJsonForLayer).substring(0, 200));
         mapRef.current.addSource("parcel-source", { type: "geojson", data: geoJsonForLayer });
         console.log("[WebRecorder] geojson source added");
         console.log("[WebRecorder] polygon layer adding...");
@@ -588,8 +611,9 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
           startRecordingAfterMapReady(mapRef.current!, recordingCenter);
         }, 500);
       } catch (e) {
-        console.error("[WebRecorder] FAIL: Layer creation failed:", e);
-        setErrorMessage("Harita katmanları oluşturulamadı."); 
+        const err = e as Error;
+        console.error("[VIDEO RECORD ERROR]", err?.message || err);
+        setErrorMessage(err?.message || "Harita katmanları oluşturulamadı."); 
         setRenderState("error"); 
         return;
       }
