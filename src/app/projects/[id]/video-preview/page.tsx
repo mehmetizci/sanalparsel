@@ -603,15 +603,25 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
       console.log("[LAYER DATA]", {
         geoJson: geoJsonForLayer,
         type: geoJsonForLayer?.type,
-        geometry: geoJsonForLayer?.geometry,
+        hasGeometry: !!geoJsonForLayer?.geometry,
+        geometryType: geoJsonForLayer?.geometry?.type,
         coordinates: geoJsonForLayer?.geometry?.coordinates
       });
       
-      if (!geoJsonForLayer) { 
-        console.error("[WebRecorder] FAIL: GeoJSON not found in store at load time"); 
-        setErrorMessage("Parsel geometrisi bulunamadı."); 
-        setRenderState("error"); 
-        return; 
+      if (!geoJsonForLayer) {
+        throw new Error("GeoJSON missing - not found in Zustand store");
+      }
+      
+      if (!geoJsonForLayer.geometry) {
+        throw new Error("Geometry missing - uploadedGeoJson.geometry is null/undefined");
+      }
+      
+      if (!geoJsonForLayer.geometry.coordinates) {
+        throw new Error("Coordinates missing - geometry.coordinates is null/undefined");
+      }
+      
+      if (!geoJsonForLayer.geometry.coordinates[0]?.length) {
+        throw new Error("No coordinates - geometry.coordinates[0] is empty");
       }
       
       try {
