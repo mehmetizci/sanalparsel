@@ -340,6 +340,10 @@ export default function MapboxMap({
 
       setIsReady(true);
       setMapError(null);
+      
+      // Register map in global store for recording
+      useParcelStore.getState().setRecordingMap(mapRef.current);
+      
       onReady?.(mapRef.current);
     });
 
@@ -348,6 +352,7 @@ export default function MapboxMap({
         cancelAnimationFrame(bearingRafRef.current);
         bearingRafRef.current = null;
       }
+      // Don't remove the map from store on cleanup - let it persist for recording
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
@@ -443,6 +448,10 @@ export default function MapboxMap({
       }
 
       setIsReady(true);
+      
+      // Register map in global store for recording
+      useParcelStore.getState().setRecordingMap(mapRef.current);
+      
       onReady?.(mapRef.current);
     });
 

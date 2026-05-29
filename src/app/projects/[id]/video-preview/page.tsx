@@ -2,12 +2,11 @@
 
 import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { createClient } from "@/lib/supabase";
 import { Project, Narration, ParcelGeoJson, TTSProvider, OpenAIVoice } from "@/types";
 import { useParcelStore, CameraSequenceStep, ParcelMetadata } from "@/lib/parcel-store";
-import { buildCinematicStyle } from "@/lib/cinematic-renderer";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
@@ -20,50 +19,7 @@ type RenderState = "idle" | "preparing" | "recording" | "processing" | "complete
 const VIDEO_WIDTH = 720;
 const VIDEO_HEIGHT = 1280;
 const VIDEO_FPS = 30;
-const PREPARATION_TIMEOUT_MS = 10000;
 
-// Helper to wait for style to be fully loaded
-async function waitForStyleReady(map: maplibregl.Map, timeoutMs = 10000): Promise<void> {
-  const start = Date.now();
-  
-  return new Promise<void>((resolve, reject) => {
-    const check = () => {
-      try {
-        if (map.isStyleLoaded()) {
-          console.log("[WebRecorder] style ready (isStyleLoaded)");
-          resolve();
-          return;
-        }
-      } catch (err) {
-        console.warn("[WebRecorder] style check failed", err);
-      }
-      
-      if (Date.now() - start > timeoutMs) {
-        console.error("[WebRecorder] style loading timeout after", timeoutMs, "ms");
-        reject(new Error("Mapbox style loading timeout"));
-        return;
-      }
-      
-      setTimeout(check, 100);
-    };
-    
-    map.once("style.load", () => {
-      console.log("[WebRecorder] style.load event fired");
-      setTimeout(() => {
-        if (map.isStyleLoaded()) {
-          console.log("[WebRecorder] style ready after event");
-          resolve();
-        } else {
-          console.log("[WebRecorder] style still loading after event, checking...");
-          check();
-        }
-      }, 500);
-    });
-    
-    // Also check immediately
-    check();
-  });
-}
 
 export default function VideoPreviewPage({ params }: { params: { id: string } }) {
   return (
@@ -122,8 +78,8 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   // Map refs for recording
-  const recordingContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
+  
+  const mapRef = useRef<mapboxgl.Map | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const animationRef = useRef<number | null>(null);
@@ -358,14 +314,14 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
     return { supported: true, mimeType };
   }, []);
 
-  const startRecordingAfterMapReady = useCallback(async (map: maplibregl.Map, center: { lat: number; lon: number }) => {
+  const startRecordingAfterMapReady = useCallback(async (map: mapboxgl.Map, center: { lat: number; lon: number }) => {
     setRenderProgress(10);
 
     console.log("[WebRecorder] Starting recording setup after map ready");
     
     preparationTimeoutRef.current = setTimeout(() => {
       if (renderStateRef.current === "preparing") { console.log("[WebRecorder] Preparation timeout reached"); setErrorMessage("Harita hazırlanması çok uzun sürüyor. Lütfen tekrar deneyin."); setRenderState("error"); }
-    }, PREPARATION_TIMEOUT_MS);
+    }, 10000);
 
     if (!mapRef.current) { console.log("[WebRecorder] Map not ready"); setErrorMessage("Harita hazırlanması tamamlanamadı. Lütfen tekrar deneyin."); setRenderState("error"); return; }
 
@@ -468,219 +424,25 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
   }, [droneSettings, cameraSequence, interpolateCameraStep, checkMediaRecorderSupport]);
 
   const initializeRecordingMap = useCallback(() => {
-    // Read directly from store to get the latest value
-    const uploadedGeoJson = useParcelStore.getState().uploadedGeoJson;
+    // Check if we already have a recording map in the store
+    const existingMap = useParcelStore.getState().getRecordingMap();
     
-    console.log("[WebRecorder] start");
-    
-    console.log("[WebRecorder] geojson exists:", !!uploadedGeoJson);
-    console.log("[WebRecorder] geometry type:", uploadedGeoJson?.geometry?.type);
-    console.log("[WebRecorder] coordinates count:", uploadedGeoJson?.geometry?.coordinates?.[0]?.length);
-    
-    console.log("[WebRecorder] creating capture container");
-    
-    // Validation checks
-    if (!uploadedGeoJson) {
-      console.error("[VIDEO RECORD ERROR] uploadedGeoJson is null/undefined - GeoJSON not in Zustand store");
-      setErrorMessage("Parsel geometrisi bulunamadı. Lütfen önce parsel seçin veya sayfayı yenileyin."); 
-      setRenderState("error"); 
-      return; 
-    }
-    
-    if (!uploadedGeoJson.geometry) {
-      console.error("[VIDEO RECORD ERROR] uploadedGeoJson.geometry is missing");
-      setErrorMessage("Parsel geometrisi geçersiz veya boş."); 
-      setRenderState("error"); 
-      return; 
-    }
-    
-    if (!recordingContainerRef.current) { 
-      console.error("[WebRecorder] CATASTROPHIC: Container ref not attached!");
-      setErrorMessage("Harita container bulunamadı."); 
-      setRenderState("error"); 
-      return; 
-    }
-    
-    // Use geometry directly (not .features)
-    const geometry = uploadedGeoJson.geometry;
-    const positions = geometry.coordinates?.[0] || [];
-    if (!positions.length) { 
-      console.error("[WebRecorder] FAIL: No positions in geometry"); 
-      setErrorMessage("Parsel geometrisi geçersiz."); 
-      setRenderState("error"); 
-      return; 
-    }
-    
-    let lon = 0, lat = 0, count = 0;
-    for (const p of positions) { if (Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number") { lon += p[0]; lat += p[1]; count += 1; } }
-    if (!count) { console.error("[WebRecorder] FAIL: No valid coordinates"); setErrorMessage("Parsel koordinatları geçersiz."); setRenderState("error"); return; }
-    
-    const center = { lat: lat / count, lon: lon / count };
-    let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
-    for (const p of positions) { if (!Array.isArray(p) || typeof p[0] !== "number" || typeof p[1] !== "number") continue; if (p[0] < minLon) minLon = p[0]; if (p[0] > maxLon) maxLon = p[0]; if (p[1] < minLat) minLat = p[1]; if (p[1] > maxLat) maxLat = p[1]; }
-    if (!Number.isFinite(minLon)) { console.error("[WebRecorder] FAIL: Invalid bounds"); setErrorMessage("Parsel sınırları geçersiz."); setRenderState("error"); return; }
-    
-    console.log("[WebRecorder] creating map instance");
-    console.log("[WebRecorder] Container size:", recordingContainerRef.current.offsetWidth + "x" + recordingContainerRef.current.offsetHeight);
-    
-    let style;
-    try {
-      style = buildCinematicStyle({ contrast: 1.15, saturation: 1.2, fogColor: [0.78, 0.85, 0.94, 0.3], fogAttenuation: 0.15, antialias: true });
-    } catch (e) {
-      console.error("[WebRecorder] FAIL: Style build failed:", e);
-      setErrorMessage("Harita stili oluşturulamadı."); 
-      setRenderState("error"); 
+    if (existingMap) {
+      console.log("[WebRecorder] Using existing recording map from store");
+      // Cast to mapboxgl.Map - the store stores the actual mapboxgl.Map instance
+      mapRef.current = existingMap as mapboxgl.Map;
+      // Get center from store
+      const parcelCenter = useParcelStore.getState().parcelCenter;
+      if (parcelCenter) {
+        startRecordingAfterMapReady(mapRef.current, parcelCenter);
+      }
       return;
     }
-
-    let map: maplibregl.Map | null = null;
-    let mapLoadTimeout: ReturnType<typeof setTimeout> | null = null;
-    let mapLoadResolved = false;
     
-    try {
-      map = new maplibregl.Map({
-        container: recordingContainerRef.current,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        style: style as any,
-        center: [center.lon, center.lat],
-        zoom: 15, pitch: 60, bearing: -20, maxZoom: 22, antialias: true, renderWorldCopies: false, preserveDrawingBuffer: true, attributionControl: false,
-      });
-    } catch (e) {
-      const errorMsg = (e as Error)?.message || "";
-      console.error("[WebRecorder] FAIL: Map creation failed:", errorMsg);
-      
-      if (errorMsg.includes("WebGL") || errorMsg.includes("webgl")) {
-        setErrorMessage("Tarayıcınızda WebGL desteklenmiyor. Lütfen Chrome, Firefox veya Edge kullanın."); 
-      } else {
-        setErrorMessage("Harita oluşturulamadı. Lütfen tekrar deneyin."); 
-      }
-      setRenderState("error"); 
-      return;
-    }
-
-    mapRef.current = map;
-    const recordingCenter = center;
-    
-    // 10 second overall timeout for preparation
-    const preparationTimeout = setTimeout(() => {
-      if (!mapLoadResolved && mapRef.current) {
-        console.error("[WebRecorder] PREPARATION TIMEOUT: Map didn't load in 10 seconds");
-        mapLoadResolved = true;
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-        setErrorMessage("Video haritası hazırlanamadı. Lütfen tekrar deneyin."); 
-        setRenderState("error");
-      }
-    }, 10000);
-
-    // Helper to resolve map load
-    const resolveMapLoad = async () => {
-      if (mapLoadResolved || !mapRef.current) return;
-      mapLoadResolved = true;
-      if (preparationTimeout) clearTimeout(preparationTimeout);
-      
-      console.log("[WebRecorder] map load event");
-      console.log("[WebRecorder] waiting for style...");
-      
-      // Wait for style to be fully ready using robust helper
-      try {
-        await waitForStyleReady(mapRef.current, 15000);
-        console.log("[WebRecorder] style ready");
-      } catch (err) {
-        console.error("[WebRecorder] Style never became ready:", err);
-        setErrorMessage("Harita stili yüklenemedi. Lütfen tekrar deneyin."); 
-        setRenderState("error"); 
-        return;
-      }
-      
-      // Add GeoJSON source
-      const geoJsonForLayer = useParcelStore.getState().uploadedGeoJson;
-      
-      if (!geoJsonForLayer) {
-        throw new Error("GeoJSON missing - not found in Zustand store");
-      }
-      
-      if (!geoJsonForLayer.geometry) {
-        throw new Error("Geometry missing - uploadedGeoJson.geometry is null/undefined");
-      }
-      
-      if (!geoJsonForLayer.geometry.coordinates) {
-        throw new Error("Coordinates missing - geometry.coordinates is null/undefined");
-      }
-      
-      if (!geoJsonForLayer.geometry.coordinates[0]?.length) {
-        throw new Error("No coordinates - geometry.coordinates[0] is empty");
-      }
-      
-      try {
-        // Remove any existing layers/sources first (duplicate protection)
-        if (mapRef.current.getLayer("parcel-fill")) { mapRef.current.removeLayer("parcel-fill"); console.log("[WebRecorder] removed parcel-fill layer"); }
-        if (mapRef.current.getLayer("parcel-outline")) { mapRef.current.removeLayer("parcel-outline"); console.log("[WebRecorder] removed parcel-outline layer"); }
-        if (mapRef.current.getSource("parcel-source")) { mapRef.current.removeSource("parcel-source"); console.log("[WebRecorder] removed parcel-source source"); }
-        
-        console.log("[WebRecorder] adding source...");
-        mapRef.current.addSource("parcel-source", { type: "geojson", data: geoJsonForLayer });
-        console.log("[WebRecorder] source added");
-        
-        console.log("[WebRecorder] adding fill layer...");
-        mapRef.current.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-source", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
-        console.log("[WebRecorder] fill layer added");
-        
-        console.log("[WebRecorder] adding outline layer...");
-        mapRef.current.addLayer({ id: "parcel-outline", type: "line", source: "parcel-source", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
-        console.log("[WebRecorder] outline layer added");
-        
-        // Fit bounds to parcel
-        console.log("[WebRecorder] fitting bounds...");
-        const cinematicPitch = 55 + Math.random() * 10;
-        mapRef.current.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
-          padding: 60,
-          maxZoom: 18,
-          pitch: cinematicPitch,
-          bearing: -20,
-          duration: 2000,
-        });
-        console.log("[WebRecorder] bounds fitted");
-        
-        // Proceed to recording setup after fitBounds animation
-        setTimeout(() => {
-          console.log("[WebRecorder] captureStream available");
-          console.log("[WebRecorder] MediaRecorder available");
-          console.log("[WebRecorder] recorder start");
-          startRecordingAfterMapReady(mapRef.current!, recordingCenter);
-        }, 2200);
-      } catch (e) {
-        const err = e as Error;
-        console.error("[WebRecorder ERROR]", err?.message || err);
-        setErrorMessage(err?.message || "Harita katmanları oluşturulamadı."); 
-        setRenderState("error");
-        return;
-      }
-    };
-
-    // Set up map load handler - use setTimeout fallback
-    mapLoadTimeout = setTimeout(() => {
-      if (!mapLoadResolved && mapRef.current) {
-        console.log("[WebRecorder] Map load timeout fallback - assuming map is ready");
-        resolveMapLoad();
-      }
-    }, 2000);
-    
-    if (map.loaded()) {
-      console.log("[WebRecorder] Map already loaded immediately");
-      if (mapLoadTimeout) clearTimeout(mapLoadTimeout);
-      resolveMapLoad();
-    } else {
-      map.once("load", () => {
-        console.log("[WebRecorder] Map 'load' event fired");
-        if (mapLoadTimeout) clearTimeout(mapLoadTimeout);
-        resolveMapLoad();
-      });
-    }
-
-    map.on("error", (e) => console.error("[WebRecorder] Map error event:", e));
+    // No existing map - need to create one
+    console.log("[WebRecorder] No recording map found, user must visit Preview page first");
+    setErrorMessage("Haritayı görüntülemediniz. Lütfen önce parseli haritadan görüntüleyin.");
+    setRenderState("error");
   }, [startRecordingAfterMapReady]);
 
   const startRecording = useCallback(async () => {
@@ -774,10 +536,8 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
               className="rounded-lg overflow-hidden border border-white/20 bg-black/50 mx-auto"
               style={{ width: 180, height: 320 }}
             >
-              <div 
-                ref={recordingContainerRef} 
-                style={{ width: "100%", height: "100%" }} 
-              />
+              {/* Recording map preview - shared from store */}
+              <div id="recording-canvas" style={{ width: "100%", height: "100%" }} />
             </div>
           </div>
 
