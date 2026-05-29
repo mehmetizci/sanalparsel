@@ -8,8 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "pip install -r requirements.txt && next build",
-    "postinstall": "npx puppeteer browsers install chrome",
-    "start": "PUPPETEER_CACHE_DIR=/opt/render/.cache/puppeteer npm start",
+    "start": "next start",
     "lint": "next lint",
     "remotion": "remotion studio",
     "render": "remotion render --config=remotion.config.ts",
