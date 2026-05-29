@@ -471,17 +471,12 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
     // Read directly from store to get the latest value
     const uploadedGeoJson = useParcelStore.getState().uploadedGeoJson;
     
-    console.log("[VIDEO]", {
-      projectId: "current-project",
-      uploadedGeoJson,
-      geojsonExists: !!uploadedGeoJson,
-      type: uploadedGeoJson?.type,
-      hasGeometry: !!uploadedGeoJson?.geometry,
-      geometryType: uploadedGeoJson?.geometry?.type,
-      coordinatesCount: uploadedGeoJson?.geometry?.coordinates?.[0]?.length
-    });
-    
     console.log("[WebRecorder] start");
+    
+    console.log("[WebRecorder] geojson exists:", !!uploadedGeoJson);
+    console.log("[WebRecorder] geometry type:", uploadedGeoJson?.geometry?.type);
+    console.log("[WebRecorder] coordinates count:", uploadedGeoJson?.geometry?.coordinates?.[0]?.length);
+    
     console.log("[WebRecorder] creating capture container");
     
     // Validation checks
@@ -587,10 +582,12 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
       if (preparationTimeout) clearTimeout(preparationTimeout);
       
       console.log("[WebRecorder] map load event");
+      console.log("[WebRecorder] waiting for style...");
       
       // Wait for style to be fully ready using robust helper
       try {
         await waitForStyleReady(mapRef.current, 15000);
+        console.log("[WebRecorder] style ready");
       } catch (err) {
         console.error("[WebRecorder] Style never became ready:", err);
         setErrorMessage("Harita stili yüklenemedi. Lütfen tekrar deneyin."); 
@@ -600,13 +597,6 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
       
       // Add GeoJSON source
       const geoJsonForLayer = useParcelStore.getState().uploadedGeoJson;
-      console.log("[LAYER DATA]", {
-        geoJson: geoJsonForLayer,
-        type: geoJsonForLayer?.type,
-        hasGeometry: !!geoJsonForLayer?.geometry,
-        geometryType: geoJsonForLayer?.geometry?.type,
-        coordinates: geoJsonForLayer?.geometry?.coordinates
-      });
       
       if (!geoJsonForLayer) {
         throw new Error("GeoJSON missing - not found in Zustand store");
@@ -626,22 +616,21 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
       
       try {
         // Remove any existing layers/sources first (duplicate protection)
-        if (mapRef.current.getLayer("parcel-fill")) { mapRef.current.removeLayer("parcel-fill"); console.log("[WebRecorder] removed existing parcel-fill layer"); }
-        if (mapRef.current.getLayer("parcel-outline")) { mapRef.current.removeLayer("parcel-outline"); console.log("[WebRecorder] removed existing parcel-outline layer"); }
-        if (mapRef.current.getSource("parcel-source")) { mapRef.current.removeSource("parcel-source"); console.log("[WebRecorder] removed existing parcel-source source"); }
+        if (mapRef.current.getLayer("parcel-fill")) { mapRef.current.removeLayer("parcel-fill"); console.log("[WebRecorder] removed parcel-fill layer"); }
+        if (mapRef.current.getLayer("parcel-outline")) { mapRef.current.removeLayer("parcel-outline"); console.log("[WebRecorder] removed parcel-outline layer"); }
+        if (mapRef.current.getSource("parcel-source")) { mapRef.current.removeSource("parcel-source"); console.log("[WebRecorder] removed parcel-source source"); }
         
         console.log("[WebRecorder] adding source...");
-        console.log("[WebRecorder] GeoJSON preview:", JSON.stringify(geoJsonForLayer).substring(0, 200));
         mapRef.current.addSource("parcel-source", { type: "geojson", data: geoJsonForLayer });
         console.log("[WebRecorder] source added");
         
-        console.log("[WebRecorder] adding parcel-fill layer...");
+        console.log("[WebRecorder] adding fill layer...");
         mapRef.current.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-source", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
-        console.log("[WebRecorder] parcel-fill layer added");
+        console.log("[WebRecorder] fill layer added");
         
-        console.log("[WebRecorder] adding parcel-outline layer...");
+        console.log("[WebRecorder] adding outline layer...");
         mapRef.current.addLayer({ id: "parcel-outline", type: "line", source: "parcel-source", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
-        console.log("[WebRecorder] parcel-outline layer added");
+        console.log("[WebRecorder] outline layer added");
         
         // Fit bounds to parcel
         console.log("[WebRecorder] fitting bounds...");
@@ -657,7 +646,9 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
         
         // Proceed to recording setup after fitBounds animation
         setTimeout(() => {
-          console.log("[WebRecorder] starting recording...");
+          console.log("[WebRecorder] captureStream available");
+          console.log("[WebRecorder] MediaRecorder available");
+          console.log("[WebRecorder] recorder start");
           startRecordingAfterMapReady(mapRef.current!, recordingCenter);
         }, 2200);
       } catch (e) {
