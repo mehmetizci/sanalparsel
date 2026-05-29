@@ -7,13 +7,9 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "pip install -r requirements.txt && next build",
-    "postinstall": "npx puppeteer browsers install chrome",
+    "build": "pip install -r requirements.txt && npx puppeteer browsers install chrome && next build",
     "start": "next start",
-    "lint": "next lint",
-    "remotion": "remotion studio",
-    "render": "remotion render --config=remotion.config.ts",
-    "build:remotion": "remotion render All --config=remotion.config.ts --no-browser"
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "dependencies": {
     "@remotion/bundler": "4.0.468",
