@@ -620,36 +620,36 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
         if (mapRef.current.getLayer("parcel-outline")) { mapRef.current.removeLayer("parcel-outline"); console.log("[WebRecorder] removed existing parcel-outline layer"); }
         if (mapRef.current.getSource("parcel-source")) { mapRef.current.removeSource("parcel-source"); console.log("[WebRecorder] removed existing parcel-source source"); }
         
-        console.log("[WebRecorder] geojson source adding...");
-        console.log("[WebRecorder] GeoJSON data for source:", JSON.stringify(geoJsonForLayer).substring(0, 200));
+        console.log("[WebRecorder] adding source...");
+        console.log("[WebRecorder] GeoJSON preview:", JSON.stringify(geoJsonForLayer).substring(0, 200));
         mapRef.current.addSource("parcel-source", { type: "geojson", data: geoJsonForLayer });
-        console.log("[WebRecorder] geojson source added");
-        console.log("[WebRecorder] polygon layer adding...");
+        console.log("[WebRecorder] source added");
+        
+        console.log("[WebRecorder] adding parcel-fill layer...");
         mapRef.current.addLayer({ id: "parcel-fill", type: "fill", source: "parcel-source", paint: { "fill-color": "#ef4444", "fill-opacity": 0.28 } });
+        console.log("[WebRecorder] parcel-fill layer added");
+        
+        console.log("[WebRecorder] adding parcel-outline layer...");
         mapRef.current.addLayer({ id: "parcel-outline", type: "line", source: "parcel-source", layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": "#ef4444", "line-width": 3, "line-opacity": 0.95 } });
-        console.log("[WebRecorder] polygon layer added");
+        console.log("[WebRecorder] parcel-outline layer added");
         
-        // Fly to parcel bounds
+        // Fit bounds to parcel
+        console.log("[WebRecorder] fitting bounds...");
         const cinematicPitch = 55 + Math.random() * 10;
-        setTimeout(() => {
-          mapRef.current?.flyTo({
-            center: [center.lon, center.lat],
-            zoom: 16,
-            pitch: cinematicPitch,
-            bearing: -20,
-            duration: 1500,
-            essential: true,
-          });
-        }, 200);
+        mapRef.current.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
+          padding: 60,
+          maxZoom: 18,
+          pitch: cinematicPitch,
+          bearing: -20,
+          duration: 2000,
+        });
+        console.log("[WebRecorder] bounds fitted");
         
-        // Proceed to recording setup after animation starts
+        // Proceed to recording setup after fitBounds animation
         setTimeout(() => {
-          console.log("[WebRecorder] canvas found");
-          console.log("[WebRecorder] captureStream available");
-          console.log("[WebRecorder] MediaRecorder available");
-          console.log("[WebRecorder] recorder start");
+          console.log("[WebRecorder] starting recording...");
           startRecordingAfterMapReady(mapRef.current!, recordingCenter);
-        }, 500);
+        }, 2200);
       } catch (e) {
         const err = e as Error;
         console.error("[VIDEO RECORD ERROR]", err?.message || err);
