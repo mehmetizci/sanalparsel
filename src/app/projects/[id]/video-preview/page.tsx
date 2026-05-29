@@ -20,6 +20,9 @@ const VIDEO_WIDTH = 720;
 const VIDEO_HEIGHT = 1280;
 const VIDEO_FPS = 30;
 
+// Mapbox token
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
+
 
 export default function VideoPreviewPage({ params }: { params: { id: string } }) {
   return (
@@ -424,25 +427,134 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
   }, [droneSettings, cameraSequence, interpolateCameraStep, checkMediaRecorderSupport]);
 
   const initializeRecordingMap = useCallback(() => {
-    // Check if we already have a recording map in the store
-    const existingMap = useParcelStore.getState().getRecordingMap();
+    // Get GeoJSON from store
+    const geoJson = useParcelStore.getState().uploadedGeoJson;
+    const parcelCenter = useParcelStore.getState().parcelCenter;
     
-    if (existingMap) {
-      console.log("[WebRecorder] Using existing recording map from store");
-      // Cast to mapboxgl.Map - the store stores the actual mapboxgl.Map instance
-      mapRef.current = existingMap as mapboxgl.Map;
-      // Get center from store
-      const parcelCenter = useParcelStore.getState().parcelCenter;
-      if (parcelCenter) {
-        startRecordingAfterMapReady(mapRef.current, parcelCenter);
-      }
+    console.log("[WebRecorder] Creating recording map in video-preview page");
+    console.log("[WebRecorder] GeoJSON exists:", !!geoJson);
+    console.log("[WebRecorder] Parcel center:", parcelCenter);
+    
+    if (!geoJson || !geoJson.geometry) {
+      console.error("[WebRecorder] GeoJSON or geometry missing");
+      setErrorMessage("Parsel geometrisi bulunamadı."); 
+      setRenderState("error"); 
       return;
     }
     
-    // No existing map - need to create one
-    console.log("[WebRecorder] No recording map found, user must visit Preview page first");
-    setErrorMessage("Haritayı görüntülemediniz. Lütfen önce parseli haritadan görüntüleyin.");
-    setRenderState("error");
+    if (!parcelCenter) {
+      console.error("[WebRecorder] Parcel center missing");
+      setErrorMessage("Parsel merkezi hesaplanamadı."); 
+      setRenderState("error"); 
+      return;
+    }
+    
+    // Create map container in the page
+    const container = document.getElementById("recording-map-container");
+    if (!container) {
+      console.error("[WebRecorder] Container #recording-map-container not found");
+      setErrorMessage("Harita container bulunamadı."); 
+      setRenderState("error"); 
+      return;
+    }
+    
+    // Remove existing map if any
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+    
+    // Set Mapbox access token
+    mapboxgl.accessToken = MAPBOX_TOKEN;
+    
+    // Create new map with 720x1280 dimensions (for high quality capture)
+    const map = new mapboxgl.Map({
+      container: container,
+      style: "mapbox://styles/mapbox/satellite-streets-v12",
+      center: [parcelCenter.lon, parcelCenter.lat],
+      zoom: 15,
+      pitch: 60,
+      bearing: -20,
+      maxZoom: 22,
+      antialias: true,
+      preserveDrawingBuffer: true,
+      attributionControl: false,
+    });
+    
+    mapRef.current = map;
+    
+    // Set up map load handler
+    map.on("load", () => {
+      console.log("[WebRecorder] Map loaded, adding GeoJSON layers");
+      
+      // Add GeoJSON source
+      map.addSource("parcel-source", {
+        type: "geojson",
+        data: geoJson,
+      });
+      
+      // Add fill layer
+      map.addLayer({
+        id: "parcel-fill",
+        type: "fill",
+        source: "parcel-source",
+        paint: {
+          "fill-color": "#ef4444",
+          "fill-opacity": 0.28,
+        },
+      });
+      
+      // Add outline layer
+      map.addLayer({
+        id: "parcel-outline",
+        type: "line",
+        source: "parcel-source",
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": "#ef4444",
+          "line-width": 3,
+          "line-opacity": 0.95,
+        },
+      });
+      
+      // Fit bounds to parcel
+      const positions = geoJson.geometry.coordinates[0] || [];
+      let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+      for (const p of positions) {
+        if (Array.isArray(p) && typeof p[0] === "number" && typeof p[1] === "number") {
+          if (p[0] < minLon) minLon = p[0];
+          if (p[0] > maxLon) maxLon = p[0];
+          if (p[1] < minLat) minLat = p[1];
+          if (p[1] > maxLat) maxLat = p[1];
+        }
+      }
+      
+      if (Number.isFinite(minLon)) {
+        map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
+          padding: 60,
+          maxZoom: 18,
+          pitch: 55,
+          bearing: -20,
+          duration: 2000,
+        });
+      }
+      
+      // Start recording after map is ready
+      setTimeout(() => {
+        console.log("[WebRecorder] Starting recording after map ready");
+        startRecordingAfterMapReady(map, parcelCenter);
+      }, 2500);
+    });
+    
+    map.on("error", (e) => {
+      console.error("[WebRecorder] Map error:", e);
+      setErrorMessage("Harita hatası: " + (e.error?.message || "Bilinmeyen hata"));
+      setRenderState("error");
+    });
+    
   }, [startRecordingAfterMapReady]);
 
   const startRecording = useCallback(async () => {
@@ -522,23 +634,21 @@ function VideoPreviewPageInner({ params }: { params: { id: string } }) {
   const hasAudio = !!narration?.audio_url;
   const textPreview = narration?.text || "";
 
-  // Show capture-only view during recording process
+  // Show capture map during recording process (step 9/10)
   if (renderState === "preparing" || renderState === "recording" || renderState === "processing") {
     return (
       <AppShell>
         <div className="px-4 py-5 max-w-2xl mx-auto">
           <StepHeader step={9} totalSteps={10} title="Video Oluşturuluyor" description="Drone görüntüleri ve seslendirme hazırlanıyor" />
           
-          {/* Full capture preview - 720x1280 aspect ratio */}
+          {/* Full 720x1280 capture map */}
           <div className="mb-6">
-            <div className="text-sm text-white/60 mb-2">Canlı Önizleme</div>
+            <div className="text-sm text-white/60 mb-2">Kayıt Alanı (720×1280)</div>
             <div 
-              className="rounded-lg overflow-hidden border border-white/20 bg-black/50 mx-auto"
+              id="recording-map-container"
+              className="rounded-lg overflow-hidden border border-white/20 bg-black mx-auto"
               style={{ width: 180, height: 320 }}
-            >
-              {/* Recording map preview - shared from store */}
-              <div id="recording-canvas" style={{ width: "100%", height: "100%" }} />
-            </div>
+            />
           </div>
 
           {/* Progress UI */}
