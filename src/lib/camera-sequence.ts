@@ -373,12 +373,32 @@ export function interpolateCameraStep(
         ? hoverThreshold  // Freeze at end for 2 seconds max
         : progress;
       
-      // Pure zoom interpolation: 13 → 16.3 (keeping parcel in frame, no edge cut)
-      const startZoom = 13;
+      // Cinematic zoom curve:
+      // First 20%: Very slow approach (ease in)
+      // Middle 60%: Normal approach (linear)
+      // Last 20%: Slow down (ease out)
+      // This creates DJI drone / Apple Maps flyover feel
+      let cinematicProgress = actualProgress;
+      if (actualProgress < 0.2) {
+        // First 20%: Ease in - very slow start
+        cinematicProgress = Math.pow(actualProgress / 0.2, 0.5) * 0.2;
+      } else if (actualProgress < 0.8) {
+        // Middle 60%: Linear (0.2 to 0.8 maps to 0.2 to 0.8)
+        cinematicProgress = actualProgress;
+      } else {
+        // Last 20%: Ease out - slow down
+        const t = (actualProgress - 0.8) / 0.2;
+        cinematicProgress = 0.8 + 0.2 * (1 - Math.pow(1 - t, 2));
+      }
+      
+      // Zoom: 12 → 16.3 (wider start for wow effect)
+      // Start: 12 gives ~1200-1500m feel (very wide)
+      // End: 16.3 gives ~150-200m feel (close but not too aggressive)
+      const startZoom = 12;
       const endZoom = 16.3;
       
       // Single easing application - no double easing
-      zoom = startZoom + (endZoom - startZoom) * actualProgress;
+      zoom = startZoom + (endZoom - startZoom) * cinematicProgress;
       
       // FIXED VALUES - no interpolation, no drift, no jitter
       pitch = 65;           // Fixed pitch at 65°
