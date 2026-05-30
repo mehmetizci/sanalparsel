@@ -361,34 +361,31 @@ export function interpolateCameraStep(
 
   switch (step.mode) {
     case "heroZoom": {
-      // Google Earth Studio Hero Shot: Camera locked to parcel center, direct zoom interpolation
-      // Start wide (zoom 13), end close (zoom 18), parcel stays centered
+      // Google Earth Studio Hero Shot: Camera locked to parcel center
+      // Fixed, deterministic values - no jitter
       const progress = easedT;
       
-      // Ease out in last 20% for cinematic slow-down effect
-      let adjustedProgress = progress;
-      if (progress > 0.8) {
-        const t = (progress - 0.8) / 0.2; // 0 to 1 in last 20%
-        adjustedProgress = 0.8 + 0.2 * (1 - Math.pow(1 - t, 3)); // Cubic ease out
-      }
+      // Final hover: last 10% of time, camera stays fixed
+      const hoverThreshold = 0.9;
+      const actualProgress = progress > hoverThreshold 
+        ? hoverThreshold  // Freeze at end
+        : progress;
       
-      // Direct zoom interpolation: 13 → 18 (wide to close)
+      // Direct zoom interpolation: 13 → 16.8 (keeping parcel in frame)
+      // End zoom 16.8 ensures parcel is ~60-70% of screen, no edges cut
       const startZoom = 13;
-      const endZoom = 18;
-      zoom = startZoom + (endZoom - startZoom) * adjustedProgress;
+      const endZoom = 16.8;
+      zoom = startZoom + (endZoom - startZoom) * actualProgress;
       
-      // Pitch: 60° → 70° (slight increase for dramatic effect)
-      const startPitch = 60;
-      const endPitch = 70;
-      pitch = startPitch + (endPitch - startPitch) * adjustedProgress;
+      // Pitch: nearly fixed at 65° (slight decrease for stability)
+      const fixedPitch = 65;
+      pitch = fixedPitch;
       
-      // Bearing: almost fixed, only +8 degrees max for subtle cinematic movement
-      const startBearing = step.bearingFrom || 0;
-      const endBearing = startBearing + 8;
-      bearing = startBearing + (endBearing - startBearing) * Math.min(adjustedProgress * 1.5, 1);
+      // Bearing: completely fixed (0 rotation) for DJI-like stability
+      bearing = step.bearingFrom || 0; // No rotation at all
       
-      // CRITICAL: No center offset - camera stays locked on parcel center
-      // This creates the true "lookAt" effect where only zoom changes
+      // CRITICAL: Camera stays locked on parcel center - no drift
+      // centerOffset is always 0 - no X/Y movement
       centerOffset = { lon: 0, lat: 0 };
       
       break;
