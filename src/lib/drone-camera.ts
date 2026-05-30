@@ -226,10 +226,12 @@ export class DroneCamera {
     switch (scene) {
       case "intro": {
         // ═══════════════════════════════════════════════════════════════
-        // INTRO - Hızlı kurulum
+        // INTRO - Stabil başlangıç (1-2 saniye)
         // ═══════════════════════════════════════════════════════════════
+        // KAMERA DÖNMEZ - sadece stabil kadraj
+        // Parsel görünür, kamera sabit
         
-        bearing = startBearing + sceneProgress * 45;
+        bearing = startBearing;  // SABİT - dönüş YOK
         zoom = baseZoom + 0.5;
         
         break;
@@ -239,6 +241,7 @@ export class DroneCamera {
         // ═══════════════════════════════════════════════════════════════
         // ORBIT - Yavaş, sinematik tanıtım dönüşü
         // ═══════════════════════════════════════════════════════════════
+        // Intro'dan kesintisiz devam
         // Sadece 75° yavaş dönüş (360° yerine)
         // Easing ile yumuşak başlangıç ve bitiş
         

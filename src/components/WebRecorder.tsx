@@ -6,7 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
 import type { CameraSequence } from "@/lib/parcel-store";
 import { buildCinematicStyle, CINEMATIC_EASING } from "@/lib/cinematic-renderer";
-import { DroneCamera } from "@/lib/drone-camera";
+import { PreviewCameraEngine } from "@/lib/preview-camera-engine";
 
 export interface WebRecorderProps {
   /** GeoJSON parcel feature */
@@ -260,6 +260,7 @@ export default function WebRecorder({
       const duration = cameraSequence?.totalDuration || 30000;
       const positions = flattenRings(parcel.geometry);
       const center = computeCenter(positions);
+      const bounds = computeBounds(positions);
 
       if (!center) {
         console.error("[WebRecorder] No valid parcel center");
@@ -271,15 +272,17 @@ export default function WebRecorder({
       const altitude = cameraSequence?.steps?.[0]?.startHeight || 300;
       const feel = cameraSequence?.steps?.[0]?.easing || "cinematic";
 
-      // Create DroneCamera engine
-      const cameraEngine = new DroneCamera({
+      // Create Preview Camera Engine (stabil kamera davranışı)
+      const cameraEngine = new PreviewCameraEngine({
         parcelCenter: [center.lon, center.lat],
+        parcelBounds: bounds || undefined,
         altitude,
         duration,
         feel: feel as "soft" | "cinematic" | "dynamic",
+        basePitch: 57, // Stabil pitch değeri
       });
 
-      console.log("[WebRecorder] DroneCamera created, starting animation immediately");
+      console.log("[WebRecorder] PreviewCameraEngine created, starting animation immediately");
       console.log("[WebRecorder] altitude:", altitude, "feel:", feel);
 
       // Animation loop - starts immediately, no delay
@@ -304,7 +307,7 @@ export default function WebRecorder({
           return;
         }
 
-        // Get camera state from DroneCamera
+        // Get camera state from PreviewCameraEngine
         if (map) {
           const cameraState = cameraEngine.getState(progress);
           

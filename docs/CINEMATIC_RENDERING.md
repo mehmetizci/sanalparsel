@@ -12,12 +12,34 @@ High-quality satellite video rendering system using MapLibre GL JS and Esri Worl
 - **Contrast enhancement (1.15x)** - Sharper imagery
 - **Saturation boost (1.2x)** - Cinematic warmth
 
-### Cinematic Camera
-- **Pitch range 55-65°** - Dramatic aerial perspective
-- **Smooth flyTo animations** - Natural camera movement
-- **Cinematic easing** - Custom cubic easing curves
-- **Subtle atmospheric fog** - Depth and atmosphere
-- **Orbit keyframes** - Smooth circular camera paths
+### Cinematic Camera (PreviewCameraEngine)
+- **4-Yön Çekimi** - Kuzey, Doğu, Güney, Batı (stabil görünüm)
+- **Pitch ~57° sabit** - Ön izleme ekranındaki gibi
+- **fitBounds ile kadrajlama** - Parseller asla kaybolmaz
+- **Bearing yavaş drift** - Max ±5° sinematik hareket
+- **Zoom çok hafif değişim** - Agresif zoom YOK
+- **Sakin hız eğrisi** - easeInOutCubic
+- **Geçiş yok** - Her sahne doğrudan başlar
+
+### Video Scenes (30s default)
+1. **Kuzey** - 7s (bearing=180°)
+2. **Doğu** - 7s (bearing=270°)
+3. **Güney** - 7s (bearing=0°)
+4. **Batı** - 7s (bearing=90°)
+5. **Final Hover** - 2s
+
+## Camera Engine Philosophy
+
+PreviewCameraEngine, parsel ön izleme ekranındaki stabil kamera davranışını video render'a taşır.
+
+### Temel İlkeler:
+1. `center = parcelCenter` (HER ZAMAN SABİT)
+2. `pitch = 57°` (SABİT)
+3. `bearing = cardinal direction + max ±5° drift`
+4. `zoom = baseZoom ± 0.15` (çok hafif değişim)
+5. `fitBounds` mantığı ile zoom hesaplama
+6. 360° orbit YOK
+7. Ani dönüş YOK
 
 ### Video Rendering
 - **Frame-by-frame capture** - No realtime canvas recording

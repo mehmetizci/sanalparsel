@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useParcelStore } from "@/lib/parcel-store";
-import { DroneCamera, altitudeToZoom } from "@/lib/drone-camera";
+import { PreviewCameraEngine, altitudeToZoom } from "@/lib/preview-camera-engine";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 
@@ -38,6 +38,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   const droneSettings = useParcelStore((state) => state.droneSettings);
   const videoSettings = useParcelStore((state) => state.videoSettings);
   const parcelCenter = useParcelStore((state) => state.parcelCenter);
+  const parcelBounds = useParcelStore((state) => state.parcelBounds);
   const setRecordingMap = useParcelStore((state) => state.setRecordingMap);
   const setRecordedVideoUrl = useParcelStore((state) => state.setRecordedVideoUrl);
 
@@ -620,7 +621,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   const animateCameraCallbackRef = useRef<((map: mapboxgl.Map, center: { lat: number; lon: number }) => void) | null>(null);
   
   // Cinematic camera engine ref
-  const cameraEngineRef = useRef<DroneCamera | null>(null);
+  const cameraEngineRef = useRef<PreviewCameraEngine | null>(null);
   
   animateCameraCallbackRef.current = (map: mapboxgl.Map, center: { lat: number; lon: number }) => {
     if (!mountedRef.current) return;
@@ -638,13 +639,15 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
     }
     setRenderProgress(displayProgress);
 
-    // Initialize simple camera engine if not done
+    // Initialize Preview Camera Engine (stabil kamera davranışı)
     if (!cameraEngineRef.current && parcelCenter) {
-      cameraEngineRef.current = new DroneCamera({
+      cameraEngineRef.current = new PreviewCameraEngine({
         parcelCenter: [parcelCenter.lon, parcelCenter.lat],
+        parcelBounds: parcelBounds || undefined,
         altitude: droneSettings.startHeight,
         feel: droneSettings.cameraFeel,
         duration: totalDuration,
+        basePitch: 57, // Stabil pitch değeri
       });
     }
     

@@ -24,8 +24,9 @@ import {
   buildCinematicStyle,
 } from "@/lib/cinematic-renderer";
 import { 
-  DroneCamera 
+  // DroneCamera - deprecated, use PreviewCameraEngine
 } from "@/lib/drone-camera";
+import { PreviewCameraEngine } from "@/lib/preview-camera-engine";
 import { useParcelStore } from "@/lib/parcel-store";
 import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
 import type { LngLatLike } from "maplibre-gl";
@@ -122,7 +123,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
   const isIdleHandledRef = useRef(false);
   const isCancelledRef = useRef(false);
   const framesRef = useRef<ImageData[]>([]);
-  const cameraEngineRef = useRef<DroneCamera | null>(null);
+  const cameraEngineRef = useRef<PreviewCameraEngine | null>(null);
   
   const [renderState, setRenderState] = useState<RenderState>({
     phase: "idle",
@@ -274,14 +275,17 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         return;
       }
 
-      // Create Simple Camera Engine and store in ref
+      // Create Preview Camera Engine (stabil kamera davranışı)
       const droneSettings = useParcelStore.getState().droneSettings;
+      const parcelBounds = useParcelStore.getState().parcelBounds;
       
-      cameraEngineRef.current = new DroneCamera({
+      cameraEngineRef.current = new PreviewCameraEngine({
         parcelCenter: [center.lon, center.lat],
+        parcelBounds: parcelBounds || undefined,
         altitude: droneSettings.startHeight,
         duration: droneSettings.duration,
         feel: droneSettings.cameraFeel,
+        basePitch: 57, // Stabil pitch değeri
       });
 
       // Initial camera state
