@@ -1,36 +1,46 @@
 /**
- * Simple Cinematic Camera Engine v6
+ * Simple Cinematic Camera Engine v7
  * 
  * Sıralı 6 sahne sistemi:
- * 1. 360 Orbit - %30 (tam tur, sabit zoom, sabit center)
- * 2. Kuzeyden Yaklaşım - %15 (düz hat, lineer)
- * 3. Güneyden Yaklaşım - %15 (düz hat, lineer)
- * 4. Doğudan Yaklaşım - %15 (düz hat, lineer)
- * 5. Batıdan Yaklaşım - %15 (düz hat, lineer)
- * 6. Final Yaklaşım - %10 (yavaş zoom)
+ * 1. 360 Orbit - %28 (tam tur, sabit zoom, sabit center)
+ * 2. Geçiş - %2 (1 saniye sabit)
+ * 3. Kuzey - %14 (düz ileri yaklaşma)
+ * 4. Geçiş - %2 (1 saniye sabit)
+ * 5. Güney - %14 (düz ileri yaklaşma)
+ * 6. Geçiş - %2 (1 saniye sabit)
+ * 7. Doğu - %14 (düz ileri yaklaşma)
+ * 8. Geçiş - %2 (1 saniye sabit)
+ * 9. Batı - %14 (düz ileri yaklaşma)
+ * 10. Final - %10
  * 
  * KRİTİK KURALLAR:
  * - Orbit: center = parcelCenter (SABİT), zoom = SABİT, sadece bearing döner
- * - 4 Köşe: center kayar (düz hat), bearing SABİT, zoom SABİT
- * - Parsel HER ZAMAN görünür olmalı
- * - Ani hızlanma veya ani dönüş YOK
- * - easeInOutCubic kullan (smooth)
+ * - 4 Köşe: düz ileri yaklaşma, bearing ileri yöne bakar
+ * - Her sahne başında 1sn hazırlık
+ * - Parsel HER ZAMAN görünür
+ * - easeInOutCubic kullan
  */
 
 import type { CameraFeel } from "@/lib/parcel-store";
 
 // ─── Sabitler ────────────────────────────────────────────────────────────────
 
-const MIN_ZOOM = 13;      // Parsel görünür kalır (güvenli minimum)
-const MAX_ZOOM = 17;      // Parsel kadrajdan taşmaz
+const MIN_ZOOM = 13;
+const MAX_ZOOM = 17;
 
+// Sahne süreleri (100% = 1.0)
 const SCENE_DURATIONS = {
-  orbit: 0.30,           // %30
-  north: 0.15,           // %15
-  south: 0.15,           // %15
-  east: 0.15,            // %15
-  west: 0.15,            // %15
-  final: 0.10,           // %10
+  orbit: 0.28,
+  orbitHover: 0.02,    // Orbit sonunda 2% hover
+  transitionNorth: 0.02, // 1sn geçiş
+  north: 0.14,
+  transitionSouth: 0.02,
+  south: 0.14,
+  transitionEast: 0.02,
+  east: 0.14,
+  transitionWest: 0.02,
+  west: 0.14,
+  final: 0.10,
 };
 
 // ─── Easing ─────────────────────────────────────────────────────────────────
@@ -60,27 +70,18 @@ function getEasing(feel: CameraFeel): (t: number) => number {
 
 // ─── Yardımcı Fonksiyonlar ───────────────────────────────────────────────────
 
-/**
- * Yükseklikten zoom hesapla
- */
 export function altitudeToZoom(altitude: number): number {
   return 18 - Math.log2(altitude / 50);
 }
 
 /**
- * Yükseklikten offset mesafesi hesapla (derece cinsinden)
- * Daha yüksek = daha uzak başlangıç
+ * Yükseklikten offset mesafesi (derece)
  */
 function altitudeToOffset(altitude: number): number {
-  // Her 100m için ~0.004 derece offset
-  const baseOffset = altitude / 100 * 0.004;
-  // Minimum 0.004, maximum 0.025
-  return Math.max(0.004, Math.min(0.025, baseOffset));
+  const baseOffset = altitude / 100 * 0.006;
+  return Math.max(0.006, Math.min(0.030, baseOffset));
 }
 
-/**
- * Parsel bounds'dan uygun zoom hesapla
- */
 export function calculateOptimalZoom(
   altitude: number,
   parcelBounds: { width: number; height: number }
@@ -91,24 +92,25 @@ export function calculateOptimalZoom(
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, baseZoom - sizeAdjustment + 1));
 }
 
-/**
- * Süreye göre sahne zamanlamalarını hesapla
- */
 export function calculateSceneTimings(
   duration: number
 ): Array<{ name: SceneName; start: number; end: number }> {
   const timings: Array<{ name: SceneName; start: number; end: number }> = [];
-  
   let currentTime = 0;
   
-  for (const [scene, ratio] of Object.entries(SCENE_DURATIONS)) {
+  const sceneMap: Record<string, number> = {
+    orbit: SCENE_DURATIONS.orbit,
+    north: SCENE_DURATIONS.north,
+    south: SCENE_DURATIONS.south,
+    east: SCENE_DURATIONS.east,
+    west: SCENE_DURATIONS.west,
+    final: SCENE_DURATIONS.final,
+  };
+  
+  for (const [scene, ratio] of Object.entries(sceneMap)) {
     const start = currentTime;
     const end = currentTime + (duration * ratio);
-    timings.push({
-      name: scene as SceneName,
-      start,
-      end,
-    });
+    timings.push({ name: scene as SceneName, start, end });
     currentTime = end;
   }
   
@@ -127,10 +129,13 @@ export interface CameraState {
 
 export type SceneName = 'orbit' | 'north' | 'south' | 'east' | 'west' | 'final';
 
+// Internal scene type (includes transitions)
+type InternalScene = SceneName | 'transitionNorth' | 'transitionSouth' | 'transitionEast' | 'transitionWest';
+
 export interface SceneInfo {
   name: SceneName;
-  progress: number; // 0-1 within scene
-  globalProgress: number; // 0-1 overall
+  progress: number;
+  globalProgress: number;
 }
 
 // ─── Basit Kamera Motoru ─────────────────────────────────────────────────────
@@ -138,7 +143,7 @@ export interface SceneInfo {
 export interface SimpleCameraOptions {
   parcelCenter: [number, number];
   altitude: number;
-  duration: number; // Video duration in seconds
+  duration: number;
   feel: CameraFeel;
 }
 
@@ -147,19 +152,14 @@ export class SimpleCameraEngine {
   private easing: (t: number) => number;
   private baseZoom: number;
   private startBearing: number;
-  private offset: number; // Başlangıç offset mesafesi (derece)
+  private offset: number;
+  private previousScene: SceneName = 'orbit';
 
   constructor(options: SimpleCameraOptions) {
     this.options = options;
     this.easing = getEasing(options.feel);
-    
-    // Base zoom altitude'dan hesaplanır
     this.baseZoom = 18 - Math.log2(options.altitude / 50);
-    
-    // Rastgele başlangıç bearing'i
-    this.startBearing = Math.random() * 360;
-    
-    // Yükseklik bazlı offset
+    this.startBearing = Math.floor(Math.random() * 360);
     this.offset = altitudeToOffset(options.altitude);
   }
 
@@ -177,173 +177,201 @@ export class SimpleCameraEngine {
   }
 
   /**
-   * Mevcut sahneyi bul
+   * Mevcut sahneyi bul (geçiş sahneleri dahil)
    */
-  private getCurrentScene(progress: number): SceneName {
-    if (progress < SCENE_DURATIONS.orbit) return 'orbit';
-    if (progress < SCENE_DURATIONS.orbit + SCENE_DURATIONS.north) return 'north';
-    if (progress < SCENE_DURATIONS.orbit + SCENE_DURATIONS.north + SCENE_DURATIONS.south) return 'south';
-    if (progress < SCENE_DURATIONS.orbit + SCENE_DURATIONS.north + SCENE_DURATIONS.south + SCENE_DURATIONS.east) return 'east';
-    if (progress < SCENE_DURATIONS.orbit + SCENE_DURATIONS.north + SCENE_DURATIONS.south + SCENE_DURATIONS.east + SCENE_DURATIONS.west) return 'west';
+  private getCurrentScene(progress: number): InternalScene {
+    // Geçiş kontrolü
+    const orbitEnd = SCENE_DURATIONS.orbit;
+    const transitionNorthEnd = orbitEnd + SCENE_DURATIONS.transitionNorth;
+    const northEnd = transitionNorthEnd + SCENE_DURATIONS.north;
+    const transitionSouthEnd = northEnd + SCENE_DURATIONS.transitionSouth;
+    const southEnd = transitionSouthEnd + SCENE_DURATIONS.south;
+    const transitionEastEnd = southEnd + SCENE_DURATIONS.transitionEast;
+    const eastEnd = transitionEastEnd + SCENE_DURATIONS.east;
+    const transitionWestEnd = eastEnd + SCENE_DURATIONS.transitionWest;
+    const westEnd = transitionWestEnd + SCENE_DURATIONS.west;
+    
+    if (progress < orbitEnd) return 'orbit';
+    if (progress < transitionNorthEnd) return 'transitionNorth';
+    if (progress < northEnd) return 'north';
+    if (progress < transitionSouthEnd) return 'transitionSouth';
+    if (progress < southEnd) return 'south';
+    if (progress < transitionEastEnd) return 'transitionEast';
+    if (progress < eastEnd) return 'east';
+    if (progress < transitionWestEnd) return 'transitionWest';
+    if (progress < westEnd) return 'west';
     return 'final';
   }
 
   /**
    * Sahne içi progress (0-1)
    */
-  private getSceneProgress(globalProgress: number, scene: SceneName): number {
+  private getSceneProgress(globalProgress: number, scene: InternalScene): number {
     const sceneStart = this.getSceneStartProgress(scene);
     const sceneDuration = this.getSceneDuration(scene);
+    
+    if (sceneDuration === 0) return 0;
     
     const progressInScene = globalProgress - sceneStart;
     return Math.max(0, Math.min(1, progressInScene / sceneDuration));
   }
 
-  private getSceneStartProgress(scene: SceneName): number {
+  private getSceneStartProgress(scene: InternalScene): number {
+    const d = SCENE_DURATIONS;
+    
     switch (scene) {
       case 'orbit': return 0;
-      case 'north': return SCENE_DURATIONS.orbit;
-      case 'south': return SCENE_DURATIONS.orbit + SCENE_DURATIONS.north;
-      case 'east': return SCENE_DURATIONS.orbit + SCENE_DURATIONS.north + SCENE_DURATIONS.south;
-      case 'west': return SCENE_DURATIONS.orbit + SCENE_DURATIONS.north + SCENE_DURATIONS.south + SCENE_DURATIONS.east;
-      case 'final': return SCENE_DURATIONS.orbit + SCENE_DURATIONS.north + SCENE_DURATIONS.south + SCENE_DURATIONS.east + SCENE_DURATIONS.west;
+      case 'transitionNorth': return d.orbit;
+      case 'north': return d.orbit + d.transitionNorth;
+      case 'transitionSouth': return d.orbit + d.transitionNorth + d.north;
+      case 'south': return d.orbit + d.transitionNorth + d.north + d.transitionSouth;
+      case 'transitionEast': return d.orbit + d.transitionNorth + d.north + d.transitionSouth + d.south;
+      case 'east': return d.orbit + d.transitionNorth + d.north + d.transitionSouth + d.south + d.transitionEast;
+      case 'transitionWest': return d.orbit + d.transitionNorth + d.north + d.transitionSouth + d.south + d.transitionEast + d.east;
+      case 'west': return d.orbit + d.transitionNorth + d.north + d.transitionSouth + d.south + d.transitionEast + d.east + d.transitionWest;
+      case 'final': return d.orbit + d.transitionNorth + d.north + d.transitionSouth + d.south + d.transitionEast + d.east + d.transitionWest + d.west;
     }
   }
 
-  private getSceneDuration(scene: SceneName): number {
+  private getSceneDuration(scene: InternalScene): number {
+    const d = SCENE_DURATIONS;
+    
     switch (scene) {
-      case 'orbit': return SCENE_DURATIONS.orbit;
-      case 'north': return SCENE_DURATIONS.north;
-      case 'south': return SCENE_DURATIONS.south;
-      case 'east': return SCENE_DURATIONS.east;
-      case 'west': return SCENE_DURATIONS.west;
-      case 'final': return SCENE_DURATIONS.final;
+      case 'orbit': return d.orbit;
+      case 'transitionNorth': return d.transitionNorth;
+      case 'north': return d.north;
+      case 'transitionSouth': return d.transitionSouth;
+      case 'south': return d.south;
+      case 'transitionEast': return d.transitionEast;
+      case 'east': return d.east;
+      case 'transitionWest': return d.transitionWest;
+      case 'west': return d.west;
+      case 'final': return d.final;
     }
   }
 
   /**
    * Sahneye göre kamera durumunu hesapla
    */
-  private calculateSceneState(scene: SceneName, sceneProgress: number): CameraState {
+  private calculateSceneState(scene: InternalScene, sceneProgress: number): CameraState {
     const { parcelCenter, altitude } = this.options;
-    const easedSceneProgress = easeInOutCubic(sceneProgress); // Her zaman smooth easing
+    const easedSceneProgress = easeInOutCubic(sceneProgress);
     
     let center: [number, number];
     let zoom: number;
     let pitch: number;
     let bearing: number;
 
+    // ─── Geçiş sahneleri: parsel merkeze snap ───
+    if (scene.startsWith('transition')) {
+      center = [parcelCenter[0], parcelCenter[1]];
+      zoom = this.baseZoom + 0.5;
+      pitch = 45;
+      
+      // Hangi yöne geçiş yapılıyor
+      const nextScene = scene.replace('transition', '');
+      bearing = this.getBearingForScene(nextScene as SceneName);
+      
+      return { center, zoom, pitch, bearing, altitude };
+    }
+
+    // ─── Ana sahneler ───
     switch (scene) {
       case 'orbit':
-        // ═══════════════════════════════════════════════════════════════
-        // SAHNE 1: 360° ORBIT
-        // ═══════════════════════════════════════════════════════════════
-        // center = parcelCenter (SABİT - ASLA değişmez)
-        // zoom = SABİT (ASLA değişmez)
-        // pitch = SABİT
-        // Sadece bearing döner: 0→360 (tam tur)
-        // Son %15: hover (yavaş son)
-        // ═══════════════════════════════════════════════════════════════
-        
+        // ═══════════════════════════════════════════════════
+        // ORBIT 360° - Tam tur, sabit zoom, sabit center
+        // ═══════════════════════════════════════════════════
         center = [parcelCenter[0], parcelCenter[1]];
-        zoom = this.baseZoom + 0.5; // SABİT zoom - değişmez!
+        zoom = this.baseZoom + 0.5; // SABİT
         pitch = 45;
         
-        // Tam 360° dönüş, sabit hız
-        // Son 15%'de yavaş hover
-        const isHovering = sceneProgress > 0.85;
+        // Son %7'de (2%) hover
+        const isHovering = sceneProgress > 0.93;
         
         if (isHovering) {
-          // Hover: son 15%'de yavaşla
-          const hoverProgress = (sceneProgress - 0.85) / 0.15;
-          const preHoverBearing = this.startBearing + 0.85 * 360;
-          // Son 54° (15% * 360) yavaş geçiş
-          bearing = preHoverBearing + (hoverProgress * 54);
+          const hoverProgress = (sceneProgress - 0.93) / 0.07;
+          const preHoverBearing = this.startBearing + 0.93 * 360;
+          bearing = preHoverBearing + (hoverProgress * 25.2);
         } else {
-          // Normal: sabit hızda 360°
           bearing = this.startBearing + easedSceneProgress * 360;
         }
         break;
 
       case 'north':
-        // ═══════════════════════════════════════════════════════════════
-        // SAHNE 2: KUZEYDEN YAKLAŞIM
-        // ═══════════════════════════════════════════════════════════════
-        // Düz hat boyunca parsele yaklaşır
-        // center kayar, bearing SABİT, zoom SABİT
-        // ═══════════════════════════════════════════════════════════════
-        
+        // ═══════════════════════════════════════════════════
+        // KUZEYDEN YAKLAŞIM - Düz ileri, kuzeye bak
+        // ═══════════════════════════════════════════════════
         // Başlangıç: kuzeyde uzak
-        const northStart = parcelCenter[1] + this.offset;
-        // Bitiş: parsel merkezine yaklaş
-        const northEnd = parcelCenter[1] + this.offset * 0.2;
+        // Bitiş: parsele yaklaş
+        // İleri hareket, kuzeye bak
         
-        center = [
-          parcelCenter[0], // lon SABİT
-          northStart + (northEnd - northStart) * easedSceneProgress, // lat değişir
-        ];
-        zoom = this.baseZoom + 0.5; // SABİT zoom
-        pitch = 45;
-        bearing = 180; // Kuzeye doğru bak (SABİT)
-        break;
-
-      case 'south':
-        // ═══════════════════════════════════════════════════════════════
-        // SAHNE 3: GÜNEYDEN YAKLAŞIM
-        // ═══════════════════════════════════════════════════════════════
-        
-        const southStart = parcelCenter[1] - this.offset;
-        const southEnd = parcelCenter[1] - this.offset * 0.2;
+        const northStartLat = parcelCenter[1] + this.offset;
+        const northEndLat = parcelCenter[1] + this.offset * 0.15;
         
         center = [
           parcelCenter[0],
-          southStart + (southEnd - southStart) * easedSceneProgress,
+          northStartLat + (northEndLat - northStartLat) * easedSceneProgress,
         ];
-        zoom = this.baseZoom + 0.5; // SABİT zoom
+        zoom = this.baseZoom + 0.5; // SABİT
         pitch = 45;
-        bearing = 0; // Güneye doğru bak (SABİT)
+        bearing = 180; // Kuzeye doğru (ileri)
+        break;
+
+      case 'south':
+        // ═══════════════════════════════════════════════════
+        // GÜNEYDEN YAKLAŞIM - Düz ileri, güneye bak
+        // ═══════════════════════════════════════════════════
+        
+        const southStartLat = parcelCenter[1] - this.offset;
+        const southEndLat = parcelCenter[1] - this.offset * 0.15;
+        
+        center = [
+          parcelCenter[0],
+          southStartLat + (southEndLat - southStartLat) * easedSceneProgress,
+        ];
+        zoom = this.baseZoom + 0.5;
+        pitch = 45;
+        bearing = 0; // Güneye doğru (ileri)
         break;
 
       case 'east':
-        // ═══════════════════════════════════════════════════════════════
-        // SAHNE 4: DOĞUDAN YAKLAŞIM
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════
+        // DOĞUDAN YAKLAŞIM - Düz ileri, doğuya bak
+        // ═══════════════════════════════════════════════════
         
-        const eastStart = parcelCenter[0] + this.offset;
-        const eastEnd = parcelCenter[0] + this.offset * 0.2;
+        const eastStartLon = parcelCenter[0] + this.offset;
+        const eastEndLon = parcelCenter[0] + this.offset * 0.15;
         
         center = [
-          eastStart + (eastEnd - eastStart) * easedSceneProgress, // lon değişir
-          parcelCenter[1], // lat SABİT
+          eastStartLon + (eastEndLon - eastStartLon) * easedSceneProgress,
+          parcelCenter[1],
         ];
-        zoom = this.baseZoom + 0.5; // SABİT zoom
+        zoom = this.baseZoom + 0.5;
         pitch = 45;
-        bearing = 90; // Doğuya doğru bak (SABİT)
+        bearing = 90; // Doğuya doğru (ileri)
         break;
 
       case 'west':
-        // ═══════════════════════════════════════════════════════════════
-        // SAHNE 5: BATIDAN YAKLAŞIM
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════
+        // BATIDAN YAKLAŞIM - Düz ileri, batıya bak
+        // ═══════════════════════════════════════════════════
         
-        const westStart = parcelCenter[0] - this.offset;
-        const westEnd = parcelCenter[0] - this.offset * 0.2;
+        const westStartLon = parcelCenter[0] - this.offset;
+        const westEndLon = parcelCenter[0] - this.offset * 0.15;
         
         center = [
-          westStart + (westEnd - westStart) * easedSceneProgress, // lon değişir
-          parcelCenter[1], // lat SABİT
+          westStartLon + (westEndLon - westStartLon) * easedSceneProgress,
+          parcelCenter[1],
         ];
-        zoom = this.baseZoom + 0.5; // SABİT zoom
+        zoom = this.baseZoom + 0.5;
         pitch = 45;
-        bearing = 270; // Batıya doğru bak (SABİT)
+        bearing = 270; // Batıya doğru (ileri)
         break;
 
       case 'final':
-        // ═══════════════════════════════════════════════════════════════
-        // SAHNE 6: FİNAL YAKLAŞIM
-        // ═══════════════════════════════════════════════════════════════
-        // Yavaşça zoom yap, parsel merkezde kalır
-        
+        // ═══════════════════════════════════════════════════
+        // FİNAL - Yavaş zoom in, parsel merkezde
+        // ═══════════════════════════════════════════════════
         center = [parcelCenter[0], parcelCenter[1]];
         zoom = this.clampZoom(this.baseZoom + 0.5 + easedSceneProgress * 1.5);
         pitch = 45;
@@ -357,6 +385,8 @@ export class SimpleCameraEngine {
         bearing = this.startBearing;
     }
 
+    this.previousScene = scene as SceneName;
+
     return {
       center,
       zoom,
@@ -366,32 +396,45 @@ export class SimpleCameraEngine {
     };
   }
 
-  /**
-   * Zoom'u sınırlar içinde tut
-   */
+  private getBearingForScene(scene: SceneName): number {
+    switch (scene) {
+      case 'north': return 180;
+      case 'south': return 0;
+      case 'east': return 90;
+      case 'west': return 270;
+      case 'final': return this.startBearing + 360;
+      default: return this.startBearing;
+    }
+  }
+
   private clampZoom(zoom: number): number {
     return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
   }
 
-  /**
-   * Mevcut sahne bilgisini al (debugging için)
-   */
   getSceneInfo(progress: number): SceneInfo {
     const p = Math.max(0, Math.min(1, progress));
     const easedP = this.easing(p);
     const scene = this.getCurrentScene(easedP);
     const sceneProgress = this.getSceneProgress(easedP, scene);
     
+    // Geçiş sahnelerini ana sahneye map et
+    let mappedScene: SceneName = 'orbit';
+    if (scene === 'orbit') mappedScene = 'orbit';
+    else if (scene.startsWith('transition')) {
+      // Geçiş ise bir sonraki sahneyi göster
+      const next = scene.replace('transition', '') as SceneName;
+      mappedScene = next || 'orbit';
+    } else {
+      mappedScene = scene as SceneName;
+    }
+    
     return {
-      name: scene,
+      name: mappedScene,
       progress: sceneProgress,
       globalProgress: easedP,
     };
   }
 
-  /**
-   * Sahne adını Türkçe olarak al
-   */
   getSceneNameTR(scene: SceneName): string {
     switch (scene) {
       case 'orbit': return '360° Orbit';
