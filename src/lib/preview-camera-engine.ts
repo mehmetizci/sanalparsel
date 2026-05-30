@@ -30,8 +30,11 @@ import type { CameraFeel } from "@/lib/parcel-store";
 const MIN_ZOOM = 13;
 const MAX_ZOOM = 16.5;
 
-// Her yön için sabit bearing değerleri
-const CARDINAL_BEARINGS = {
+// Direction scene type - sadece 4 yön
+export type DirectionScene = "north" | "east" | "south" | "west";
+
+// Her yön için sabit bearing değerleri - sadece direction scene'ler
+const CARDINAL_BEARINGS: Record<DirectionScene, number> = {
   north: 180,
   east: 270,
   south: 0,
@@ -236,7 +239,7 @@ export class PreviewCameraEngine {
    * KRİTİK KURALLAR:
    * - center = parcelCenter (SABİT - değişmez!)
    * - pitch = basePitch (SABİT - değişmez!)
-   * - bearing = CARDINAL_BEARINGS[scene] + max ±5° drift
+   * - bearing = CARDINAL_BEARINGS[scene] + max ±5° drift (direction scenes için)
    * - zoom = sceneStartZoom + easing * (sceneEndZoom - sceneStartZoom)
    */
   private calculateSceneState(scene: SceneName, sceneProgress: number): CameraState {
@@ -252,12 +255,27 @@ export class PreviewCameraEngine {
     // ─── PITCH (SABİT) ───
     const pitch = this.basePitch;
     
-    // ─── BEARING (çok küçük drift ile) ───
-    const baseBearing = CARDINAL_BEARINGS[scene];
-    // Max ±5° drift (çok küçük sinematik hareket)
-    const driftRange = 5;
-    const driftAmount = Math.sin(calmProgress * Math.PI) * driftRange;
-    const bearing = baseBearing + driftAmount;
+    // ─── BEARING ───
+    let bearing: number;
+    
+    // Final sahne - direction değil, son bearing'i koru
+    if (scene === "final") {
+      // Final'de son direction'un bearing değerini kullan
+      const lastDirection = "west" as DirectionScene;
+      const lastBearing = CARDINAL_BEARINGS[lastDirection];
+      // Final'de hafif drift devam
+      const driftRange = 3;
+      const driftAmount = Math.sin(calmProgress * Math.PI) * driftRange;
+      bearing = lastBearing + driftAmount;
+    } else {
+      // Direction scene - CARDINAL_BEARINGS kullan
+      const directionScene = scene as DirectionScene;
+      const baseBearing = CARDINAL_BEARINGS[directionScene];
+      // Max ±5° drift (çok küçük sinematik hareket)
+      const driftRange = 5;
+      const driftAmount = Math.sin(calmProgress * Math.PI) * driftRange;
+      bearing = baseBearing + driftAmount;
+    }
     
     // ─── ZOOM (çok hafif değişim) ───
     const startZoom = this.sceneStartZooms[scene];
