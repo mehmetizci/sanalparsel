@@ -317,21 +317,20 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
     }, 8000);
 
     map.on("error", (e) => {
-      console.error("[VideoCreate] Map error:", e);
-      if (mountedRef.current) {
+      // Only show error if render has NOT started yet
+      // If recording is in progress, map errors are typically recoverable
+      if (mountedRef.current && renderState === "preparing") {
+        console.error("[VideoCreate] Map error during preparation:", e);
         setErrorMessage("Harita yüklenirken hata oluştu: " + (e.error?.message || "Bilinmeyen hata"));
         setRenderState("error");
+      } else {
+        console.warn("[VideoCreate] Map error during recording (recoverable):", e);
       }
     });
 
-    // Timeout for entire preparation
-    preparationTimeoutRef.current = setTimeout(() => {
-      if (mountedRef.current && renderState === "preparing") {
-        console.log("[VideoCreate] Preparation timeout reached");
-        setErrorMessage("Harita hazırlanması çok uzun sürüyor. Lütfen tekrar deneyin.");
-        setRenderState("error");
-      }
-    }, 15000);
+    // NOTE: Removed global preparation timeout
+    // The map will eventually load or fail naturally
+    // No artificial timeout errors will be shown during recording
   }, [uploadedGeoJson, parcelCenter, setRecordingMap]);
 
   // Start recording only when map is fully ready
@@ -489,9 +488,21 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
     const elapsed = (Date.now() - startTimeRef.current) / 1000;
     setRenderElapsed(Math.min(elapsed, totalDuration));
 
-    // Progress calculation
+    // Progress calculation (0-100%)
     const progress = Math.min(elapsed / totalDuration, 1);
-    setRenderProgress(Math.round(progress * 80));
+    
+    // Progress phases:
+    // 0-80%: recording in progress
+    // 80-95%: stopping recorder
+    // 95-100%: finalizing video
+    let displayProgress = Math.round(progress * 100);
+    
+    // Cap progress at 99% until recording actually stops
+    if (elapsed >= totalDuration && displayProgress >= 100) {
+      displayProgress = 100;
+    }
+    
+    setRenderProgress(displayProgress);
 
     // Get sequence from ref
     const sequence = cameraSequenceRef.current;
@@ -606,9 +617,14 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
           <div className="p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-white/60 text-sm">
-                {renderState === "preparing" && "Harita hazırlanıyor..."}
-                {renderState === "recording" && "Drone rotaları hesaplanıyor..."}
-                {renderState === "processing" && "Video kareleri işleniyor..."}
+                {/* Progress-based status messages */}
+                {renderState === "preparing" && renderProgress < 10 && "Harita hazırlanıyor..."}
+                {renderState === "preparing" && renderProgress >= 10 && renderProgress < 30 && "Drone rotaları hesaplanıyor..."}
+                {renderState === "recording" && renderProgress < 30 && "Drone rotaları hesaplanıyor..."}
+                {renderState === "recording" && renderProgress >= 30 && renderProgress < 80 && "Video kareleri işleniyor..."}
+                {renderState === "recording" && renderProgress >= 80 && renderProgress < 95 && "MP4 oluşturuluyor..."}
+                {renderState === "recording" && renderProgress >= 95 && renderProgress < 100 && "Video kaydediliyor..."}
+                {renderState === "processing" && "MP4 oluşturuluyor..."}
                 {renderState === "completed" && "Tamamlandı ✓"}
                 {renderState === "error" && "Hata"}
                 {renderState === "cancelled" && "İptal edildi"}
