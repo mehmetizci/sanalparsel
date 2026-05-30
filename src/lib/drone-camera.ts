@@ -126,17 +126,6 @@ export class DroneCamera {
   private easing: (t: number) => number;
   private baseZoom: number;
   private startBearing: number;
-  
-  // Yükseklik bazlı offset (derece cinsinden)
-  // Daha yüksek = daha uzak başlangıç
-  private get offset(): number {
-    const alt = this.options.altitude;
-    if (alt <= 100) return 0.010;
-    if (alt <= 200) return 0.015;
-    if (alt <= 300) return 0.020;
-    if (alt <= 400) return 0.025;
-    return 0.030;
-  }
 
   constructor(options: DroneCameraOptions) {
     this.options = options;
@@ -215,12 +204,14 @@ export class DroneCamera {
   /**
    * Sahneye göre kamera durumunu hesapla
    * 
-   * ÖNEMLİ: center = parcelCenter + offset
-   * offset sahne ilerledikçe azalır (yaklaşıyoruz)
+   * ÖNEMLİ: center = parcelCenter (HER ZAMAN SABİT)
+   * Parsel her zaman merkezde ve görünür kalır
+   * 
+   * Sadece bearing ve zoom değişir (çok hafif)
    */
   private calculateSceneState(scene: SceneName, sceneProgress: number): CameraState {
     const { parcelCenter, altitude } = this.options;
-    const { baseZoom, startBearing, offset } = this;
+    const { baseZoom, startBearing } = this;
     
     // Temel değerler
     const pitch = 45;
@@ -265,21 +256,13 @@ export class DroneCamera {
 
       case "north": {
         // ═══════════════════════════════════════════════════════════════
-        // NORTH - Kuzeyden yaklaşma
+        // NORTH - Kuzey yaklaşımı
         // ═══════════════════════════════════════════════════════════════
-        // Kamera kuzeyde başlar, parsele doğru ilerler
-        // center kuzeyden parcelCenter'a kayar
+        // center = parcelCenter (SABİT - parsel görünür kalır)
         
-        const eased = this.easing(sceneProgress);
+        center = [parcelCenter[0], parcelCenter[1]];
         
-        // center kayar: parcelCenter + offset → parcelCenter
-        // offset azaldıkça parsele yaklaşıyoruz
-        const lon = parcelCenter[0];
-        const lat = parcelCenter[1] + offset * (1 - eased);
-        
-        center = [lon, lat];
-        
-        // bearing = 180 (güneye bak = parsele doğru)
+        // bearing = 180 (güneye bak) - parsele doğru
         bearing = 180;
         
         break;
@@ -287,17 +270,10 @@ export class DroneCamera {
 
       case "south": {
         // ═══════════════════════════════════════════════════════════════
-        // SOUTH - Güneyden yaklaşma
+        // SOUTH - Güney yaklaşımı
         // ═══════════════════════════════════════════════════════════════
         
-        const eased = this.easing(sceneProgress);
-        
-        const lon = parcelCenter[0];
-        const lat = parcelCenter[1] - offset * (1 - eased);
-        
-        center = [lon, lat];
-        
-        // bearing = 0 (kuzeye bak = parsele doğru)
+        center = [parcelCenter[0], parcelCenter[1]];
         bearing = 0;
         
         break;
@@ -305,17 +281,10 @@ export class DroneCamera {
 
       case "east": {
         // ═══════════════════════════════════════════════════════════════
-        // EAST - Doğudan yaklaşma
+        // EAST - Doğu yaklaşımı
         // ═══════════════════════════════════════════════════════════════
         
-        const eased = this.easing(sceneProgress);
-        
-        const lon = parcelCenter[0] + offset * (1 - eased);
-        const lat = parcelCenter[1];
-        
-        center = [lon, lat];
-        
-        // bearing = 270 (batıya bak = parsele doğru)
+        center = [parcelCenter[0], parcelCenter[1]];
         bearing = 270;
         
         break;
@@ -323,17 +292,10 @@ export class DroneCamera {
 
       case "west": {
         // ═══════════════════════════════════════════════════════════════
-        // WEST - Batıdan yaklaşma
+        // WEST - Batı yaklaşımı
         // ═══════════════════════════════════════════════════════════════
         
-        const eased = this.easing(sceneProgress);
-        
-        const lon = parcelCenter[0] - offset * (1 - eased);
-        const lat = parcelCenter[1];
-        
-        center = [lon, lat];
-        
-        // bearing = 90 (doğuya bak = parsele doğru)
+        center = [parcelCenter[0], parcelCenter[1]];
         bearing = 90;
         
         break;
