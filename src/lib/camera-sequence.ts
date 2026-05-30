@@ -24,6 +24,62 @@ function getEasing(feel: CameraFeel): (t: number) => number {
 }
 
 /**
+ * Calculate optimal zoom based on altitude and parcel size
+ * Higher altitude = lower zoom (further view)
+ * Smaller parcel = higher zoom (keep parcel visible)
+ */
+function calculateZoomForAltitude(
+  altitude: number, 
+  parcelBounds?: { minLonDiff?: number; minLatDiff?: number } | null
+): number {
+  // Base zoom from altitude (100m = zoom 18, 500m = zoom 14)
+  // Formula: zoom ≈ 20 - log2(altitude / 50)
+  let baseZoom = 20 - Math.log2(altitude / 50);
+  
+  // Clamp to reasonable range
+  baseZoom = Math.max(12, Math.min(19, baseZoom));
+  
+  // Adjust for parcel size if bounds available
+  if (parcelBounds && parcelBounds.minLonDiff && parcelBounds.minLatDiff) {
+    const parcelDegreesX = parcelBounds.minLonDiff;
+    const parcelDegreesY = parcelBounds.minLatDiff;
+    
+    // Target: parcel should be ~40-60% of screen
+    const targetScreenRatio = 0.5;
+    
+    // Calculate what zoom needed to fit parcel in view with some margin
+    // Solve for zoom: zoom = log2(360 / (degrees / ratio) / 256)
+    const neededZoomX = Math.log2(360 / (parcelDegreesX / targetScreenRatio) / 256);
+    const neededZoomY = Math.log2(360 / (parcelDegreesY / targetScreenRatio) / 256);
+    
+    // Use the more zoomed-in (higher) value to ensure parcel fits
+    const neededZoom = Math.max(neededZoomX, neededZoomY);
+    
+    // Blend between altitude-based and parcel-based zoom
+    // Higher altitude = more altitude-based (wider view)
+    // Lower altitude = more parcel-based (show parcel clearly)
+    const altitudeWeight = Math.min(1, altitude / 400);
+    baseZoom = baseZoom * altitudeWeight + neededZoom * (1 - altitudeWeight);
+  }
+  
+  return Math.max(12, Math.min(19, baseZoom));
+}
+
+/**
+ * Calculate orbit radius based on altitude
+ */
+function calculateOrbitRadius(altitude: number): number {
+  // At 100m: tight orbit (0.001)
+  // At 300m: medium orbit (0.003)
+  // At 500m: wide orbit (0.005)
+  // Formula: radius = altitude / 100000 (roughly)
+  const baseRadius = altitude / 100000;
+  
+  // Clamp to reasonable range
+  return Math.max(0.001, Math.min(0.006, baseRadius));
+}
+
+/**
  * Get pitch range based on camera feel
  */
 function getPitchRange(feel: CameraFeel, mode: CameraSequenceMode): { start: number; end: number } {
@@ -349,7 +405,8 @@ export const defaultDroneSettings: DroneSettingsState = {
 export function interpolateCameraStep(
   step: CameraSequenceStep,
   t: number,
-  center: { lat: number; lon: number }
+  center: { lat: number; lon: number },
+  parcelBounds?: { minLonDiff: number; minLatDiff: number }
 ): { center: [number, number]; zoom: number; pitch: number; bearing: number } {
   const ease = getEasing(step.easing);
   const easedT = ease(t);
@@ -358,6 +415,9 @@ export function interpolateCameraStep(
   let zoom: number;
   let pitch: number;
   let bearing: number;
+  
+  // Use altitude from step (set by buildCameraSequence based on drone settings)
+  const altitude = step.startHeight || 300;
 
   switch (step.mode) {
     case "heroZoom": {
@@ -390,11 +450,16 @@ export function interpolateCameraStep(
         cinematicProgress = 0.8 + 0.2 * (1 - Math.pow(1 - t, 2));
       }
       
-      // Zoom: 11.5 → 15.9 (wider start, slightly relaxed end)
-      // Start: 11.5 gives ~1500m feel (very wide, regional view)
-      // End: 15.9 gives ~200m feel (parcel ~60-65% of screen, surroundings visible)
-      const startZoom = 11.5;
-      const endZoom = 15.9;
+      // Calculate zoom based on altitude
+      // At higher altitude, start further out
+      // At lower altitude, start closer
+      const startZoomBase = calculateZoomForAltitude(altitude * 2, parcelBounds || null);
+      const endZoomBase = calculateZoomForAltitude(altitude * 0.7, parcelBounds || null);
+      
+      // Start: wide view based on altitude (100m=14, 300m=12.5, 500m=11.5)
+      const startZoom = Math.max(11, startZoomBase - 1);
+      // End: close view (parcel fills screen)
+      const endZoom = Math.min(17, endZoomBase + 0.5);
       
       zoom = startZoom + (endZoom - startZoom) * cinematicProgress;
       
@@ -422,9 +487,11 @@ export function interpolateCameraStep(
       
       if (progress < centeringThreshold) {
         // Scene 1: Parcel centered, no orbit yet
-        // Show parcel fully visible in center
+        // Calculate zoom based on altitude
+        const centeringZoom = calculateZoomForAltitude(altitude * 0.8, parcelBounds || null);
+        
         centerOffset = { lon: 0, lat: 0 };  // Locked on parcel center
-        zoom = 15;  // Zoom out to show full parcel
+        zoom = Math.min(16, centeringZoom);  // Show full parcel
         pitch = 65;
         bearing = 0;  // Start facing north
         break;
@@ -443,13 +510,16 @@ export function interpolateCameraStep(
       
       // FIXED VALUES during orbit - no change
       const fixedPitch = 65;
-      const fixedZoom = 16;
       
-      // Orbit radius based on altitude (from step.startHeight or default)
-      // Higher altitude = larger radius
-      const baseRadius = 0.002;
-      const altitudeMultiplier = (step.startHeight || 300) / 300;
-      const orbitRadius = baseRadius * altitudeMultiplier;
+      // Calculate zoom based on altitude (altitude-adjusted zoom)
+      const altitudeZoom = calculateZoomForAltitude(altitude, parcelBounds || null);
+      const fixedZoom = Math.min(18, Math.max(14, altitudeZoom));
+      
+      // Calculate orbit radius based on altitude
+      // At 100m: tight orbit (0.001)
+      // At 300m: medium orbit (0.003)
+      // At 500m: wide orbit (0.005)
+      const orbitRadius = calculateOrbitRadius(altitude);
       
       // Bearing: FULL 360° rotation (linear, no easing)
       // Progress 0 → 1 means bearing 0° → 360°
@@ -461,6 +531,7 @@ export function interpolateCameraStep(
       const bearingRad = (currentBearing * Math.PI) / 180;
       
       // Camera position offset from center (for orbit path)
+      // Center stays at parcel center - camera orbits around it
       centerOffset = { 
         lon: Math.sin(bearingRad) * orbitRadius,
         lat: Math.cos(bearingRad) * orbitRadius 
