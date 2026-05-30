@@ -36,6 +36,7 @@ export interface ParcelCoordinates {
 // Drone settings types
 export type CameraSequenceMode = "heroZoom" | "orbit360" | "spiralDescend" | "topView" | "lowPass" | "fourCorners";
 export type CameraFeel = "soft" | "cinematic" | "dynamic";
+export type ListingType = "sale" | "investment" | "rent";
 
 export interface DroneSettingsState {
   duration: 30 | 45 | 60;

@@ -89,7 +89,6 @@ export class CinematicProfile {
     
     if (p <= 0.20) {
       // Hero zone (0-20%)
-      const t = p / 0.20;
       hero = 1;
       orbit = 0;
       reveal = 0;
@@ -228,7 +227,6 @@ export class OrbitBehavior implements CameraBehavior {
   getState(progress: number, baseState: CameraState, parcelCenter: [number, number]): CameraState {
     // Full 360° orbit around parcel center
     const normalizedProgress = Math.max(0, (progress - 0.15) / 0.35);
-    const angle = normalizedProgress * this.rotationSpeed * (Math.PI / 180);
     
     // Orbit around center (no offset needed - center stays locked)
     const center: [number, number] = [parcelCenter[0], parcelCenter[1]];
@@ -331,7 +329,6 @@ export class FinalOrbitBehavior implements CameraBehavior {
   getState(progress: number, baseState: CameraState, parcelCenter: [number, number]): CameraState {
     // Final orbit: Elegant 360° with slight zoom out
     const normalizedProgress = Math.max(0, (progress - 0.70) / 0.30);
-    const angle = normalizedProgress * this.rotationSpeed * (Math.PI / 180);
     
     // Center stays locked on parcel
     const center: [number, number] = parcelCenter;
@@ -489,7 +486,7 @@ export function lerpBearing(from: number, to: number, t: number): number {
   if (diff > 180) diff -= 360;
   if (diff < -180) diff += 360;
   
-  let result = from + diff * t;
+  const result = from + diff * t;
   return ((result % 360) + 360) % 360;
 }
 

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useParcelStore } from "@/lib/parcel-store";
-import { buildCameraSequence, interpolateCameraStep } from "@/lib/camera-sequence";
+import { buildCameraSequence } from "@/lib/camera-sequence";
 import { CameraBlendingEngine, calculateBaseZoom } from "@/lib/camera-blending-engine";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
@@ -459,8 +459,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
         duration: 30,
         startHeight: 300,
         cameraFeel: "cinematic",
-      },
-      uploadedGeoJson || undefined
+      }
     );
     
     console.log("[VideoCreate] Starting recording with camera sequence");

@@ -25,8 +25,7 @@ import {
 } from "@/lib/cinematic-renderer";
 import { 
   CameraBlendingEngine, 
-  calculateBaseZoom, 
-  type CameraState 
+  calculateBaseZoom 
 } from "@/lib/camera-blending-engine";
 import { useParcelStore } from "@/lib/parcel-store";
 import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
@@ -315,8 +314,6 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
       });
 
       // Progress-based animation
-      const totalFrames = duration * fps;
-      let currentFrame = 0;
       const animationDuration = Math.min(duration * 1000, 15000); // max 15s for intro
       const animationStartTime = performance.now();
 
