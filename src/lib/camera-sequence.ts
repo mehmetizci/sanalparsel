@@ -5,7 +5,7 @@ import type {
   CameraSequenceMode,
   CameraFeel
 } from "@/lib/parcel-store";
-import { calculateBaseZoom } from "@/lib/camera-blending-engine";
+import { altitudeToZoom } from "@/lib/simple-camera-engine";
 
 /**
  * Easing functions based on camera feel
@@ -49,7 +49,7 @@ function generateAutoSequence(
   startHeight: number,
   totalDuration: number
 ): CameraSequenceStep[] {
-  const baseZoom = calculateBaseZoom(startHeight);
+  const baseZoom = altitudeToZoom(startHeight);
   const startBearing = Math.random() * 360;
   
   // Define the phases based on camera feel

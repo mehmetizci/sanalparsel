@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useParcelStore } from "@/lib/parcel-store";
-import { CinematicCameraEngine, calculateBaseZoom } from "@/lib/cinematic-camera-engine";
+import { SimpleCameraEngine, altitudeToZoom } from "@/lib/simple-camera-engine";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 
@@ -466,7 +466,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
     // CRITICAL: Set initial camera position to parcelCenter BEFORE recording starts
     // This ensures the first frame shows parcel centered
     if (center) {
-      const baseZoom = calculateBaseZoom(droneSettings.startHeight);
+      const baseZoom = altitudeToZoom(droneSettings.startHeight);
       console.log("[VideoCreate] Setting initial camera position:", {
         center: [center.lon, center.lat],
         zoom: baseZoom,
@@ -620,7 +620,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   const animateCameraCallbackRef = useRef<((map: mapboxgl.Map, center: { lat: number; lon: number }) => void) | null>(null);
   
   // Cinematic camera engine ref
-  const cameraEngineRef = useRef<CinematicCameraEngine | null>(null);
+  const cameraEngineRef = useRef<SimpleCameraEngine | null>(null);
   
   animateCameraCallbackRef.current = (map: mapboxgl.Map, center: { lat: number; lon: number }) => {
     if (!mountedRef.current) return;
@@ -638,9 +638,9 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
     }
     setRenderProgress(displayProgress);
 
-    // Initialize cinematic camera engine if not done
+    // Initialize simple camera engine if not done
     if (!cameraEngineRef.current && parcelCenter) {
-      cameraEngineRef.current = new CinematicCameraEngine({
+      cameraEngineRef.current = new SimpleCameraEngine({
         parcelCenter: [parcelCenter.lon, parcelCenter.lat],
         altitude: droneSettings.startHeight,
         feel: droneSettings.cameraFeel,
@@ -648,13 +648,13 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
       });
     }
     
-    // Use cinematic camera engine for scene-based animation
+    // Use simple camera engine for scene-based animation
     if (cameraEngineRef.current) {
       const cameraState = cameraEngineRef.current.getState(progress);
       
       // Log camera state for debugging (every 5 seconds)
       if (Math.floor(elapsed) % 5 === 0 && Math.floor(elapsed) > 0) {
-        const sceneInfo = cameraEngineRef.current.getSceneProgressInfo(progress);
+        const sceneInfo = cameraEngineRef.current.getSceneInfo(progress);
         console.log(`[WebRecorder] Progress: ${(progress * 100).toFixed(1)}%, Scene: ${sceneInfo.name}, zoom=${cameraState.zoom.toFixed(2)}, pitch=${cameraState.pitch.toFixed(1)}°`);
       }
       

@@ -24,9 +24,8 @@ import {
   buildCinematicStyle,
 } from "@/lib/cinematic-renderer";
 import { 
-  CameraBlendingEngine, 
-  calculateBaseZoom 
-} from "@/lib/camera-blending-engine";
+  SimpleCameraEngine 
+} from "@/lib/simple-camera-engine";
 import { useParcelStore } from "@/lib/parcel-store";
 import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
 import type { LngLatLike } from "maplibre-gl";
@@ -123,6 +122,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
   const isIdleHandledRef = useRef(false);
   const isCancelledRef = useRef(false);
   const framesRef = useRef<ImageData[]>([]);
+  const cameraEngineRef = useRef<SimpleCameraEngine | null>(null);
   
   const [renderState, setRenderState] = useState<RenderState>({
     phase: "idle",
@@ -158,24 +158,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
     setRenderState(prev => ({ ...prev, phase: "capturing", progress: 0, currentFrame: 0 }));
     onProgressRef.current?.(0, "capturing_frames");
 
-    // Create Camera Blending Engine for the capture phase
-    const positions = flattenRings(parcel.geometry);
-    const parcelCenter = computeCenter(positions);
-    const droneSettings = useParcelStore.getState().droneSettings;
-    const baseZoom = calculateBaseZoom(droneSettings.startHeight);
-    const startBearing = Math.random() * 360;
-
-    let blendingEngine: CameraBlendingEngine | null = null;
-    if (parcelCenter) {
-      blendingEngine = new CameraBlendingEngine({
-        parcelCenter: [parcelCenter.lon, parcelCenter.lat],
-        baseZoom,
-        startBearing,
-        altitude: droneSettings.startHeight,
-        feel: droneSettings.cameraFeel,
-      });
-    }
-
+    // Use existing camera engine from animation phase
     const captureFrame = () => {
       if (isCancelledRef.current) {
         if (captureIntervalRef.current) {
@@ -185,10 +168,10 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         return;
       }
 
-      // Update camera using blending engine during capture
-      if (blendingEngine) {
+      // Update camera using simple engine during capture
+      if (cameraEngineRef.current) {
         const progress = frameCount / totalFrames;
-        const cameraState = blendingEngine.getState(progress);
+        const cameraState = cameraEngineRef.current.getState(progress);
         map.jumpTo({
           center: cameraState.center as LngLatLike,
           zoom: cameraState.zoom,
@@ -291,21 +274,18 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         return;
       }
 
-      // Create Camera Blending Engine
+      // Create Simple Camera Engine and store in ref
       const droneSettings = useParcelStore.getState().droneSettings;
-      const baseZoom = calculateBaseZoom(droneSettings.startHeight);
-      const startBearing = Math.random() * 360;
       
-      const blendingEngine = new CameraBlendingEngine({
+      cameraEngineRef.current = new SimpleCameraEngine({
         parcelCenter: [center.lon, center.lat],
-        baseZoom,
-        startBearing,
         altitude: droneSettings.startHeight,
+        duration: droneSettings.duration,
         feel: droneSettings.cameraFeel,
       });
 
       // Initial camera state
-      const initialState = blendingEngine.getState(0);
+      const initialState = cameraEngineRef.current.getState(0);
       map.jumpTo({
         center: initialState.center as LngLatLike,
         zoom: initialState.zoom,
@@ -323,8 +303,8 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         const elapsed = timestamp - animationStartTime;
         const progress = Math.min(elapsed / animationDuration, 1);
 
-        // Get blended camera state
-        const cameraState = blendingEngine.getState(progress);
+        // Get camera state from simple engine
+        const cameraState = cameraEngineRef.current!.getState(progress);
 
         // Apply to map (smooth via jumpTo)
         map.jumpTo({
