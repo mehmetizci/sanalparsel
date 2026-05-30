@@ -6,6 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
 import type { CameraSequence, CameraSequenceStep } from "@/lib/parcel-store";
 import { buildCinematicStyle, CINEMATIC_EASING } from "@/lib/cinematic-renderer";
+import { interpolateCameraStep as interpolateFromLibrary } from "@/lib/camera-sequence";
 
 export interface WebRecorderProps {
   /** GeoJSON parcel feature */
@@ -74,10 +75,6 @@ function computeCenter(positions: Position[]): { lat: number; lon: number } | nu
   return { lat: lat / count, lon: lon / count };
 }
 
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
 export default function WebRecorder({
   parcel,
   cameraSequence,
@@ -108,40 +105,15 @@ export default function WebRecorder({
     setState(prev => ({ ...prev, ...updates }));
   }, []);
 
+  // Use the enhanced interpolation from camera-sequence library
+  // This includes proper Hero Zoom (parcel locked, only zoom changes)
   const interpolateCameraStep = useCallback((
     step: CameraSequenceStep,
     t: number,
     center: { lat: number; lon: number }
   ): { center: [number, number]; zoom: number; pitch: number; bearing: number } => {
-    const ease = easeInOutCubic(t);
-    
-    // Calculate zoom based on height (higher = zoom out)
-    const heightRange = step.startHeight - step.endHeight;
-
-    const baseZoom = 16 - Math.log2(step.startHeight / 100);
-    const zoomOffset = heightRange / 500 * 0.5;
-    const zoom = baseZoom + (zoomOffset * ease);
-
-    // Interpolate pitch
-    const pitch = step.pitch;
-
-    // Interpolate bearing (handle circular wraparound)
-    let bearingDiff = step.bearingTo - step.bearingFrom;
-    if (bearingDiff > 180) bearingDiff -= 360;
-    if (bearingDiff < -180) bearingDiff += 360;
-    const bearing = step.bearingFrom + bearingDiff * ease;
-
-    // Slight offset from center based on bearing
-    const offsetFactor = 0.0005 * (1 - Math.abs(t - 0.5) * 2);
-    const offsetLon = Math.sin(bearing * Math.PI / 180) * offsetFactor * step.startHeight / 100;
-    const offsetLat = Math.cos(bearing * Math.PI / 180) * offsetFactor * step.startHeight / 100;
-
-    return {
-      center: [center.lon + offsetLon, center.lat + offsetLat] as [number, number],
-      zoom: Math.min(18, Math.max(14, zoom)),
-      pitch,
-      bearing: (bearing + 360) % 360,
-    };
+    // Delegate to the library function which has all mode implementations
+    return interpolateFromLibrary(step, t, center);
   }, []);
 
   // Helper to wait for map to be fully loaded before recording

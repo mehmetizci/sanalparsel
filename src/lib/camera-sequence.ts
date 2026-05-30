@@ -361,45 +361,39 @@ export function interpolateCameraStep(
 
   switch (step.mode) {
     case "heroZoom": {
-      // Dramatic zoom from far high altitude (800-1000m) to close view
-      // Fast approach, slow down in last 2 seconds for Netflix drone feel
+      // Google Earth Studio Hero Shot: Camera locked to parcel center, only zoom changes
+      // Start from 800-1000m, approach to 150m, parcel stays centered
       const progress = easedT;
       
-      // Use approachFrom if available (simulate high altitude start)
-      const hasApproach = step.approachFrom && step.approachTo;
+      // Slow down in last 20% for cinematic feel
+      const adjustedProgress = progress < 0.8 
+        ? progress 
+        : 0.8 + (progress - 0.8) * 0.25; // Ease out last 20%
       
-      if (hasApproach && step.approachFrom && step.approachTo) {
-        // Start from far position (approaching from above)
-        const targetLon = step.approachTo.lon;
-        const targetLat = step.approachTo.lat;
-        
-        centerOffset = {
-          lon: (step.approachFrom.startLon - targetLon) * (1 - progress) + (step.approachFrom.startLon - center.lon) * (1 - progress),
-          lat: (step.approachFrom.startLat - targetLat) * (1 - progress) + (step.approachFrom.startLat - center.lat) * (1 - progress),
-        };
-        
-        // Slow down in last 20% for cinematic feel
-        const adjustedProgress = progress < 0.8 
-          ? progress * 1.0 
-          : 0.8 + (progress - 0.8) * 0.25; // Slow down last 20%
-        
-        zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * adjustedProgress;
-        pitch = step.pitch + (step.pitchEnd - step.pitch) * Math.pow(adjustedProgress, 0.5);
-      } else {
-        // Fallback: simple zoom from far
-        const startRadius = 0.015 * (1 - progress * 0.8);
-        const angle = -progress * Math.PI * 0.3;
-        
-        centerOffset = {
-          lon: Math.sin(angle) * startRadius,
-          lat: Math.cos(angle) * startRadius * 0.5,
-        };
-        
-        zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * Math.pow(progress, 0.7);
-        pitch = step.pitch + (step.pitchEnd - step.pitch) * Math.pow(progress, 0.6);
-      }
+      // Start distance: 1000m, End distance: 150m
+      const startDistanceMeters = 1000;
+      const endDistanceMeters = 150;
+      const currentDistanceMeters = startDistanceMeters - (startDistanceMeters - endDistanceMeters) * adjustedProgress;
       
-      bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * progress;
+      // Convert distance to zoom level (MapLibre/Mapbox formula)
+      // At 1000m altitude, zoom ~13; at 150m, zoom ~17
+      const currentZoom = 20 - Math.log2(currentDistanceMeters);
+      
+      // Pitch: Start at 65° (high angle), slightly increase during approach
+      const startPitch = 65;
+      const endPitch = 70;
+      pitch = startPitch + (endPitch - startPitch) * adjustedProgress;
+      
+      // Bearing stays fixed (or very slight rotation for cinematic effect)
+      bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * progress * 0.1;
+      
+      // NO center offset - camera stays locked on parcel center
+      // This is the key difference: no X/Y drift
+      centerOffset = { lon: 0, lat: 0 };
+      
+      // Zoom with cinematic feel
+      zoom = currentZoom;
+      
       break;
     }
 
