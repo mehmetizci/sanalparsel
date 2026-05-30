@@ -83,7 +83,7 @@ export interface CameraSequence {
 }
 
 // Video settings types
-export type VideoResolution = "1080x1920" | "720x1280";
+export type VideoResolution = "1080x1920" | "720x1280" | "1440x2560" | "2160x3840";
 export type ListingType = "sale" | "investment";
 
 export interface VideoOverlaySettings {

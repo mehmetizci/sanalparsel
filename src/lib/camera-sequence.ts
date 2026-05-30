@@ -444,48 +444,35 @@ export function interpolateCameraStep(
 
   switch (step.mode) {
     case "heroZoom": {
-      // SIMPLIFIED Google Earth Studio Hero Shot
+      // Hero Zoom: Smooth transition from wide view to close-up
+      // Uses step.zoomFrom, step.zoomTo for smooth transitions between scenes
       // Rules:
-      // - center = parcelCenter (NEVER changes)
-      // - pitch = fixed (NEVER changes)
-      // - bearing = fixed (NEVER changes)
-      // - Only zoom changes
-      // - Zoom calculated ONCE at video start, then locked
+      // - center = parcelCenter (NEVER changes) - parcel always at center
+      // - pitch changes smoothly from step.pitch to step.pitchEnd
+      // - bearing changes smoothly from step.bearingFrom to step.bearingTo
+      // - zoom changes from step.zoomFrom to step.zoomTo
       
       const progress = easedT;
       
-      // Final hover: 1.5 seconds at end
-      const hoverDurationSeconds = 1.5;
-      const hoverThreshold = Math.max(0.9, (step.duration - hoverDurationSeconds) / step.duration);
-      const actualProgress = progress > hoverThreshold 
-        ? hoverThreshold 
-        : progress;
-      
-      // Cinematic zoom curve - only zoom changes
-      // First 20%: Very slow approach (ease in)
-      // Middle 60%: Normal approach (linear)
-      // Last 20%: Slow down (ease out)
-      let cinematicProgress = actualProgress;
-      if (actualProgress < 0.2) {
-        cinematicProgress = Math.pow(actualProgress / 0.2, 0.5) * 0.2;
-      } else if (actualProgress < 0.8) {
-        cinematicProgress = actualProgress;
+      // Cinematic zoom curve
+      let cinematicProgress = progress;
+      if (progress < 0.2) {
+        cinematicProgress = Math.pow(progress / 0.2, 0.5) * 0.2;
+      } else if (progress < 0.8) {
+        cinematicProgress = progress;
       } else {
-        const t = (actualProgress - 0.8) / 0.2;
+        const t = (progress - 0.8) / 0.2;
         cinematicProgress = 0.8 + 0.2 * (1 - Math.pow(1 - t, 2));
       }
       
-      // FIXED zoom range - calculated once, never changes
-      // Start: wide view (11.5 = ~1500m feel)
-      // End: close view (15.9 = ~200m feel)
-      const startZoom = 11.5;
-      const endZoom = 15.9;
+      // Smooth zoom interpolation
+      zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * cinematicProgress;
       
-      zoom = startZoom + (endZoom - startZoom) * cinematicProgress;
+      // Smooth pitch interpolation
+      pitch = step.pitch + (step.pitchEnd - step.pitch) * cinematicProgress;
       
-      // FIXED VALUES - never change during zoom
-      pitch = 65;           // Fixed at 65°
-      bearing = 0;          // Fixed at 0° (no rotation)
+      // Smooth bearing interpolation
+      bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * cinematicProgress;
       
       // CRITICAL: Camera LOCKED on parcel center
       centerOffset = { lon: 0, lat: 0 };
@@ -494,55 +481,60 @@ export function interpolateCameraStep(
     }
 
     case "orbit360": {
-      // TRUE DJI POI Mode - 360° orbit with parcel LOCKED at center
-      // CRITICAL RULES:
-      // - center = parcelCenter (NEVER moves, not even offset)
-      // - zoom = fixed (NEVER changes)
-      // - pitch = fixed (NEVER changes)
-      // - ONLY bearing changes (0° → 360°)
+      // Orbit360: Smooth 360° orbit around parcel
+      // CRITICAL for transitions:
+      // - Starts from step.pitch, step.zoomFrom (inherited from previous scene)
+      // - Ends near step.pitchEnd, step.zoomTo
+      // - pitch and zoom change smoothly (not hardcoded)
+      // - ONLY bearing changes for the orbit effect
       // - Camera orbits by rotating bearing, not moving center
       
       const progress = easedT;
       
       // Phase 1: Centering (first 8%)
-      // Camera locks on parcel, shows stable view
+      // Camera transitions smoothly from previous scene values
       const centeringThreshold = 0.08;
       
       if (progress < centeringThreshold) {
-        // Parcel centered, stable view
-        centerOffset = { lon: 0, lat: 0 };  // ZERO offset
-        zoom = 16;  // Fixed zoom
-        pitch = 65; // Fixed pitch
-        bearing = 0; // North facing
+        const transitionProgress = progress / centeringThreshold;
+        // Smooth transition from previous scene values to orbit values
+        const orbitPitch = 65;
+        const orbitZoom = 15;
+        const orbitBearing = 0;
+        
+        centerOffset = { lon: 0, lat: 0 };
+        zoom = step.zoomFrom + (orbitZoom - step.zoomFrom) * transitionProgress;
+        pitch = step.pitch + (orbitPitch - step.pitch) * transitionProgress;
+        bearing = step.bearingFrom + (orbitBearing - step.bearingFrom) * transitionProgress;
         break;
       }
       
-      // Phase 2: True 360° orbit
+      // Phase 2: True 360° orbit with smooth parameter transitions
       const orbitProgress = (progress - centeringThreshold) / (1 - centeringThreshold);
       
-      // Final hover: 2 seconds at end
-      const hoverDurationSeconds = 2;
-      const hoverThreshold = Math.max(0.82, (step.duration - hoverDurationSeconds) / step.duration);
-      const adjustedProgress = orbitProgress > hoverThreshold 
-        ? hoverThreshold 
-        : orbitProgress;
+      // Final hover: 1.5 seconds at end
+      const hoverDurationSeconds = 1.5;
+      const hoverThreshold = Math.max(0.85, (step.duration - hoverDurationSeconds) / step.duration);
+      const adjustedProgress = Math.min(orbitProgress, hoverThreshold);
       
-      // FIXED VALUES - calculated once, never changes
-      const fixedPitch = 65;
-      const fixedZoom = 16;
+      // Consistent values for orbit mode
+      const orbitPitch = 65;
+      const orbitZoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * 0.5; // Middle point
       
-      // ONLY bearing changes - full 360° rotation
-      const currentBearing = adjustedProgress * 360;
+      // Full 360° rotation with smooth transitions
+      const currentBearing = step.bearingFrom + adjustedProgress * 360;
       
       // CENTER STAYS LOCKED - no centerOffset!
-      // The camera orbits by rotating bearing, not by moving center
-      // This keeps parcel at exact screen center throughout orbit
       centerOffset = { lon: 0, lat: 0 };
       
-      // All values locked
-      zoom = fixedZoom;
-      pitch = fixedPitch;
+      // Smooth parameter transitions toward end values
+      const paramProgress = orbitProgress;
+      zoom = orbitZoom + (step.zoomTo - orbitZoom) * paramProgress;
+      pitch = orbitPitch + (step.pitchEnd - orbitPitch) * paramProgress;
       bearing = currentBearing;
+      
+      // Normalize bearing to 0-360
+      bearing = ((bearing % 360) + 360) % 360;
       
       break;
     }
@@ -566,21 +558,45 @@ export function interpolateCameraStep(
     }
     
     case "topView": {
-      // Nearly top-down view with slight zoom
+      // Reveal Shot: Nearly top-down view for cinematic reveal
+      // CRITICAL: Parcel must stay visible - minimum 25% screen height
+      // Uses step.zoomFrom, step.zoomTo, step.pitch, step.pitchEnd for smooth transitions
+      
       const progress = easedT;
       
-      // Very subtle circular movement
-      const radius = 0.0002 * (1 - progress);
-      const angle = progress * Math.PI / 4;
+      // SMOOTH TRANSITION from previous scene (orbit ending values)
+      // to new top view values
+      const transitionDuration = 0.1; // First 10% for smooth transition
       
-      centerOffset = {
-        lon: Math.sin(angle) * radius,
-        lat: Math.cos(angle) * radius,
-      };
+      if (progress < transitionDuration) {
+        const transitionProgress = progress / transitionDuration;
+        // Smooth transition from orbit values to top view values
+        const topPitch = 30; // High angle, can see context
+        const topZoom = Math.max(step.zoomTo, 14); // Ensure parcel stays visible
+        
+        zoom = step.zoomFrom + (topZoom - step.zoomFrom) * transitionProgress;
+        pitch = step.pitch + (topPitch - step.pitch) * transitionProgress;
+        bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * transitionProgress;
+      } else {
+        // Main top view animation with smooth transitions
+        const animProgress = (progress - transitionDuration) / (1 - transitionDuration);
+        
+        // Top down view - high pitch for showing property and context
+        const topPitch = step.pitch + (step.pitchEnd - step.pitch) * animProgress;
+        // Keep adequate zoom so parcel stays visible (25% screen minimum)
+        const topZoom = Math.max(
+          step.zoomFrom + (step.zoomTo - step.zoomFrom) * animProgress,
+          14 // Minimum zoom to keep parcel visible
+        );
+        
+        zoom = topZoom;
+        pitch = topPitch;
+        bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * animProgress;
+      }
       
-      zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * progress;
-      pitch = step.pitch + (step.pitchEnd - step.pitch) * progress;
-      bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * progress;
+      // CRITICAL: NO centerOffset - parcel stays LOCKED at center
+      centerOffset = { lon: 0, lat: 0 };
+      
       break;
     }
     

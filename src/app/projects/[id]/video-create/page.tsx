@@ -36,6 +36,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   // Store state
   const uploadedGeoJson = useParcelStore((state) => state.uploadedGeoJson);
   const droneSettings = useParcelStore((state) => state.droneSettings);
+  const videoSettings = useParcelStore((state) => state.videoSettings);
   const parcelCenter = useParcelStore((state) => state.parcelCenter);
   const setRecordingMap = useParcelStore((state) => state.setRecordingMap);
   const setRecordedVideoUrl = useParcelStore((state) => state.setRecordedVideoUrl);
@@ -481,6 +482,22 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
       return;
     }
 
+    // CRITICAL: Set canvas size from videoSettings resolution
+    // This ensures the recorded video matches the user's selected resolution
+    const { width, height } = videoSettings.resolution === "1080x1920" 
+      ? { width: 1080, height: 1920 }
+      : videoSettings.resolution === "1440x2560"
+        ? { width: 1440, height: 2560 }
+        : videoSettings.resolution === "2160x3840"
+          ? { width: 2160, height: 3840 }
+          : { width: 720, height: 1280 }; // Default: 720x1280
+
+    canvas.width = width;
+    canvas.height = height;
+    
+    console.log("[VideoCreate] Canvas size set to:", width + "x" + height);
+    console.log("[VideoCreate] Using videoSettings resolution:", videoSettings.resolution);
+
     console.log("[VideoCreate] Starting canvas recording");
 
     const stream = canvas.captureStream(VIDEO_FPS);
@@ -522,7 +539,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
     // Start animation loop
     animateCameraCallbackRef.current?.(map, center);
-  }, [checkMediaRecorderSupport, setRecordedVideoUrl]);
+  }, [checkMediaRecorderSupport, setRecordedVideoUrl, videoSettings]);
 
   // Camera animation loop - stored in ref to avoid circular deps
   const animateCameraCallbackRef = useRef<((map: mapboxgl.Map, center: { lat: number; lon: number }) => void) | null>(null);
@@ -721,7 +738,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
         <div className="text-center py-3 mt-4 px-4 rounded-xl" style={{ background: "linear-gradient(135deg, rgba(37,99,235,0.08) 0%, rgba(124,58,237,0.04) 100%)", border: "1px solid rgba(255,255,255,0.05)" }}>
           <div className="flex items-center justify-center gap-2 text-white/50 text-xs">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            <span>720×1280 • WEBM • {totalDuration}s</span>
+            <span>{videoSettings.resolution} • WEBM • {totalDuration}s</span>
           </div>
         </div>
       </div>
