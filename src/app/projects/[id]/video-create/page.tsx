@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useParcelStore } from "@/lib/parcel-store";
-import { SimpleCameraEngine, altitudeToZoom } from "@/lib/simple-camera-engine";
+import { DroneCamera, altitudeToZoom } from "@/lib/drone-camera";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 
@@ -620,7 +620,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   const animateCameraCallbackRef = useRef<((map: mapboxgl.Map, center: { lat: number; lon: number }) => void) | null>(null);
   
   // Cinematic camera engine ref
-  const cameraEngineRef = useRef<SimpleCameraEngine | null>(null);
+  const cameraEngineRef = useRef<DroneCamera | null>(null);
   
   animateCameraCallbackRef.current = (map: mapboxgl.Map, center: { lat: number; lon: number }) => {
     if (!mountedRef.current) return;
@@ -640,7 +640,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
     // Initialize simple camera engine if not done
     if (!cameraEngineRef.current && parcelCenter) {
-      cameraEngineRef.current = new SimpleCameraEngine({
+      cameraEngineRef.current = new DroneCamera({
         parcelCenter: [parcelCenter.lon, parcelCenter.lat],
         altitude: droneSettings.startHeight,
         feel: droneSettings.cameraFeel,

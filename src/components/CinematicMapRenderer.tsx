@@ -24,8 +24,8 @@ import {
   buildCinematicStyle,
 } from "@/lib/cinematic-renderer";
 import { 
-  SimpleCameraEngine 
-} from "@/lib/simple-camera-engine";
+  DroneCamera 
+} from "@/lib/drone-camera";
 import { useParcelStore } from "@/lib/parcel-store";
 import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
 import type { LngLatLike } from "maplibre-gl";
@@ -122,7 +122,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
   const isIdleHandledRef = useRef(false);
   const isCancelledRef = useRef(false);
   const framesRef = useRef<ImageData[]>([]);
-  const cameraEngineRef = useRef<SimpleCameraEngine | null>(null);
+  const cameraEngineRef = useRef<DroneCamera | null>(null);
   
   const [renderState, setRenderState] = useState<RenderState>({
     phase: "idle",
@@ -277,7 +277,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
       // Create Simple Camera Engine and store in ref
       const droneSettings = useParcelStore.getState().droneSettings;
       
-      cameraEngineRef.current = new SimpleCameraEngine({
+      cameraEngineRef.current = new DroneCamera({
         parcelCenter: [center.lon, center.lat],
         altitude: droneSettings.startHeight,
         duration: droneSettings.duration,
