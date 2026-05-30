@@ -205,30 +205,32 @@ export class DroneCamera {
    * Sahneye göre kamera durumunu hesapla
    * 
    * ÖNEMLİ: center = parcelCenter (HER ZAMAN SABİT)
-   * Parsel her zaman merkezde ve görünür kalır
+   * Parsel video boyunca her zaman merkezde
    * 
-   * Sadece bearing ve zoom değişir (çok hafif)
+   * SAHNE BAZLI DEĞİŞİMLER:
+   * - ORBIT: sadece bearing döner, zoom sabit
+   * - 4 YÖN: bearing sabit, zoom çok hafif değişir (yaklaşma hissi)
+   * - FINAL: tüm değerler sabit
    */
   private calculateSceneState(scene: SceneName, sceneProgress: number): CameraState {
     const { parcelCenter, altitude } = this.options;
     const { baseZoom, startBearing } = this;
     
-    // Temel değerler
+    // Temel sabitler
     const pitch = 45;
-    const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, baseZoom + 0.5));
-
-    let center: [number, number];
+    const center: [number, number] = [parcelCenter[0], parcelCenter[1]];
+    
     let bearing: number;
+    let zoom: number;
 
     switch (scene) {
       case "intro": {
         // ═══════════════════════════════════════════════════════════════
         // INTRO - Hızlı kurulum
         // ═══════════════════════════════════════════════════════════════
-        // Orbit başlangıcına hazırlık
         
-        center = [parcelCenter[0], parcelCenter[1]];
         bearing = startBearing + sceneProgress * 45;
+        zoom = baseZoom + 0.5;
         
         break;
       }
@@ -237,12 +239,9 @@ export class DroneCamera {
         // ═══════════════════════════════════════════════════════════════
         // ORBIT - Kısa tur
         // ═══════════════════════════════════════════════════════════════
-        // center = parcelCenter (sabit)
-        // sadece bearing döner
+        // ZOOM KESİNLİKLE SABİT - sadece bearing döner
         
-        center = [parcelCenter[0], parcelCenter[1]];
-        
-        // Son %20'de yavaşla
+        // Son %20'de yavaşla (hover effect)
         if (sceneProgress > 0.8) {
           const hoverProgress = (sceneProgress - 0.8) / 0.2;
           const preHoverBearing = startBearing + 0.8 * 360;
@@ -251,52 +250,72 @@ export class DroneCamera {
           bearing = startBearing + sceneProgress * 360;
         }
         
+        zoom = baseZoom + 0.5; // ZOOM SABİT
+        
         break;
       }
 
       case "north": {
         // ═══════════════════════════════════════════════════════════════
-        // NORTH - Kuzey yaklaşımı
+        // NORTH - Kuzey hissi
         // ═══════════════════════════════════════════════════════════════
-        // center = parcelCenter (SABİT - parsel görünür kalır)
+        // Çok hafif zoom değişimi (yaklaşma hissi)
         
-        center = [parcelCenter[0], parcelCenter[1]];
-        
-        // bearing = 180 (güneye bak) - parsele doğru
         bearing = 180;
+        
+        const eased = this.easing(sceneProgress);
+        const startZoom = baseZoom - 0.25;
+        const endZoom = baseZoom + 0.15;
+        zoom = startZoom + (endZoom - startZoom) * eased;
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
         
         break;
       }
 
       case "south": {
         // ═══════════════════════════════════════════════════════════════
-        // SOUTH - Güney yaklaşımı
+        // SOUTH - Güney hissi
         // ═══════════════════════════════════════════════════════════════
         
-        center = [parcelCenter[0], parcelCenter[1]];
         bearing = 0;
+        
+        const eased = this.easing(sceneProgress);
+        const startZoom = baseZoom - 0.25;
+        const endZoom = baseZoom + 0.15;
+        zoom = startZoom + (endZoom - startZoom) * eased;
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
         
         break;
       }
 
       case "east": {
         // ═══════════════════════════════════════════════════════════════
-        // EAST - Doğu yaklaşımı
+        // EAST - Doğu hissi
         // ═══════════════════════════════════════════════════════════════
         
-        center = [parcelCenter[0], parcelCenter[1]];
         bearing = 270;
+        
+        const eased = this.easing(sceneProgress);
+        const startZoom = baseZoom - 0.25;
+        const endZoom = baseZoom + 0.15;
+        zoom = startZoom + (endZoom - startZoom) * eased;
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
         
         break;
       }
 
       case "west": {
         // ═══════════════════════════════════════════════════════════════
-        // WEST - Batı yaklaşımı
+        // WEST - Batı hissi
         // ═══════════════════════════════════════════════════════════════
         
-        center = [parcelCenter[0], parcelCenter[1]];
         bearing = 90;
+        
+        const eased = this.easing(sceneProgress);
+        const startZoom = baseZoom - 0.25;
+        const endZoom = baseZoom + 0.15;
+        zoom = startZoom + (endZoom - startZoom) * eased;
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
         
         break;
       }
@@ -305,18 +324,17 @@ export class DroneCamera {
         // ═══════════════════════════════════════════════════════════════
         // FINAL - Stabil hover
         // ═══════════════════════════════════════════════════════════════
-        // center = parcelCenter
         // TÜM DEĞERLER SABİT
         
-        center = [parcelCenter[0], parcelCenter[1]];
         bearing = startBearing + 360;
+        zoom = baseZoom + 0.5;
         
         break;
       }
 
       default:
-        center = [parcelCenter[0], parcelCenter[1]];
         bearing = startBearing;
+        zoom = baseZoom + 0.5;
     }
 
     return {
