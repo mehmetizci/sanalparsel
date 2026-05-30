@@ -96,7 +96,7 @@ export class SimpleCameraEngine {
 
   constructor(options: SimpleCameraOptions) {
     this.options = {
-      orbitRadiusDegrees: 0.003, // ~300m
+      orbitRadiusDegrees: 0.006, // ~600m - daha büyük daire
       passDistanceDegrees: 0.002, // ~200m - güvenli
       ...options,
     };
@@ -203,15 +203,25 @@ export class SimpleCameraEngine {
     const orbitLon = parcelCenter[0] + Math.cos(currentAngleRad) * orbitRadiusDegrees;
     const orbitLat = parcelCenter[1] + Math.sin(currentAngleRad) * orbitRadiusDegrees;
     
-    // Center, parcelCenter'dan orbit noktasına doğru sadece %30 kayar
-    // Böylece parsel kadrajda kalır ama dairesel hareket görünür
-    const offsetFactor = 0.30;
+    // Center, parcelCenter'dan orbit noktasına doğru %60 kayar
+    // Daha görünür dairesel hareket için artırıldı
+    const offsetFactor = 0.60;
     const centerLon = parcelCenter[0] + (orbitLon - parcelCenter[0]) * offsetFactor;
     const centerLat = parcelCenter[1] + (orbitLat - parcelCenter[1]) * offsetFactor;
     
-    // Bearing - kameranın parsel merkezine bakması
-    // Her zaman parsel merkezine doğru
-    const bearing = bearingToTarget(centerLon, centerLat, parcelCenter[0], parcelCenter[1]);
+    // Bearing - kameranın parsel merkezine bakması + hafif drift
+    // Hareket hissi için küçük drift ekle
+    const baseBearing = bearingToTarget(centerLon, centerLat, parcelCenter[0], parcelCenter[1]);
+    const bearingDrift = Math.sin(currentAngleRad) * 5; // ±5° drift
+    const bearing = (baseBearing + bearingDrift + 360) % 360;
+    
+    // Debug log (production'da kaldırılabilir)
+    console.log("orbit", {
+      centerLon: centerLon.toFixed(6),
+      centerLat: centerLat.toFixed(6),
+      bearing: bearing.toFixed(1),
+      angleDeg: this.radToDeg(currentAngleRad).toFixed(1),
+    });
     
     return {
       center: [centerLon, centerLat],
