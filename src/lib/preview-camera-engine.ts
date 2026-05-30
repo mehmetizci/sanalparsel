@@ -18,9 +18,7 @@ const SPEED_MPS = ORBIT_SPEED_KMH / 3.6; // ~1.39 m/s
 
 // ─── EASING ────────────────────────────────────────────────────────────────
 
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
+// Easing kaldırıldı - tüm hareketler lineer sabit hızda
 
 // ─── YARDIMCI FONKSİYONLAR ────────────────────────────────────────────────
 
@@ -53,7 +51,7 @@ export interface SimpleCameraOptions {
   altitude: number;
   duration: number;
   feel: CameraFeel;
-  /** Orbit radius (derece cinsinden, varsayılan ~500m) */
+  /** Orbit radius (derece cinsinden, varsayılan ~300m) */
   orbitRadiusDegrees?: number;
   /** Geçiş mesafesi (derece cinsinden) */
   passDistanceDegrees?: number;
@@ -61,7 +59,7 @@ export interface SimpleCameraOptions {
 
 export class SimpleCameraEngine {
   private options: Required<SimpleCameraOptions>;
-  private easing: (t: number) => number;
+  private startAngleRad: number;
   private startBearing: number;
   
   // Scene durations (ratio of total)
@@ -70,15 +68,32 @@ export class SimpleCameraEngine {
     transition: 0.45,
     final: 0.10,
   };
+  
+  // Offset factor - center moves only 35% towards actual orbit position
+  // Keeps parcel in frame while showing circular motion
+  private readonly ORBIT_OFFSET_FACTOR = 0.35;
 
   constructor(options: SimpleCameraOptions) {
     this.options = {
-      orbitRadiusDegrees: 0.005, // ~500m
-      passDistanceDegrees: 0.002, // ~200m - güvenli, parsel kaybolmaz
+      orbitRadiusDegrees: 0.003, // ~300m
+      passDistanceDegrees: 0.002, // ~200m - güvenli
       ...options,
     };
-    this.easing = easeInOutCubic; // Sadece geçiş için
-    this.startBearing = Math.random() * 360;
+    // Random starting angle for orbit
+    this.startAngleRad = Math.random() * Math.PI * 2;
+    // Starting bearing - points at parcel center initially
+    this.startBearing = this.radToDeg(Math.atan2(
+      options.parcelCenter[0] - options.parcelCenter[0],
+      options.parcelCenter[1] - options.parcelCenter[1]
+    )) + 180;
+  }
+  
+  private radToDeg(rad: number): number {
+    return rad * (180 / Math.PI);
+  }
+  
+  private degToRad(deg: number): number {
+    return deg * (Math.PI / 180);
   }
   
   /**
@@ -142,8 +157,11 @@ export class SimpleCameraEngine {
   }
   
   /**
-   * ORBIT: 5 km/saat hızda sabit yükseklik orbit
-   * NOT: Easing YOK - lineer sabit hız
+   * ORBIT: Dairesel hareket - drone parsel etrafında daire üzerinde
+   * 
+   * center, parsel merkezi etrafında küçük bir daire üzerinde hareket eder
+   * offsetFactor = 0.35 ile parsel kadrajda kalır
+   * Hız: 5 km/saat (lineer, easing yok)
    */
   private calculateOrbitState(
     sceneProgress: number,
@@ -161,17 +179,32 @@ export class SimpleCameraEngine {
     
     // Elapsed time (orbit sahnesi içinde)
     const elapsedSeconds = linearProgress * this.options.duration * this.SCENE_RATIOS.orbit;
-    const angleRad = angularSpeedRadPerSec * elapsedSeconds;
-    const angleDeg = angleRad * (180 / Math.PI);
     
-    // Bearing hesapla - lineer artış
-    const bearing = (this.startBearing + angleDeg) % 360;
+    // Açı hesapla - dairesel hareket
+    const currentAngleRad = this.startAngleRad + angularSpeedRadPerSec * elapsedSeconds;
+    
+    // Orbit pozisyonu hesapla (daire üzerinde)
+    const orbitLon = parcelCenter[0] + Math.cos(currentAngleRad) * orbitRadiusDegrees;
+    const orbitLat = parcelCenter[1] + Math.sin(currentAngleRad) * orbitRadiusDegrees;
+    
+    // Center, parcelCenter'dan orbit noktasına doğru sadece %35 kayar
+    // Böylece parsel kadrajda kalır ama dairesel hareket görünür
+    const centerLon = parcelCenter[0] + (orbitLon - parcelCenter[0]) * this.ORBIT_OFFSET_FACTOR;
+    const centerLat = parcelCenter[1] + (orbitLat - parcelCenter[1]) * this.ORBIT_OFFSET_FACTOR;
+    
+    // Bearing - kameranın hareket yönüne uyumlu
+    // Kamera parsel merkezine bakar
+    const angleToTargetRad = Math.atan2(
+      parcelCenter[0] - centerLon,
+      parcelCenter[1] - centerLat
+    );
+    const bearing = ((this.radToDeg(angleToTargetRad) + 360) % 360);
     
     return {
-      center: [parcelCenter[0], parcelCenter[1]],
+      center: [centerLon, centerLat],
       zoom,
       pitch,
-      bearing: ((bearing % 360) + 360) % 360,
+      bearing,
       altitude: this.options.altitude,
     };
   }
