@@ -38,7 +38,6 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   const droneSettings = useParcelStore((state) => state.droneSettings);
   const videoSettings = useParcelStore((state) => state.videoSettings);
   const parcelCenter = useParcelStore((state) => state.parcelCenter);
-  const parcelBounds = useParcelStore((state) => state.parcelBounds);
   const setRecordingMap = useParcelStore((state) => state.setRecordingMap);
   const setRecordedVideoUrl = useParcelStore((state) => state.setRecordedVideoUrl);
 
@@ -639,15 +638,13 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
     }
     setRenderProgress(displayProgress);
 
-    // Initialize Preview Camera Engine (stabil kamera davranışı)
+    // Initialize Simplified Camera Engine (orbit + N-S transition)
     if (!cameraEngineRef.current && parcelCenter) {
       cameraEngineRef.current = new PreviewCameraEngine({
         parcelCenter: [parcelCenter.lon, parcelCenter.lat],
-        parcelBounds: parcelBounds || undefined,
         altitude: droneSettings.startHeight,
         feel: droneSettings.cameraFeel,
         duration: totalDuration,
-        basePitch: 57, // Stabil pitch değeri
       });
     }
     

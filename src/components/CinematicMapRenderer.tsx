@@ -275,17 +275,14 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         return;
       }
 
-      // Create Preview Camera Engine (stabil kamera davranışı)
+      // Create Simplified Camera Engine (orbit + N-S transition)
       const droneSettings = useParcelStore.getState().droneSettings;
-      const parcelBounds = useParcelStore.getState().parcelBounds;
       
       cameraEngineRef.current = new PreviewCameraEngine({
         parcelCenter: [center.lon, center.lat],
-        parcelBounds: parcelBounds || undefined,
         altitude: droneSettings.startHeight,
         duration: droneSettings.duration,
         feel: droneSettings.cameraFeel,
-        basePitch: 57, // Stabil pitch değeri
       });
 
       // Initial camera state

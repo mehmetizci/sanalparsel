@@ -260,7 +260,6 @@ export default function WebRecorder({
       const duration = cameraSequence?.totalDuration || 30000;
       const positions = flattenRings(parcel.geometry);
       const center = computeCenter(positions);
-      const bounds = computeBounds(positions);
 
       if (!center) {
         console.error("[WebRecorder] No valid parcel center");
@@ -272,17 +271,15 @@ export default function WebRecorder({
       const altitude = cameraSequence?.steps?.[0]?.startHeight || 300;
       const feel = cameraSequence?.steps?.[0]?.easing || "cinematic";
 
-      // Create Preview Camera Engine (stabil kamera davranışı)
+      // Create Simplified Camera Engine (orbit + N-S transition)
       const cameraEngine = new PreviewCameraEngine({
         parcelCenter: [center.lon, center.lat],
-        parcelBounds: bounds || undefined,
         altitude,
         duration,
         feel: feel as "soft" | "cinematic" | "dynamic",
-        basePitch: 57, // Stabil pitch değeri
       });
 
-      console.log("[WebRecorder] PreviewCameraEngine created, starting animation immediately");
+      console.log("[WebRecorder] SimplifiedCameraEngine created, starting animation immediately");
       console.log("[WebRecorder] altitude:", altitude, "feel:", feel);
 
       // Animation loop - starts immediately, no delay

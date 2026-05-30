@@ -1,115 +1,31 @@
 /**
- * Preview Camera Engine v1
+ * Simplified Camera Engine v2
  * 
- * Parcel ön izleme ekranındaki stabil kamera davranışını video render'a taşıyan kamera motoru.
+ * Sadece iki ana hareket:
+ * 1. SABİT YÜKSEKLİKTE ORBIT (5 km/saat)
+ * 2. KUZEY-GÜNEY HATTI BOYUNCA GEÇİŞ
  * 
- * TEMEL İLKELER:
- * - 4 yön çekimi korunur (Kuzey, Doğu, Güney, Batı)
- * - Ancak karmaşık drone-camera mantığı YERİNE stabil, doğal kamera
- * - fitBounds ile kadrajlama (parseller kaybolmaz)
- * - Pitch ~55-60° sabit
- * - Bearing yavaş değişir (max ±5° drift)
- * - Zoom çok hafif değişir (agresif zoom YOK)
- * - Center offset KULLANILMAZ (parsel her zaman merkezde)
- * - 360° orbit YOK
- * 
- * SAHNELER:
- * 1. KUZEY - 7s (bearing=180, pitch=55-60)
- * 2. DOĞU - 7s (bearing=270, pitch=55-60)
- * 3. GÜNEY - 7s (bearing=0, pitch=55-60)
- * 4. BATI - 7s (bearing=90, pitch=55-60)
- * 5. FİNAL HOVER - 2s
- * 
- * TOPLAM: 30s
+ * Karmaşık 4 yön çekimi ve zoom değişimi YOK.
  */
 
 import type { CameraFeel } from "@/lib/parcel-store";
 
 // ─── SABİTLER ────────────────────────────────────────────────────────────────
 
-const MIN_ZOOM = 13;
-const MAX_ZOOM = 16.5;
+// Orbit hızı: 5 km/saat (yürüyüş hızı)
+const ORBIT_SPEED_KMH = 5;
+const SPEED_MPS = ORBIT_SPEED_KMH / 3.6; // ~1.39 m/s
 
-// Direction scene type - sadece 4 yön
-export type DirectionScene = "north" | "east" | "south" | "west";
-
-// Her yön için sabit bearing değerleri - sadece direction scene'ler
-const CARDINAL_BEARINGS: Record<DirectionScene, number> = {
-  north: 180,
-  east: 270,
-  south: 0,
-  west: 90,
-};
-
-// Sahne süreleri (toplam = 1.00)
-const SCENE_DURATIONS = {
-  north: 0.233,    // 7s / 30s = 0.233
-  east: 0.233,      // 7s / 30s = 0.233
-  south: 0.233,     // 7s / 30s = 0.233
-  west: 0.233,      // 7s / 30s = 0.233
-  final: 0.067,      // 2s / 30s = 0.067
-};
-
-// Toplam kontrol
-const TOTAL = Object.values(SCENE_DURATIONS).reduce((a, b) => a + b, 0);
-console.log(`[PreviewCamera] Scene total: ${TOTAL} (should be 1.00)`);
-
-// ─── EASING FONKSİYONLARI ───────────────────────────────────────────────────
+// ─── EASING ────────────────────────────────────────────────────────────────
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-function easeInOutQuint(t: number): number {
-  return t < 0.5 ? 16 * t * t * t * t * t : 1 - Math.pow(-2 * t + 2, 5) / 2;
-}
-
-function easeOutExpo(t: number): number {
-  return t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
-}
-
-function getEasing(feel: CameraFeel): (t: number) => number {
-  switch (feel) {
-    case "soft":
-      return easeInOutQuint;
-    case "cinematic":
-      return easeInOutCubic;
-    case "dynamic":
-      return easeOutExpo;
-  }
 }
 
 // ─── YARDIMCI FONKSİYONLAR ────────────────────────────────────────────────
 
 export function altitudeToZoom(altitude: number): number {
   return 18 - Math.log2(altitude / 50);
-}
-
-/**
- * fitBounds mantığı ile güvenli zoom hesapla
- * Parsel ekranın ~35% ini kaplayacak şekilde
- */
-export function calculateFitBoundsZoom(
-  altitude: number,
-  parcelBounds: { minLon: number; minLat: number; maxLon: number; maxLat: number }
-): number {
-  if (!parcelBounds) return 15;
-  
-  // Parsel boyutunu hesapla (derece cinsinden)
-  const width = parcelBounds.maxLon - parcelBounds.minLon;
-  const height = parcelBounds.maxLat - parcelBounds.minLat;
-  const avgSize = Math.max(width, height);
-  
-  // Parsel boyutuna göre zoom ayarla
-  // Büyük parseller için daha düşük zoom, küçük parseller için daha yüksek zoom
-  const sizeAdjustment = Math.log2(Math.max(avgSize, 0.0001) * 10000) * 0.4;
-  const baseZoom = altitudeToZoom(altitude);
-  
-  // fitBounds mantığı: parseli kadrajla
-  // Ortalama zoom = baseZoom - sizeAdjustment + offset
-  const fittedZoom = baseZoom - sizeAdjustment + 0.5;
-  
-  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fittedZoom));
 }
 
 // ─── TİPLER ────────────────────────────────────────────────────────────────
@@ -122,65 +38,47 @@ export interface CameraState {
   altitude: number;
 }
 
-export type SceneName = "north" | "east" | "south" | "west" | "final";
+export type SceneName = "orbit" | "transition" | "final";
 
 export interface SceneInfo {
   name: SceneName;
   progress: number;
   globalProgress: number;
-  bearing: number;
-  zoom: number;
 }
 
-// ─── PREVIEW CAMERA ENGINE ──────────────────────────────────────────────────
+// ─── KAMERA MOTORU ─────────────────────────────────────────────────────────
 
-export interface PreviewCameraOptions {
+export interface SimpleCameraOptions {
   parcelCenter: [number, number];
-  parcelBounds?: { minLon: number; minLat: number; maxLon: number; maxLat: number };
   altitude: number;
   duration: number;
   feel: CameraFeel;
-  /** Base pitch değeri (55-60 arası önerilir) */
-  basePitch?: number;
+  /** Orbit radius (derece cinsinden, varsayılan ~500m) */
+  orbitRadiusDegrees?: number;
+  /** Geçiş mesafesi (derece cinsinden) */
+  passDistanceDegrees?: number;
 }
 
-export class PreviewCameraEngine {
-  private options: PreviewCameraOptions;
+export class SimpleCameraEngine {
+  private options: Required<SimpleCameraOptions>;
   private easing: (t: number) => number;
-  private baseZoom: number;
-  private basePitch: number;
-  private sceneStartZooms: Record<SceneName, number>;
-  private sceneEndZooms: Record<SceneName, number>;
+  private startBearing: number;
   
-  constructor(options: PreviewCameraOptions) {
-    this.options = options;
-    this.easing = getEasing(options.feel);
-    
-    // Base zoom: fitBounds mantığı ile hesapla
-    this.baseZoom = options.parcelBounds
-      ? calculateFitBoundsZoom(options.altitude, options.parcelBounds)
-      : altitudeToZoom(options.altitude);
-    
-    // Base pitch: 55-60 arası (ön izleme ekranındaki gibi)
-    this.basePitch = options.basePitch ?? 57;
-    
-    // Her sahne için zoom aralıkları (çok hafif değişim)
-    // sceneStartZoom = baseZoom - 0.15, sceneEndZoom = baseZoom + 0.10
-    this.sceneStartZooms = {
-      north: this.baseZoom - 0.15,
-      east: this.baseZoom - 0.15,
-      south: this.baseZoom - 0.15,
-      west: this.baseZoom - 0.15,
-      final: this.baseZoom - 0.10,
+  // Scene durations (ratio of total)
+  private readonly SCENE_RATIOS = {
+    orbit: 0.45,
+    transition: 0.45,
+    final: 0.10,
+  };
+
+  constructor(options: SimpleCameraOptions) {
+    this.options = {
+      orbitRadiusDegrees: 0.005, // ~500m
+      passDistanceDegrees: 0.008, // ~800m
+      ...options,
     };
-    
-    this.sceneEndZooms = {
-      north: this.baseZoom + 0.10,
-      east: this.baseZoom + 0.10,
-      south: this.baseZoom + 0.10,
-      west: this.baseZoom + 0.10,
-      final: this.baseZoom + 0.05,
-    };
+    this.easing = easeInOutCubic; // Her zaman cinematic
+    this.startBearing = Math.random() * 360;
   }
   
   /**
@@ -188,23 +86,22 @@ export class PreviewCameraEngine {
    */
   getState(progress: number): CameraState {
     const p = Math.max(0, Math.min(1, progress));
-    
     const scene = this.getCurrentScene(p);
     const sceneProgress = this.getSceneProgress(p, scene);
     
-    return this.calculateSceneState(scene, sceneProgress);
+    return this.calculateSceneState(scene, sceneProgress, p);
   }
   
   /**
    * Mevcut sahneyi bul
    */
   private getCurrentScene(progress: number): SceneName {
-    const d = SCENE_DURATIONS;
+    const r = this.SCENE_RATIOS;
+    const orbitEnd = r.orbit;
+    const transitionEnd = orbitEnd + r.transition;
     
-    if (progress < d.north) return "north";
-    if (progress < d.north + d.east) return "east";
-    if (progress < d.north + d.east + d.south) return "south";
-    if (progress < d.north + d.east + d.south + d.west) return "west";
+    if (progress < orbitEnd) return "orbit";
+    if (progress < transitionEnd) return "transition";
     return "final";
   }
   
@@ -212,103 +109,163 @@ export class PreviewCameraEngine {
    * Sahne içi progress (0-1)
    */
   private getSceneProgress(globalProgress: number, scene: SceneName): number {
-    const sceneStart = this.getSceneStartProgress(scene);
-    const sceneDuration = SCENE_DURATIONS[scene];
-    
-    if (sceneDuration === 0) return 0;
-    
-    const progressInScene = globalProgress - sceneStart;
-    return Math.max(0, Math.min(1, progressInScene / sceneDuration));
-  }
-  
-  private getSceneStartProgress(scene: SceneName): number {
-    const d = SCENE_DURATIONS;
+    const r = this.SCENE_RATIOS;
     
     switch (scene) {
-      case "north": return 0;
-      case "east": return d.north;
-      case "south": return d.north + d.east;
-      case "west": return d.north + d.east + d.south;
-      case "final": return d.north + d.east + d.south + d.west;
+      case "orbit": return globalProgress / r.orbit;
+      case "transition": return (globalProgress - r.orbit) / r.transition;
+      case "final": return (globalProgress - r.orbit - r.transition) / r.final;
     }
   }
   
   /**
-   * Sahneye göre kamera durumunu hesapla
-   * 
-   * KRİTİK KURALLAR:
-   * - center = parcelCenter (SABİT - değişmez!)
-   * - pitch = basePitch (SABİT - değişmez!)
-   * - bearing = CARDINAL_BEARINGS[scene] + max ±5° drift (direction scenes için)
-   * - zoom = sceneStartZoom + easing * (sceneEndZoom - sceneStartZoom)
+   * Her sahne için kamera durumunu hesapla
    */
-  private calculateSceneState(scene: SceneName, sceneProgress: number): CameraState {
-    const { parcelCenter, altitude } = this.options;
+  private calculateSceneState(
+    scene: SceneName, 
+    sceneProgress: number,
+    globalProgress: number
+  ): CameraState {
+    const { parcelCenter, orbitRadiusDegrees, passDistanceDegrees } = this.options;
+    const { baseZoom, basePitch } = this;
     
-    // SAKİN HIZ EĞRİSİ (0-20% yavaş, 20-80% normal, 80-100% yavaşla)
-    const calmProgress = this.calculateCalmProgress(sceneProgress);
-    const easedProgress = this.easing(calmProgress);
-    
-    // ─── CENTER (SABİT) ───
-    const center: [number, number] = [parcelCenter[0], parcelCenter[1]];
-    
-    // ─── PITCH (SABİT) ───
-    const pitch = this.basePitch;
-    
-    // ─── BEARING ───
-    let bearing: number;
-    
-    // Final sahne - direction değil, son bearing'i koru
-    if (scene === "final") {
-      // Final'de son direction'un bearing değerini kullan
-      const lastDirection = "west" as DirectionScene;
-      const lastBearing = CARDINAL_BEARINGS[lastDirection];
-      // Final'de hafif drift devam
-      const driftRange = 3;
-      const driftAmount = Math.sin(calmProgress * Math.PI) * driftRange;
-      bearing = lastBearing + driftAmount;
-    } else {
-      // Direction scene - CARDINAL_BEARINGS kullan
-      const directionScene = scene as DirectionScene;
-      const baseBearing = CARDINAL_BEARINGS[directionScene];
-      // Max ±5° drift (çok küçük sinematik hareket)
-      const driftRange = 5;
-      const driftAmount = Math.sin(calmProgress * Math.PI) * driftRange;
-      bearing = baseBearing + driftAmount;
+    switch (scene) {
+      case "orbit":
+        return this.calculateOrbitState(sceneProgress, parcelCenter, baseZoom, basePitch, orbitRadiusDegrees);
+      
+      case "transition":
+        return this.calculateTransitionState(sceneProgress, parcelCenter, baseZoom, basePitch, passDistanceDegrees);
+      
+      case "final":
+        return this.calculateFinalState(globalProgress, parcelCenter, baseZoom, basePitch);
     }
+  }
+  
+  /**
+   * ORBIT: 5 km/saat hızda sabit yükseklik orbit
+   */
+  private calculateOrbitState(
+    sceneProgress: number,
+    parcelCenter: [number, number],
+    zoom: number,
+    pitch: number,
+    orbitRadiusDegrees: number
+  ): CameraState {
+    // Easing uygula (başlangıç ve bitiş yumuşak)
+    const easedProgress = this.easing(sceneProgress);
     
-    // ─── ZOOM (çok hafif değişim) ───
-    const startZoom = this.sceneStartZooms[scene];
-    const endZoom = this.sceneEndZooms[scene];
-    let zoom = startZoom + (endZoom - startZoom) * easedProgress;
-    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+    // Açısal hız hesapla (5 km/saat)
+    // 5 km/saat = 1.39 m/s
+    // Radius ~500m ise: angular = 1.39 / (500 * 111000) rad/s
+    const radiusMeters = orbitRadiusDegrees * 111000; // derece → metre
+    const angularSpeedRadPerSec = SPEED_MPS / radiusMeters;
+    
+    // Elapsed time (orbit sahnesi içinde)
+    const elapsedSeconds = easedProgress * this.options.duration * this.SCENE_RATIOS.orbit;
+    const angleRad = angularSpeedRadPerSec * elapsedSeconds;
+    const angleDeg = angleRad * (180 / Math.PI);
+    
+    // Bearing hesapla
+    const bearing = (this.startBearing + angleDeg) % 360;
     
     return {
-      center,
+      center: [parcelCenter[0], parcelCenter[1]],
       zoom,
       pitch,
       bearing: ((bearing % 360) + 360) % 360,
-      altitude,
+      altitude: this.options.altitude,
     };
   }
   
   /**
-   * Sakin hız eğrisi:
-   * İlk %20: yavaş başla
-   * Orta %60: sakin ilerle
-   * Son %20: yavaşla
+   * TRANSITION: Kuzey-Güney düz geçiş
    */
-  private calculateCalmProgress(progress: number): number {
-    if (progress < 0.2) {
-      // İlk %20: quadratic yavaş başlangıç
-      return Math.pow(progress / 0.2, 2) * 0.2;
-    } else if (progress > 0.8) {
-      // Son %20: quadratic yavaş bitiş
-      const t = (progress - 0.8) / 0.2;
-      return 0.2 + (1 - Math.pow(1 - t, 2)) * 0.8;
-    } else {
-      // Orta %60: doğrusal
-      return progress;
+  private calculateTransitionState(
+    sceneProgress: number,
+    parcelCenter: [number, number],
+    zoom: number,
+    pitch: number,
+    passDistanceDegrees: number
+  ): CameraState {
+    // Easing uygula
+    const easedProgress = this.easing(sceneProgress);
+    
+    // Kuzeyden güneye doğru düz hat
+    // start: parcelCenter + northOffset
+    // end: parcelCenter + southOffset
+    
+    const northOffset = passDistanceDegrees / 2;
+    const southOffset = -passDistanceDegrees / 2;
+    
+    // Linear interpolation: north → south
+    const centerLat = parcelCenter[1] + northOffset + (southOffset - northOffset) * easedProgress;
+    
+    // Bearing: 180° (güneye doğru bak)
+    const bearing = 180;
+    
+    return {
+      center: [parcelCenter[0], centerLat],
+      zoom,
+      pitch,
+      bearing,
+      altitude: this.options.altitude,
+    };
+  }
+  
+  /**
+   * FINAL: Stabil hover
+   */
+  private calculateFinalState(
+    globalProgress: number,
+    parcelCenter: [number, number],
+    zoom: number,
+    pitch: number
+  ): CameraState {
+    // Son hafif drift
+    const finalProgress = (globalProgress - this.SCENE_RATIOS.orbit - this.SCENE_RATIOS.transition) / this.SCENE_RATIOS.final;
+    const driftRange = 3;
+    const driftAmount = Math.sin(finalProgress * Math.PI) * driftRange;
+    
+    return {
+      center: [parcelCenter[0], parcelCenter[1]],
+      zoom,
+      pitch,
+      bearing: ((180 + driftAmount) % 360 + 360) % 360,
+      altitude: this.options.altitude,
+    };
+  }
+  
+  /**
+   * Base zoom hesapla
+   */
+  private get baseZoom(): number {
+    return 18 - Math.log2(this.options.altitude / 50);
+  }
+  
+  /**
+   * Base pitch hesapla
+   */
+  private get basePitch(): number {
+    return 57; // Stabil pitch
+  }
+  
+  getSceneInfo(progress: number): SceneInfo {
+    const p = Math.max(0, Math.min(1, progress));
+    const scene = this.getCurrentScene(p);
+    const sceneProgress = this.getSceneProgress(p, scene);
+    
+    return {
+      name: scene,
+      progress: sceneProgress,
+      globalProgress: p,
+    };
+  }
+  
+  getSceneNameTR(scene: SceneName): string {
+    switch (scene) {
+      case "orbit": return "Orbit Turu";
+      case "transition": return "Kuzey-Güney Geçişi";
+      case "final": return "Final";
     }
   }
   
@@ -320,47 +277,9 @@ export class PreviewCameraEngine {
     const info = this.getSceneInfo(progress);
     return `[${info.name.toUpperCase()}] p=${(info.progress * 100).toFixed(1)}% | center=[${state.center[0].toFixed(5)}, ${state.center[1].toFixed(5)}] | zoom=${state.zoom.toFixed(2)} | pitch=${state.pitch.toFixed(0)}° | bearing=${state.bearing.toFixed(1)}°`;
   }
-  
-  getSceneInfo(progress: number): SceneInfo {
-    const p = Math.max(0, Math.min(1, progress));
-    const scene = this.getCurrentScene(p);
-    const sceneProgress = this.getSceneProgress(p, scene);
-    const state = this.getState(p);
-    
-    return {
-      name: scene,
-      progress: sceneProgress,
-      globalProgress: p,
-      bearing: state.bearing,
-      zoom: state.zoom,
-    };
-  }
-  
-  getSceneNameTR(scene: SceneName): string {
-    switch (scene) {
-      case "north": return "Kuzey Görünümü";
-      case "east": return "Doğu Görünümü";
-      case "south": return "Güney Görünümü";
-      case "west": return "Batı Görünümü";
-      case "final": return "Final Hover";
-    }
-  }
-  
-  /**
-   * Base zoom değerini al (fitBounds referansı)
-   */
-  getBaseZoom(): number {
-    return this.baseZoom;
-  }
-  
-  /**
-   * Base pitch değerini al
-   */
-  getBasePitch(): number {
-    return this.basePitch;
-  }
 }
 
 // ─── ESKİ UYUMLULUK İÇİN EXPORT ──────────────────────────────────────────────
 
-export { PreviewCameraEngine as default };
+export { SimpleCameraEngine as PreviewCameraEngine };
+export { SimpleCameraEngine as default };
