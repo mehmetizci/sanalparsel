@@ -410,44 +410,63 @@ export function interpolateCameraStep(
 
     case "orbit360": {
       // DJI Point Of Interest (POI) Mode - True 360° orbit
-      // Camera orbits around parcel center at FIXED radius
-      // Only bearing changes (0° → 360°); everything else locked
+      // Scene 1: Center on parcel (1s) - no movement
+      // Scene 2: True 360° orbit around parcel center
+      // Only bearing changes; everything else locked
       
       const progress = easedT;
       
+      // Phase 1: Centering (first 8% = ~1s at 12s duration)
+      // During this phase, camera shows parcel centered, no movement
+      const centeringThreshold = 0.08;
+      
+      if (progress < centeringThreshold) {
+        // Scene 1: Parcel centered, no orbit yet
+        // Show parcel fully visible in center
+        centerOffset = { lon: 0, lat: 0 };  // Locked on parcel center
+        zoom = 15;  // Zoom out to show full parcel
+        pitch = 65;
+        bearing = 0;  // Start facing north
+        break;
+      }
+      
+      // Phase 2: True 360° orbit begins
+      // Calculate orbit progress (0% → 100% of orbit phase)
+      const orbitProgress = (progress - centeringThreshold) / (1 - centeringThreshold);
+      
       // Final hover: 2 seconds at end
       const hoverDurationSeconds = 2;
-      const hoverThreshold = Math.max(0.85, (step.duration - hoverDurationSeconds) / step.duration);
-      const actualProgress = progress > hoverThreshold 
+      const hoverThreshold = Math.max(0.82, (step.duration - hoverDurationSeconds) / step.duration);
+      const adjustedProgress = orbitProgress > hoverThreshold 
         ? hoverThreshold 
-        : progress;
+        : orbitProgress;
       
-      // FIXED VALUES - no change during orbit
+      // FIXED VALUES during orbit - no change
       const fixedPitch = 65;
       const fixedZoom = 16;
       
-      // Orbit radius - FIXED throughout (350m equivalent)
-      const orbitRadius = 0.003;
+      // Orbit radius based on altitude (from step.startHeight or default)
+      // Higher altitude = larger radius
+      const baseRadius = 0.002;
+      const altitudeMultiplier = (step.startHeight || 300) / 300;
+      const orbitRadius = baseRadius * altitudeMultiplier;
       
       // Bearing: FULL 360° rotation (linear, no easing)
       // Progress 0 → 1 means bearing 0° → 360°
-      const currentBearing = actualProgress * 360;
+      const currentBearing = adjustedProgress * 360;
       
       // Calculate camera position around parcel center
       // At bearing 0°, camera is north of parcel
       // At bearing 90°, camera is east of parcel
-      // etc.
       const bearingRad = (currentBearing * Math.PI) / 180;
       
       // Camera position offset from center (for orbit path)
-      // sin gives X (longitude), cos gives Y (latitude)
       centerOffset = { 
         lon: Math.sin(bearingRad) * orbitRadius,
         lat: Math.cos(bearingRad) * orbitRadius 
       };
       
       // Camera always looks at parcel center (DJI POI style)
-      // Bearing matches the orbit angle for proper orientation
       zoom = fixedZoom;
       pitch = fixedPitch;
       bearing = currentBearing;
