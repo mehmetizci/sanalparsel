@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
-import type { CameraSequence, CameraSequenceStep } from "@/lib/parcel-store";
+import type { CameraSequence } from "@/lib/parcel-store";
 import { buildCinematicStyle, CINEMATIC_EASING } from "@/lib/cinematic-renderer";
-import { interpolateCameraStep as interpolateFromLibrary } from "@/lib/camera-sequence";
+import { DroneCamera } from "@/lib/drone-camera";
 
 export interface WebRecorderProps {
   /** GeoJSON parcel feature */
@@ -103,17 +103,6 @@ export default function WebRecorder({
 
   const updateState = useCallback((updates: Partial<RecordingState>) => {
     setState(prev => ({ ...prev, ...updates }));
-  }, []);
-
-  // Use the enhanced interpolation from camera-sequence library
-  // This includes proper Hero Zoom (parcel locked, only zoom changes)
-  const interpolateCameraStep = useCallback((
-    step: CameraSequenceStep,
-    t: number,
-    center: { lat: number; lon: number }
-  ): { center: [number, number]; zoom: number; pitch: number; bearing: number } => {
-    // Delegate to the library function which has all mode implementations
-    return interpolateFromLibrary(step, t, center);
   }, []);
 
   // Helper to wait for map to be fully loaded before recording
@@ -267,46 +256,46 @@ export default function WebRecorder({
       recorder.start(100); // Collect data every 100ms
       updateState({ phase: "recording", progress: 0, elapsed: 0 });
 
-      // Start animation loop
+      // Setup camera engine
       const duration = cameraSequence?.totalDuration || 30000;
-      const startTime = performance.now();
       const positions = flattenRings(parcel.geometry);
       const center = computeCenter(positions);
-      const bounds = computeBounds(positions);
 
-      if (!center || !bounds) {
-        console.error("[WebRecorder] No valid parcel geometry");
-        onError?.(new Error("Invalid parcel geometry"));
+      if (!center) {
+        console.error("[WebRecorder] No valid parcel center");
+        onError?.(new Error("Invalid parcel center"));
         return;
       }
 
-      // Initial fly-in animation
-      const cinematicPitch = 55 + Math.random() * 10;
-      map.fitBounds(
-        [[bounds.minLon, bounds.minLat], [bounds.maxLon, bounds.maxLat]],
-        {
-          padding: 60,
-          maxZoom: 18,
-          pitch: cinematicPitch,
-          bearing: -20,
-          duration: 2000,
-          easing: CINEMATIC_EASING.flyTo,
-        }
-      );
+      // Get camera settings from cameraSequence (or use defaults)
+      const altitude = cameraSequence?.steps?.[0]?.startHeight || 300;
+      const feel = cameraSequence?.steps?.[0]?.easing || "cinematic";
 
-      // Animation loop
+      // Create DroneCamera engine
+      const cameraEngine = new DroneCamera({
+        parcelCenter: [center.lon, center.lat],
+        altitude,
+        duration,
+        feel: feel as "soft" | "cinematic" | "dynamic",
+      });
+
+      console.log("[WebRecorder] DroneCamera created, starting animation immediately");
+      console.log("[WebRecorder] altitude:", altitude, "feel:", feel);
+
+      // Animation loop - starts immediately, no delay
       const animate = (now: number) => {
         if (!isRecordingRef.current) return;
 
-        const elapsed = now - startTime;
-        const progress = Math.min(elapsed / duration, 1);
+        const elapsed = now - startTimeRef.current;
+        const durationMs = duration * 1000;
+        const progress = Math.min(elapsed / durationMs, 1);
         
         // Update state every frame
         updateState({ 
           elapsed: Math.floor(elapsed / 1000), 
-          progress: Math.round(progress * 90) 
+          progress: Math.round(progress * 100) 
         });
-        onProgress?.(Math.round(progress * 90), "recording");
+        onProgress?.(Math.round(progress * 100), "recording");
 
         if (progress >= 1) {
           // Stop recording
@@ -315,38 +304,29 @@ export default function WebRecorder({
           return;
         }
 
-        // Calculate which step we're in based on elapsed time
-        const steps = cameraSequence?.steps || [];
-        let accumulatedTime = 0;
-        let currentStep: CameraSequenceStep | null = null;
-        let stepProgress = 0;
-
-        for (let i = 0; i < steps.length; i++) {
-          if (elapsed * 1000 < accumulatedTime + steps[i].duration * 1000) {
-            currentStep = steps[i];
-            stepProgress = (elapsed * 1000 - accumulatedTime) / (steps[i].duration * 1000);
-            break;
-          }
-          accumulatedTime += steps[i].duration * 1000;
-        }
-
-        if (currentStep && map) {
-          const camera = interpolateCameraStep(currentStep, stepProgress, center);
+        // Get camera state from DroneCamera
+        if (map) {
+          const cameraState = cameraEngine.getState(progress);
+          
           map.jumpTo({
-            center: camera.center,
-            zoom: camera.zoom,
-            pitch: camera.pitch,
-            bearing: camera.bearing,
+            center: cameraState.center,
+            zoom: cameraState.zoom,
+            pitch: cameraState.pitch,
+            bearing: cameraState.bearing,
           });
+
+          // Debug log every 5 seconds
+          if (Math.floor(elapsed / 1000) % 5 === 0 && Math.floor(elapsed / 1000) > 0) {
+            const sceneInfo = cameraEngine.getSceneInfo(progress);
+            console.log(`[WebRecorder] Progress: ${(progress * 100).toFixed(1)}%, Scene: ${sceneInfo.name}`);
+          }
         }
 
         animationRef.current = requestAnimationFrame(animate);
       };
 
-      // Start animation after initial fly-in + tile loading delay (4.5 seconds total)
-      setTimeout(() => {
-        animationRef.current = requestAnimationFrame(animate);
-      }, 4500);
+      // Start animation loop immediately (no delay)
+      animationRef.current = requestAnimationFrame(animate);
 
     } catch (err) {
       console.error("[WebRecorder] Recording error:", err);
