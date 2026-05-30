@@ -78,8 +78,8 @@ function computeCenter(positions: Position[]): { lat: number; lon: number } | nu
 export default function WebRecorder({
   parcel,
   cameraSequence,
-  width = 720,
-  height = 1280,
+  width = 1080,
+  height = 1920,
   fps = 30,
   onProgress,
   onComplete,

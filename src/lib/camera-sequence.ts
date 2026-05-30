@@ -411,31 +411,30 @@ export function interpolateCameraStep(
     }
 
     case "orbit360": {
-      // SIMPLIFIED DJI POI Mode - True 360° orbit
-      // Rules:
-      // - center = parcelCenter (NEVER changes)
-      // - pitch = fixed (NEVER changes)
+      // TRUE DJI POI Mode - 360° orbit with parcel LOCKED at center
+      // CRITICAL RULES:
+      // - center = parcelCenter (NEVER moves, not even offset)
       // - zoom = fixed (NEVER changes)
-      // - Only bearing changes (0° → 360°)
-      // - altitude calculated ONCE at video start, then locked
+      // - pitch = fixed (NEVER changes)
+      // - ONLY bearing changes (0° → 360°)
+      // - Camera orbits by rotating bearing, not moving center
       
       const progress = easedT;
       
-      // Phase 1: Centering (first 8% = ~1s at 12s duration)
-      // Camera shows parcel centered, no orbit movement
+      // Phase 1: Centering (first 8%)
+      // Camera locks on parcel, shows stable view
       const centeringThreshold = 0.08;
       
       if (progress < centeringThreshold) {
-        // Scene 1: Parcel centered, stable view
-        // FIXED VALUES - no animation during centering
-        centerOffset = { lon: 0, lat: 0 };  // Locked on parcel center
-        zoom = 16;  // Fixed zoom for centering
+        // Parcel centered, stable view
+        centerOffset = { lon: 0, lat: 0 };  // ZERO offset
+        zoom = 16;  // Fixed zoom
         pitch = 65; // Fixed pitch
         bearing = 0; // North facing
         break;
       }
       
-      // Phase 2: True 360° orbit begins
+      // Phase 2: True 360° orbit
       const orbitProgress = (progress - centeringThreshold) / (1 - centeringThreshold);
       
       // Final hover: 2 seconds at end
@@ -445,30 +444,19 @@ export function interpolateCameraStep(
         ? hoverThreshold 
         : orbitProgress;
       
-      // FIXED VALUES throughout orbit - NO changes after calculated once
+      // FIXED VALUES - calculated once, never changes
       const fixedPitch = 65;
-      const fixedZoom = 16;  // Pre-calculated, locked
-      
-      // Fixed orbit radius based on altitude (calculated once at start)
-      // Never changes during orbit
-      const fixedRadius = 0.003;
+      const fixedZoom = 16;
       
       // ONLY bearing changes - full 360° rotation
       const currentBearing = adjustedProgress * 360;
       
-      // Camera position: circular orbit around parcel center
-      // centerOffset creates the visual circle, but center is LOCKED on parcel
-      const bearingRad = (currentBearing * Math.PI) / 180;
+      // CENTER STAYS LOCKED - no centerOffset!
+      // The camera orbits by rotating bearing, not by moving center
+      // This keeps parcel at exact screen center throughout orbit
+      centerOffset = { lon: 0, lat: 0 };
       
-      // Camera orbits visually but center stays locked on parcel
-      // This creates the DJI POI effect where camera circles but parcel stays centered
-      centerOffset = { 
-        lon: Math.sin(bearingRad) * fixedRadius,
-        lat: Math.cos(bearingRad) * fixedRadius 
-      };
-      
-      // Camera always looks at parcel center (DJI POI style)
-      // All values LOCKED - no recalculation during orbit
+      // All values locked
       zoom = fixedZoom;
       pitch = fixedPitch;
       bearing = currentBearing;
