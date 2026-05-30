@@ -74,10 +74,10 @@ export class SimpleCameraEngine {
   constructor(options: SimpleCameraOptions) {
     this.options = {
       orbitRadiusDegrees: 0.005, // ~500m
-      passDistanceDegrees: 0.008, // ~800m
+      passDistanceDegrees: 0.002, // ~200m - güvenli, parsel kaybolmaz
       ...options,
     };
-    this.easing = easeInOutCubic; // Her zaman cinematic
+    this.easing = easeInOutCubic; // Sadece geçiş için
     this.startBearing = Math.random() * 360;
   }
   
@@ -143,6 +143,7 @@ export class SimpleCameraEngine {
   
   /**
    * ORBIT: 5 km/saat hızda sabit yükseklik orbit
+   * NOT: Easing YOK - lineer sabit hız
    */
   private calculateOrbitState(
     sceneProgress: number,
@@ -151,21 +152,19 @@ export class SimpleCameraEngine {
     pitch: number,
     orbitRadiusDegrees: number
   ): CameraState {
-    // Easing uygula (başlangıç ve bitiş yumuşak)
-    const easedProgress = this.easing(sceneProgress);
+    // Lineer sabit hız - easing YOK
+    const linearProgress = sceneProgress;
     
     // Açısal hız hesapla (5 km/saat)
-    // 5 km/saat = 1.39 m/s
-    // Radius ~500m ise: angular = 1.39 / (500 * 111000) rad/s
     const radiusMeters = orbitRadiusDegrees * 111000; // derece → metre
     const angularSpeedRadPerSec = SPEED_MPS / radiusMeters;
     
     // Elapsed time (orbit sahnesi içinde)
-    const elapsedSeconds = easedProgress * this.options.duration * this.SCENE_RATIOS.orbit;
+    const elapsedSeconds = linearProgress * this.options.duration * this.SCENE_RATIOS.orbit;
     const angleRad = angularSpeedRadPerSec * elapsedSeconds;
     const angleDeg = angleRad * (180 / Math.PI);
     
-    // Bearing hesapla
+    // Bearing hesapla - lineer artış
     const bearing = (this.startBearing + angleDeg) % 360;
     
     return {
@@ -179,6 +178,7 @@ export class SimpleCameraEngine {
   
   /**
    * TRANSITION: Kuzey-Güney düz geçiş
+   * NOT: Easing YOK - lineer sabit hız, parsel kadrajda kalır
    */
   private calculateTransitionState(
     sceneProgress: number,
@@ -187,20 +187,21 @@ export class SimpleCameraEngine {
     pitch: number,
     passDistanceDegrees: number
   ): CameraState {
-    // Easing uygula
-    const easedProgress = this.easing(sceneProgress);
+    // Lineer sabit hız - easing YOK
+    const linearProgress = sceneProgress;
     
     // Kuzeyden güneye doğru düz hat
     // start: parcelCenter + northOffset
     // end: parcelCenter + southOffset
+    // Geçiş çok küçük (<200m) - parsel her zaman kadrajda
     
     const northOffset = passDistanceDegrees / 2;
     const southOffset = -passDistanceDegrees / 2;
     
     // Linear interpolation: north → south
-    const centerLat = parcelCenter[1] + northOffset + (southOffset - northOffset) * easedProgress;
+    const centerLat = parcelCenter[1] + northOffset + (southOffset - northOffset) * linearProgress;
     
-    // Bearing: 180° (güneye doğru bak)
+    // Bearing: 180° (güneye doğru bak) - sabit
     const bearing = 180;
     
     return {
@@ -213,7 +214,8 @@ export class SimpleCameraEngine {
   }
   
   /**
-   * FINAL: Stabil hover
+   * FINAL: Tamamen sabit hover
+   * NOT: Drift YOK - tamamen sabit
    */
   private calculateFinalState(
     globalProgress: number,
@@ -221,16 +223,12 @@ export class SimpleCameraEngine {
     zoom: number,
     pitch: number
   ): CameraState {
-    // Son hafif drift
-    const finalProgress = (globalProgress - this.SCENE_RATIOS.orbit - this.SCENE_RATIOS.transition) / this.SCENE_RATIOS.final;
-    const driftRange = 3;
-    const driftAmount = Math.sin(finalProgress * Math.PI) * driftRange;
-    
+    // Tamamen sabit - hiçbir şey değişmez
     return {
       center: [parcelCenter[0], parcelCenter[1]],
       zoom,
       pitch,
-      bearing: ((180 + driftAmount) % 360 + 360) % 360,
+      bearing: 180, // Sabit
       altitude: this.options.altitude,
     };
   }
