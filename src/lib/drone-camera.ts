@@ -1,21 +1,21 @@
 /**
- * Drone Camera Engine v10
+ * Drone Camera Engine v12
  * 
- * Gerçek drone yaklaşma hissi için yeniden yazıldı
+ * Basit ve güvenilir drone kamerası
  * 
  * TEMEL İLKELER:
- * 1. Kamera pozisyonu parsele doğru hareket eder
- * 2. center = parcelCenter + offset (offset azalır)
- * 3. Bearing = hareket yönüne bakar
- * 4. Parsel görünür kalır ama tam merkezde olmak zorunda değil
+ * 1. center = parcelCenter (HER ZAMAN SABİT)
+ * 2. Parsel video boyunca her zaman merkezde
+ * 3. Sadece bearing yön değiştirir
+ * 4. Zoom çok hafif değişir
  * 
  * SAHNELER:
  * 1. INTRO - %5 (hızlı kurulum)
- * 2. ORBIT - %10 (kısa tur, sabit zoom)
- * 3. NORTH - %20 (kuzeyden yaklaşma)
- * 4. SOUTH - %20 (güneyden yaklaşma)
- * 5. EAST - %20 (doğudan yaklaşma)
- * 6. WEST - %20 (batıdan yaklaşma)
+ * 2. ORBIT - %10 (kısa tur)
+ * 3. NORTH - %20 (bearing = 180°)
+ * 4. SOUTH - %20 (bearing = 0°)
+ * 5. EAST - %20 (bearing = 270°)
+ * 6. WEST - %20 (bearing = 90°)
  * 7. FINAL - %5 (sabit hover)
  */
 
