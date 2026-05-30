@@ -106,38 +106,70 @@ function getBearingRange(mode: CameraSequenceMode, feel: CameraFeel, startBearin
 }
 
 /**
- * Extract corners from GeoJSON polygon for fourCorners mode
+ * Four Corners approach directions (cardinal)
  */
-function extractPolygonCorners(geoJson: GeoJSON.Feature): Array<{ lon: number; lat: number }> {
-  const geometry = geoJson.geometry;
-  
-  // Only process Polygon type
-  if (geometry.type !== "Polygon" && geometry.type !== "MultiPolygon") {
-    return [];
-  }
-  
-  // For MultiPolygon, get first polygon
-  const coordinates = geometry.type === "Polygon" 
-    ? (geometry as GeoJSON.Polygon).coordinates
-    : (geometry as GeoJSON.MultiPolygon).coordinates[0];
-  
-  if (!coordinates) return [];
-  
-  const ring = coordinates[0] as number[][]; // Outer ring
-    
-  // Get unique corners (skip last point which equals first)
-  const corners: Array<{ lon: number; lat: number }> = [];
-  for (let i = 0; i < ring.length - 1; i++) {
-    const [lon, lat] = ring[i];
-    corners.push({ lon, lat });
-  }
-  
-  // Return max 4 corners for simplicity
-  return corners.slice(0, 4);
+interface FourCornerShot {
+  id: string;
+  label: string;
+  // Start position offset from parcel center (in degrees)
+  startLon: number;
+  startLat: number;
+  // End position (parcel center)
+  endLon: number;
+  endLat: number;
+  // Direction label
+  direction: "north" | "south" | "east" | "west";
+}
+
+function calculateFourCornerShots(center: { lat: number; lon: number }, distance: number = 0.007): FourCornerShot[] {
+  // distance ~0.007 degrees ≈ 700 meters
+  return [
+    {
+      id: "north",
+      label: "Kuzey",
+      startLon: center.lon,
+      startLat: center.lat + distance,
+      endLon: center.lon,
+      endLat: center.lat,
+      direction: "north",
+    },
+    {
+      id: "south",
+      label: "Güney",
+      startLon: center.lon,
+      startLat: center.lat - distance,
+      endLon: center.lon,
+      endLat: center.lat,
+      direction: "south",
+    },
+    {
+      id: "east",
+      label: "Doğu",
+      startLon: center.lon + distance,
+      startLat: center.lat,
+      endLon: center.lon,
+      endLat: center.lat,
+      direction: "east",
+    },
+    {
+      id: "west",
+      label: "Batı",
+      startLon: center.lon - distance,
+      startLat: center.lat,
+      endLon: center.lon,
+      endLat: center.lat,
+      direction: "west",
+    },
+  ];
 }
 
 /**
  * Build camera sequence based on drone settings and parcel geometry
+ * 
+ * Duration distribution:
+ * - Total video duration is divided equally among selected modes
+ * - Four Corners mode internally splits its time into 4 equal cardinal directions
+ * - Each direction gets (fourCornersDuration / 4) seconds
  */
 export function buildCameraSequence(
   droneSettings: DroneSettingsState, 
@@ -153,14 +185,17 @@ export function buildCameraSequence(
   const numModes = cameraModes.length;
   const durationPerMode = Math.floor(duration / numModes);
   
-  // Pause time for dramatic effect (distributed across modes)
-  const totalPauseTime = Math.min(2, durationPerMode * 0.1);
-  const pausePerMode = totalPauseTime / numModes;
+  // Calculate parcel center from geoJson
+  const parcelCenter = geoJson ? computeParcelCenter(geoJson) : null;
+  
+  // Calculate cardinal approach positions for Four Corners
+  const fourCornerShots = parcelCenter ? calculateFourCornerShots(parcelCenter) : [];
 
-  // Extract corners if geoJson provided
-  const corners = geoJson ? extractPolygonCorners(geoJson) : [];
+  const steps: CameraSequenceStep[] = [];
+  let accumulatedDuration = 0;
 
-  const steps: CameraSequenceStep[] = cameraModes.map((mode, index) => {
+  for (let index = 0; index < cameraModes.length; index++) {
+    const mode = cameraModes[index];
     const pitchRange = getPitchRange(cameraFeel, mode);
     const zoomRange = getZoomRange(cameraFeel, mode, startHeight);
     
@@ -178,41 +213,117 @@ export function buildCameraSequence(
     const currentStartHeight = startHeight - (heightDropPerMode * index);
     const currentEndHeight = Math.max(100, currentStartHeight - heightDropPerMode);
     
-    const step: CameraSequenceStep = {
-      mode,
-      duration: durationPerMode,
-      startHeight: currentStartHeight,
-      endHeight: currentEndHeight,
-      pitch: pitchRange.start,
-      pitchEnd: pitchRange.end,
-      bearingFrom: bearingRange.from,
-      bearingTo: bearingRange.to,
-      zoomFrom: zoomRange.from,
-      zoomTo: zoomRange.to,
-      easing: cameraFeel,
-      pauseAtStart: pausePerMode,
-      ...(mode === "fourCorners" && corners.length >= 4 ? { corners } : {}),
-    };
+    if (mode === "fourCorners") {
+      // Four Corners mode: split into 4 separate steps (N, S, E, W)
+      const cornerDuration = Math.floor(durationPerMode / 4);
+      
+      for (let cornerIndex = 0; cornerIndex < fourCornerShots.length; cornerIndex++) {
+        const shot = fourCornerShots[cornerIndex];
+        
+        const cornerStep: CameraSequenceStep = {
+          mode: "fourCorners",
+          subMode: shot.id as "north" | "south" | "east" | "west",
+          duration: cornerDuration,
+          startHeight: currentStartHeight,
+          endHeight: currentEndHeight,
+          pitch: pitchRange.start,
+          pitchEnd: pitchRange.end,
+          bearingFrom: startBearing,
+          bearingTo: bearingRange.to,
+          zoomFrom: zoomRange.from,
+          zoomTo: zoomRange.to,
+          easing: cameraFeel,
+          pauseAtStart: 0,
+          // Four Corners specific: approach from cardinal direction
+          approachFrom: shot,
+          approachTo: { lon: parcelCenter?.lon || 0, lat: parcelCenter?.lat || 0 },
+        };
 
-    console.log(`[CameraSequence] Step ${index} (${mode}):`, {
-      duration: step.duration,
-      height: `${step.startHeight}m → ${step.endHeight}m`,
-      pitch: `${step.pitch}° → ${step.pitchEnd}°`,
-      bearing: `${step.bearingFrom}° → ${step.bearingTo}°`,
-      zoom: `${step.zoomFrom} → ${step.zoomTo}`,
-    });
+        console.log(`[CameraSequence] Four Corners ${shot.label} (${shot.id}):`, {
+          duration: cornerStep.duration,
+          startPos: `(${shot.startLon.toFixed(5)}, ${shot.startLat.toFixed(5)})`,
+          endPos: `(${parcelCenter?.lon.toFixed(5)}, ${parcelCenter?.lat.toFixed(5)})`,
+          height: `${cornerStep.startHeight}m → ${cornerStep.endHeight}m`,
+        });
 
-    return step;
-  });
+        steps.push(cornerStep);
+      }
+    } else {
+      const step: CameraSequenceStep = {
+        mode,
+        duration: durationPerMode,
+        startHeight: currentStartHeight,
+        endHeight: currentEndHeight,
+        pitch: pitchRange.start,
+        pitchEnd: pitchRange.end,
+        bearingFrom: bearingRange.from,
+        bearingTo: bearingRange.to,
+        zoomFrom: zoomRange.from,
+        zoomTo: zoomRange.to,
+        easing: cameraFeel,
+        pauseAtStart: 0,
+      };
+
+      console.log(`[CameraSequence] Step ${index} (${mode}):`, {
+        duration: step.duration,
+        height: `${step.startHeight}m → ${step.endHeight}m`,
+        pitch: `${step.pitch}° → ${step.pitchEnd}°`,
+      });
+
+      steps.push(step);
+    }
+    
+    accumulatedDuration += mode === "fourCorners" 
+      ? (fourCornerShots.length * Math.floor(durationPerMode / 4))
+      : durationPerMode;
+  }
 
   const sequence: CameraSequence = {
     steps,
-    totalDuration: steps.reduce((sum, step) => sum + step.duration, 0),
+    totalDuration: accumulatedDuration,
   };
 
-  console.log("[CameraSequence] Generated sequence:", JSON.stringify(sequence, null, 2));
+  console.log("[CameraSequence] Generated sequence:", {
+    totalDuration: sequence.totalDuration,
+    stepCount: steps.length,
+    modes: cameraModes,
+  });
 
   return sequence;
+}
+
+/**
+ * Compute parcel center from GeoJSON
+ */
+function computeParcelCenter(geoJson: GeoJSON.Feature): { lat: number; lon: number } | null {
+  const geometry = geoJson.geometry;
+  
+  if (geometry.type !== "Polygon" && geometry.type !== "MultiPolygon") {
+    return null;
+  }
+  
+  const coordinates = geometry.type === "Polygon" 
+    ? (geometry as GeoJSON.Polygon).coordinates
+    : (geometry as GeoJSON.MultiPolygon).coordinates[0];
+  
+  if (!coordinates || !coordinates[0]) return null;
+  
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  
+  for (const coord of coordinates[0]) {
+    const [lon, lat] = coord;
+    minLon = Math.min(minLon, lon);
+    maxLon = Math.max(maxLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+  }
+  
+  if (!Number.isFinite(minLon)) return null;
+  
+  return {
+    lat: (minLat + maxLat) / 2,
+    lon: (minLon + maxLon) / 2,
+  };
 }
 
 /**
@@ -250,21 +361,44 @@ export function interpolateCameraStep(
 
   switch (step.mode) {
     case "heroZoom": {
-      // Dramatic zoom from far high altitude to close view
+      // Dramatic zoom from far high altitude (800-1000m) to close view
+      // Fast approach, slow down in last 2 seconds for Netflix drone feel
       const progress = easedT;
       
-      // Start from far offset (simulating high altitude)
-      const startRadius = 0.015 * (1 - progress * 0.8); // Shrink towards center
-      const angle = -progress * Math.PI * 0.3; // Slight arc movement
+      // Use approachFrom if available (simulate high altitude start)
+      const hasApproach = step.approachFrom && step.approachTo;
       
-      centerOffset = {
-        lon: Math.sin(angle) * startRadius,
-        lat: Math.cos(angle) * startRadius * 0.5, // Less vertical movement
-      };
+      if (hasApproach && step.approachFrom && step.approachTo) {
+        // Start from far position (approaching from above)
+        const targetLon = step.approachTo.lon;
+        const targetLat = step.approachTo.lat;
+        
+        centerOffset = {
+          lon: (step.approachFrom.startLon - targetLon) * (1 - progress) + (step.approachFrom.startLon - center.lon) * (1 - progress),
+          lat: (step.approachFrom.startLat - targetLat) * (1 - progress) + (step.approachFrom.startLat - center.lat) * (1 - progress),
+        };
+        
+        // Slow down in last 20% for cinematic feel
+        const adjustedProgress = progress < 0.8 
+          ? progress * 1.0 
+          : 0.8 + (progress - 0.8) * 0.25; // Slow down last 20%
+        
+        zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * adjustedProgress;
+        pitch = step.pitch + (step.pitchEnd - step.pitch) * Math.pow(adjustedProgress, 0.5);
+      } else {
+        // Fallback: simple zoom from far
+        const startRadius = 0.015 * (1 - progress * 0.8);
+        const angle = -progress * Math.PI * 0.3;
+        
+        centerOffset = {
+          lon: Math.sin(angle) * startRadius,
+          lat: Math.cos(angle) * startRadius * 0.5,
+        };
+        
+        zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * Math.pow(progress, 0.7);
+        pitch = step.pitch + (step.pitchEnd - step.pitch) * Math.pow(progress, 0.6);
+      }
       
-      // Dramatic zoom and pitch change
-      zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * Math.pow(progress, 0.7);
-      pitch = step.pitch + (step.pitchEnd - step.pitch) * Math.pow(progress, 0.6);
       bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * progress;
       break;
     }
@@ -339,45 +473,60 @@ export function interpolateCameraStep(
     }
     
     case "fourCorners": {
-      // Move between corners with pauses
-      const corners = step.corners || [
-        { lon: center.lon - 0.001, lat: center.lat + 0.001 },
-        { lon: center.lon + 0.001, lat: center.lat + 0.001 },
-        { lon: center.lon + 0.001, lat: center.lat - 0.001 },
-        { lon: center.lon - 0.001, lat: center.lat - 0.001 },
-      ];
+      // Cinematic cardinal direction approach (N, S, E, W)
+      // Camera approaches from 500-700m away, always looking at parcel center
+      // Pitch stays high (55-65°) for Google Earth / DJI drone feel
       
-      const numCorners = corners.length;
-      const pauseTime = step.pauseAtStart || 0;
-      const moveTime = 1 - pauseTime;
+      const progress = easedT;
+      const pitchRange = 58; // High angle for cinematic view
       
-      if (t < pauseTime) {
-        // Pause at start
-        centerOffset = { lon: 0, lat: 0 };
-        zoom = step.zoomFrom;
-        pitch = step.pitch;
-        bearing = step.bearingFrom;
-      } else {
-        // Move between corners
-        const moveProgress = (t - pauseTime) / moveTime;
-        const segmentCount = numCorners;
-        const segmentDuration = 1 / segmentCount;
-        const segmentIndex = Math.floor(moveProgress * segmentCount);
-        const segmentProgress = (moveProgress - segmentIndex * segmentDuration) / segmentDuration;
-        const easedSegment = ease(segmentProgress);
+      // Get approach positions from step data
+      const approachFrom = step.approachFrom;
+      const approachTo = step.approachTo;
+      
+      if (approachFrom && approachTo) {
+        // Interpolate from approach position to parcel center
+        // Start far (outside), end at parcel center
+        const approachStartLon = approachFrom.startLon;
+        const approachStartLat = approachFrom.startLat;
+        const approachEndLon = approachTo.lon;
+        const approachEndLat = approachTo.lat;
         
-        const currentCorner = corners[segmentIndex % numCorners];
-        const nextCorner = corners[(segmentIndex + 1) % numCorners];
+        // Cinematic easing: ease-in-out for smooth approach
+        const cinematicT = t * t * (3 - 2 * t); // Smooth step
         
+        // Interpolate position
         centerOffset = {
-          lon: (currentCorner.lon - center.lon) + (nextCorner.lon - currentCorner.lon) * easedSegment,
-          lat: (currentCorner.lat - center.lat) + (nextCorner.lat - currentCorner.lat) * easedSegment,
+          lon: (approachEndLon - approachStartLon) * cinematicT,
+          lat: (approachEndLat - approachStartLat) * cinematicT,
         };
         
-        // Zoom in slightly at each corner
-        const cornerZoom = 0.2 * Math.sin(easedSegment * Math.PI);
-        zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * cornerZoom;
-        pitch = step.pitch;
+        // Zoom in as we approach
+        const startZoom = step.startHeight / 50; // Far zoom
+        const endZoom = step.startHeight / 100 + 2; // Close zoom
+        zoom = startZoom + (endZoom - startZoom) * cinematicT;
+        
+        // Constant high pitch for DJI drone feel
+        pitch = pitchRange;
+        
+        // Bearing points to parcel center (always looking at target)
+        // Calculate bearing based on approach direction
+        const dLon = approachEndLon - approachStartLon;
+        const dLat = approachEndLat - approachStartLat;
+        bearing = Math.atan2(dLon, dLat) * (180 / Math.PI);
+        
+      } else {
+        // Fallback: simple approach from generic position
+        const approachRadius = 0.007 * (1 - progress);
+        const angle = 0; // Default approach
+        
+        centerOffset = {
+          lon: Math.sin(angle) * approachRadius,
+          lat: Math.cos(angle) * approachRadius,
+        };
+        
+        zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * progress;
+        pitch = 58; // High pitch
         bearing = step.bearingFrom;
       }
       break;

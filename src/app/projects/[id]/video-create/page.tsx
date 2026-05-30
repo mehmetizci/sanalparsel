@@ -190,6 +190,7 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
       try {
         // Remove existing layers/sources if any (for potential re-runs)
         if (map.getLayer("parcel-fill")) map.removeLayer("parcel-fill");
+        if (map.getLayer("parcel-outline-glow")) map.removeLayer("parcel-outline-glow");
         if (map.getLayer("parcel-outline")) map.removeLayer("parcel-outline");
         if (map.getSource("parcel")) map.removeSource("parcel");
 
@@ -198,27 +199,45 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
           data: uploadedGeoJson as GeoJSON.Feature,
         });
 
+        // Red fill with transparency
         map.addLayer({
           id: "parcel-fill",
           type: "fill",
           source: "parcel",
           paint: {
-            "fill-color": "#3B82F6",
-            "fill-opacity": 0.3,
+            "fill-color": "#ff2d55",
+            "fill-opacity": 0.15,
           },
         });
 
+        // Red outline with glow effect (Google Earth style)
+        map.addLayer({
+          id: "parcel-outline-glow",
+          type: "line",
+          source: "parcel",
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: {
+            "line-color": "#ff2d55",
+            "line-width": 8,
+            "line-opacity": 0.4,
+            "line-blur": 4,
+          },
+        });
+
+        // Main red outline
         map.addLayer({
           id: "parcel-outline",
           type: "line",
           source: "parcel",
+          layout: { "line-join": "round", "line-cap": "round" },
           paint: {
-            "line-color": "#3B82F6",
+            "line-color": "#ff2d55",
             "line-width": 3,
+            "line-opacity": 1,
           },
         });
 
-        console.log("[VideoCreate] GeoJSON layers added");
+        console.log("[VideoCreate] GeoJSON layers added with red glow effect");
         geojsonAdded = true;
 
         // Fit bounds to show parcel
@@ -570,9 +589,9 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
             <div className="flex items-center justify-between mb-3">
               <span className="text-white/60 text-sm">
                 {renderState === "preparing" && "Harita hazırlanıyor..."}
-                {renderState === "recording" && "Kayıt"}
-                {renderState === "processing" && "Video işleniyor..."}
-                {renderState === "completed" && "Tamamlandı!"}
+                {renderState === "recording" && "Drone rotaları hesaplanıyor..."}
+                {renderState === "processing" && "Video kareleri işleniyor..."}
+                {renderState === "completed" && "Tamamlandı ✓"}
                 {renderState === "error" && "Hata"}
                 {renderState === "cancelled" && "İptal edildi"}
               </span>

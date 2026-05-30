@@ -47,6 +47,8 @@ export interface DroneSettingsState {
 // Extended step type with mode-specific parameters
 export interface CameraSequenceStep {
   mode: CameraSequenceMode;
+  // Optional subMode for modes that have multiple phases (e.g., fourCorners directions)
+  subMode?: "north" | "south" | "east" | "west";
   duration: number;
   startHeight: number;
   endHeight: number;
@@ -61,6 +63,16 @@ export interface CameraSequenceStep {
   corners?: Array<{ lon: number; lat: number }>;
   // Pause at start for dramatic effect
   pauseAtStart?: number;
+  // For approach modes (fourCorners, heroZoom): cardinal direction approach
+  approachFrom?: {
+    id: string;
+    startLon: number;
+    startLat: number;
+  };
+  approachTo?: {
+    lon: number;
+    lat: number;
+  };
 }
 
 export interface CameraSequence {
