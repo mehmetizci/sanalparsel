@@ -366,24 +366,23 @@ export function interpolateCameraStep(
       // Only zoom changes from start to end
       const progress = easedT;
       
-      // Final hover: max 2 seconds at end (calculated from step duration)
-      const hoverDurationSeconds = 2;
-      const hoverThreshold = Math.max(0.85, (step.duration - hoverDurationSeconds) / step.duration);
+      // Final hover: 1.5-2 seconds at end (calculated from step duration)
+      const hoverDurationSeconds = 1.5;
+      const hoverThreshold = Math.max(0.9, (step.duration - hoverDurationSeconds) / step.duration);
       const actualProgress = progress > hoverThreshold 
-        ? hoverThreshold  // Freeze at end for 2 seconds max
+        ? hoverThreshold  // Freeze at end
         : progress;
       
       // Cinematic zoom curve:
       // First 20%: Very slow approach (ease in)
       // Middle 60%: Normal approach (linear)
       // Last 20%: Slow down (ease out)
-      // This creates DJI drone / Apple Maps flyover feel
       let cinematicProgress = actualProgress;
       if (actualProgress < 0.2) {
         // First 20%: Ease in - very slow start
         cinematicProgress = Math.pow(actualProgress / 0.2, 0.5) * 0.2;
       } else if (actualProgress < 0.8) {
-        // Middle 60%: Linear (0.2 to 0.8 maps to 0.2 to 0.8)
+        // Middle 60%: Linear
         cinematicProgress = actualProgress;
       } else {
         // Last 20%: Ease out - slow down
@@ -391,20 +390,19 @@ export function interpolateCameraStep(
         cinematicProgress = 0.8 + 0.2 * (1 - Math.pow(1 - t, 2));
       }
       
-      // Zoom: 12 → 16.3 (wider start for wow effect)
-      // Start: 12 gives ~1200-1500m feel (very wide)
-      // End: 16.3 gives ~150-200m feel (close but not too aggressive)
-      const startZoom = 12;
-      const endZoom = 16.3;
+      // Zoom: 11.5 → 16.1 (wider start, balanced end)
+      // Start: 11.5 gives ~1500m feel (very wide, regional view)
+      // End: 16.1 gives ~200m feel (parcel ~65% of screen, roads visible)
+      const startZoom = 11.5;
+      const endZoom = 16.1;
       
-      // Single easing application - no double easing
       zoom = startZoom + (endZoom - startZoom) * cinematicProgress;
       
-      // FIXED VALUES - no interpolation, no drift, no jitter
-      pitch = 65;           // Fixed pitch at 65°
-      bearing = 0;          // Fixed bearing at 0° (no rotation)
+      // FIXED VALUES - no jitter, no drift
+      pitch = 65;           // Fixed at 65°
+      bearing = 0;          // Fixed at 0° (no rotation)
       
-      // CRITICAL: Camera is LOCKED on parcel center - no X/Y movement whatsoever
+      // CRITICAL: Camera LOCKED on parcel center
       centerOffset = { lon: 0, lat: 0 };
       
       break;

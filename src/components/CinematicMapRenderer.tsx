@@ -401,7 +401,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         paint: { "fill-color": "#ff2d55", "fill-opacity": 0.1 },
       });
 
-      // Outer glow (wide, faint)
+      // Outer glow (wide, faint) - enhanced for video visibility
       map.addLayer({
         id: "parcel-outline-glow-outer",
         type: "line",
@@ -409,13 +409,13 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-color": "#ff2d55",
-          "line-width": 16,
-          "line-opacity": 0.2,
-          "line-blur": 8,
+          "line-width": 20,
+          "line-opacity": 0.3,
+          "line-blur": 10,
         },
       });
 
-      // Inner glow (medium)
+      // Inner glow (medium) - enhanced
       map.addLayer({
         id: "parcel-outline-glow",
         type: "line",
@@ -423,13 +423,13 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-color": "#ff2d55",
-          "line-width": 10,
-          "line-opacity": 0.5,
-          "line-blur": 4,
+          "line-width": 12,
+          "line-opacity": 0.6,
+          "line-blur": 5,
         },
       });
 
-      // Main red outline (sharp, bright)
+      // Main red outline (sharp, bright) - enhanced
       map.addLayer({
         id: "parcel-outline",
         type: "line",
@@ -437,29 +437,54 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-color": "#ff2d55",
-          "line-width": 4,
+          "line-width": 5,
           "line-opacity": 1,
         },
       });
 
-      // Hide all Mapbox labels for clean professional video
-      // This removes "35-79" parcel numbers and other map labels
-      const labelLayers = [
-        'settlement-major-label',
-        'settlement-minor-label',
-        'airport-label',
-        'waterway-label',
-        'poi-label',
-        'road-number-shield',
-        'state-label',
-        'country-label',
-      ];
-      
-      labelLayers.forEach(layerId => {
+      // Hide ALL map labels for clean professional video
+      const hideLayer = (layerId: string) => {
         if (map.getLayer(layerId)) {
           map.setLayoutProperty(layerId, 'visibility', 'none');
         }
-      });
+      };
+      
+      // Settlement labels
+      hideLayer('settlement-major-label');
+      hideLayer('settlement-minor-label');
+      hideLayer('settlement-sublabel');
+      
+      // Road labels
+      hideLayer('road-number-shield');
+      hideLayer('road-label');
+      hideLayer('road-label-small');
+      hideLayer('road-label-medium');
+      hideLayer('road-label-large');
+      hideLayer('highway-shield');
+      
+      // POI labels
+      hideLayer('poi-label');
+      hideLayer('poi-big-label');
+      
+      // Water labels
+      hideLayer('waterway-label');
+      hideLayer('water-label');
+      
+      // Admin boundaries
+      hideLayer('state-label');
+      hideLayer('country-label');
+      hideLayer('district-label');
+      hideLayer('municipality-label');
+      
+      // Airport labels
+      hideLayer('airport-label');
+      hideLayer('airport-iki-label');
+      
+      // Other labels
+      hideLayer('mountain-peak-label');
+      hideLayer('glacier-label');
+      hideLayer('landform-label');
+      hideLayer('biological-corridor-label');
 
       // Cinematic fly-in animation
       const cinematicPitch = CINEMATIC_PITCH.min + Math.random() * (CINEMATIC_PITCH.max - CINEMATIC_PITCH.min);
