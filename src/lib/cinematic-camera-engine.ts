@@ -29,7 +29,7 @@ import type { CameraFeel } from "@/lib/parcel-store";
 // targetParcelScreenRatio = 0.35 (parcel occupies 35% of screen)
 const MIN_ZOOM = 13;      // Parcel shows more area (min 20% screen)
 const TARGET_ZOOM = 15;   // Parcel shows 35% of screen
-const MAX_ZOOM = 16;      // Parcel shows max 55% of screen
+const MAX_ZOOM = 16.5;    // Parcel shows max 55% of screen (extended for final push-in)
 
 // Scene durations as ratios of total video
 // These will be scaled based on actual duration
@@ -97,7 +97,7 @@ const SCENES: SceneConfig[] = [
   {
     name: 'introOrbit',
     startProgress: 0.00,
-    endProgress: 0.20,
+    endProgress: 0.27, // Extended from 0.20 to 0.27 for stronger intro
     targetPitch: 60,
     zoomRange: { min: 14, max: 15 },
     bearingDelta: 360, // Full 360° orbit
@@ -105,8 +105,8 @@ const SCENES: SceneConfig[] = [
   },
   {
     name: 'northApproach',
-    startProgress: 0.20,
-    endProgress: 0.35,
+    startProgress: 0.27,
+    endProgress: 0.42,
     targetPitch: 45,
     zoomRange: { min: 14.5, max: 15.5 },
     bearingDelta: 30, // Slight rotation
@@ -114,8 +114,8 @@ const SCENES: SceneConfig[] = [
   },
   {
     name: 'southApproach',
-    startProgress: 0.35,
-    endProgress: 0.50,
+    startProgress: 0.42,
+    endProgress: 0.57,
     targetPitch: 45,
     zoomRange: { min: 14.5, max: 15.5 },
     bearingDelta: 30,
@@ -123,8 +123,8 @@ const SCENES: SceneConfig[] = [
   },
   {
     name: 'eastApproach',
-    startProgress: 0.50,
-    endProgress: 0.65,
+    startProgress: 0.57,
+    endProgress: 0.72,
     targetPitch: 45,
     zoomRange: { min: 14.5, max: 15.5 },
     bearingDelta: 30,
@@ -132,8 +132,8 @@ const SCENES: SceneConfig[] = [
   },
   {
     name: 'westApproach',
-    startProgress: 0.65,
-    endProgress: 0.80,
+    startProgress: 0.72,
+    endProgress: 0.87,
     targetPitch: 45,
     zoomRange: { min: 14.5, max: 15.5 },
     bearingDelta: 30,
@@ -141,10 +141,10 @@ const SCENES: SceneConfig[] = [
   },
   {
     name: 'finalApproach',
-    startProgress: 0.80,
+    startProgress: 0.87,
     endProgress: 1.00,
     targetPitch: 50,
-    zoomRange: { min: 15, max: 16 }, // Slight zoom in at end
+    zoomRange: { min: 15, max: 16.5 }, // Extended to 16.5 for slow push-in effect
     bearingDelta: 45, // Final rotation
     centerOffset: [0, 0], // Back to center
   },

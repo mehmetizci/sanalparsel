@@ -600,10 +600,21 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
     setRenderState("recording");
     startTimeRef.current = Date.now();
-
+    
+    // WARM-UP PHASE: Run animation for 30 frames WITHOUT recording
+    // This ensures first recorded frame has no black tiles
+    console.log("[VideoCreate] Starting warm-up phase (30 frames)...");
+    warmupFramesRef.current = 0;
+    isWarmupRef.current = true;
+    
     // Start animation loop
     animateCameraCallbackRef.current?.(map, center);
   }, [checkMediaRecorderSupport, setRecordedVideoUrl, videoSettings]);
+  
+  // Warm-up tracking refs
+  const warmupFramesRef = useRef(0);
+  const isWarmupRef = useRef(false);
+  const WARMUP_FRAMES = 30; // 30 frames warm-up before recording starts
 
   // Camera animation loop - stored in ref to avoid circular deps
   const animateCameraCallbackRef = useRef<((map: mapboxgl.Map, center: { lat: number; lon: number }) => void) | null>(null);
@@ -653,6 +664,23 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
         pitch: cameraState.pitch,
         bearing: cameraState.bearing,
       });
+    }
+
+    // WARM-UP: Skip recording for first 30 frames
+    if (isWarmupRef.current) {
+      warmupFramesRef.current++;
+      console.log(`[VideoCreate] Warm-up frame ${warmupFramesRef.current}/${WARMUP_FRAMES}`);
+      
+      if (warmupFramesRef.current >= WARMUP_FRAMES) {
+        console.log("[VideoCreate] Warm-up complete, recording now...");
+        isWarmupRef.current = false;
+      }
+      
+      // Continue animation but don't record
+      animationRef.current = requestAnimationFrame(() => {
+        animateCameraCallbackRef.current?.(map, center);
+      });
+      return;
     }
 
     // Check if recording should stop

@@ -15,16 +15,8 @@ export default function VideoOverlay({ progress, isVisible }: VideoOverlayProps)
   const [showParcelInfo, setShowParcelInfo] = useState(true);
   const [fadeOpacity, setFadeOpacity] = useState(1);
 
-  // Get overlay settings
-  const overlays = videoSettings.overlays || {
-    consultantName: false,
-    phone: false,
-    logo: false,
-    profilePhoto: false,
-    parcelInfo: false,
-    nearbyPlaces: false,
-    subtitles: false,
-  };
+  // Get overlay settings from videoSettings
+  const overlays = videoSettings.overlays;
 
   // Hide parcel info after 5 seconds
   useEffect(() => {
@@ -61,9 +53,11 @@ export default function VideoOverlay({ progress, isVisible }: VideoOverlayProps)
       className="absolute inset-0 pointer-events-none"
       style={{ opacity: fadeOpacity }}
     >
-      {/* Location Info - Top Left */}
+      {/* SAFE AREA: Top 15% reserved for overlays, parcel stays in bottom 85% */}
+      
+      {/* Location Info - Top Left (with safe area) */}
       {parcelMetadata && (
-        <div className="absolute top-4 left-4 md:top-6 md:left-6">
+        <div className="absolute top-6 left-4 md:top-8 md:left-6">
           <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 md:px-4 md:py-3">
             <p className="text-white text-xs md:text-sm font-bold tracking-wider">
               {parcelMetadata.Il?.toUpperCase() || "İL"}
@@ -78,9 +72,9 @@ export default function VideoOverlay({ progress, isVisible }: VideoOverlayProps)
         </div>
       )}
 
-      {/* Featured Info - Middle Left */}
+      {/* Featured Info - Left Side (below location) */}
       {parcelMetadata && (
-        <div className="absolute top-1/2 left-4 md:left-6 -translate-y-1/2">
+        <div className="absolute top-32 left-4 md:top-36 md:left-6">
           <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 md:px-4 md:py-3 space-y-1">
             {parcelMetadata.Alan && (
               <div className="flex items-center gap-2">
@@ -102,9 +96,9 @@ export default function VideoOverlay({ progress, isVisible }: VideoOverlayProps)
         </div>
       )}
 
-      {/* Parcel Info - First 5 seconds */}
+      {/* Parcel Info - First 5 seconds (centered, with safe area margin) */}
       {showParcelInfo && overlays.parcelInfo && parcelMetadata && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2">
           <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-3 md:px-6 md:py-4 text-center">
             {parcelMetadata.Ada && (
               <p className="text-white text-sm md:text-base">
@@ -125,9 +119,9 @@ export default function VideoOverlay({ progress, isVisible }: VideoOverlayProps)
         </div>
       )}
 
-      {/* Nearby Info - Certain scenes (40-60% progress) */}
+      {/* Nearby Info - Middle scenes (40-60% progress, top right with safe area) */}
       {overlays.nearbyPlaces && progress >= 0.40 && progress <= 0.60 && (
-        <div className="absolute top-4 right-4 md:top-6 md:right-6">
+        <div className="absolute top-6 right-4 md:top-8 md:right-6">
           <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 md:px-4 md:py-3 space-y-1">
             <div className="flex items-center gap-2">
               <span className="text-white text-sm">🏥</span>
