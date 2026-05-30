@@ -24,62 +24,6 @@ function getEasing(feel: CameraFeel): (t: number) => number {
 }
 
 /**
- * Calculate optimal zoom based on altitude and parcel size
- * Higher altitude = lower zoom (further view)
- * Smaller parcel = higher zoom (keep parcel visible)
- */
-function calculateZoomForAltitude(
-  altitude: number, 
-  parcelBounds?: { minLonDiff?: number; minLatDiff?: number } | null
-): number {
-  // Base zoom from altitude (100m = zoom 18, 500m = zoom 14)
-  // Formula: zoom ≈ 20 - log2(altitude / 50)
-  let baseZoom = 20 - Math.log2(altitude / 50);
-  
-  // Clamp to reasonable range
-  baseZoom = Math.max(12, Math.min(19, baseZoom));
-  
-  // Adjust for parcel size if bounds available
-  if (parcelBounds && parcelBounds.minLonDiff && parcelBounds.minLatDiff) {
-    const parcelDegreesX = parcelBounds.minLonDiff;
-    const parcelDegreesY = parcelBounds.minLatDiff;
-    
-    // Target: parcel should be ~40-60% of screen
-    const targetScreenRatio = 0.5;
-    
-    // Calculate what zoom needed to fit parcel in view with some margin
-    // Solve for zoom: zoom = log2(360 / (degrees / ratio) / 256)
-    const neededZoomX = Math.log2(360 / (parcelDegreesX / targetScreenRatio) / 256);
-    const neededZoomY = Math.log2(360 / (parcelDegreesY / targetScreenRatio) / 256);
-    
-    // Use the more zoomed-in (higher) value to ensure parcel fits
-    const neededZoom = Math.max(neededZoomX, neededZoomY);
-    
-    // Blend between altitude-based and parcel-based zoom
-    // Higher altitude = more altitude-based (wider view)
-    // Lower altitude = more parcel-based (show parcel clearly)
-    const altitudeWeight = Math.min(1, altitude / 400);
-    baseZoom = baseZoom * altitudeWeight + neededZoom * (1 - altitudeWeight);
-  }
-  
-  return Math.max(12, Math.min(19, baseZoom));
-}
-
-/**
- * Calculate orbit radius based on altitude
- */
-function calculateOrbitRadius(altitude: number): number {
-  // At 100m: tight orbit (0.001)
-  // At 300m: medium orbit (0.003)
-  // At 500m: wide orbit (0.005)
-  // Formula: radius = altitude / 100000 (roughly)
-  const baseRadius = altitude / 100000;
-  
-  // Clamp to reasonable range
-  return Math.max(0.001, Math.min(0.006, baseRadius));
-}
-
-/**
  * Get pitch range based on camera feel
  */
 function getPitchRange(feel: CameraFeel, mode: CameraSequenceMode): { start: number; end: number } {
@@ -405,8 +349,7 @@ export const defaultDroneSettings: DroneSettingsState = {
 export function interpolateCameraStep(
   step: CameraSequenceStep,
   t: number,
-  center: { lat: number; lon: number },
-  parcelBounds?: { minLonDiff: number; minLatDiff: number }
+  center: { lat: number; lon: number }
 ): { center: [number, number]; zoom: number; pitch: number; bearing: number } {
   const ease = getEasing(step.easing);
   const easedT = ease(t);
@@ -415,55 +358,49 @@ export function interpolateCameraStep(
   let zoom: number;
   let pitch: number;
   let bearing: number;
-  
-  // Use altitude from step (set by buildCameraSequence based on drone settings)
-  const altitude = step.startHeight || 300;
 
   switch (step.mode) {
     case "heroZoom": {
-      // Google Earth Studio Hero Shot: Pure zoom movement only
-      // Camera is LOCKED to parcel center - no jitter, no drift
-      // Only zoom changes from start to end
+      // SIMPLIFIED Google Earth Studio Hero Shot
+      // Rules:
+      // - center = parcelCenter (NEVER changes)
+      // - pitch = fixed (NEVER changes)
+      // - bearing = fixed (NEVER changes)
+      // - Only zoom changes
+      // - Zoom calculated ONCE at video start, then locked
+      
       const progress = easedT;
       
-      // Final hover: 1.5-2 seconds at end (calculated from step duration)
+      // Final hover: 1.5 seconds at end
       const hoverDurationSeconds = 1.5;
       const hoverThreshold = Math.max(0.9, (step.duration - hoverDurationSeconds) / step.duration);
       const actualProgress = progress > hoverThreshold 
-        ? hoverThreshold  // Freeze at end
+        ? hoverThreshold 
         : progress;
       
-      // Cinematic zoom curve:
+      // Cinematic zoom curve - only zoom changes
       // First 20%: Very slow approach (ease in)
       // Middle 60%: Normal approach (linear)
       // Last 20%: Slow down (ease out)
       let cinematicProgress = actualProgress;
       if (actualProgress < 0.2) {
-        // First 20%: Ease in - very slow start
         cinematicProgress = Math.pow(actualProgress / 0.2, 0.5) * 0.2;
       } else if (actualProgress < 0.8) {
-        // Middle 60%: Linear
         cinematicProgress = actualProgress;
       } else {
-        // Last 20%: Ease out - slow down
         const t = (actualProgress - 0.8) / 0.2;
         cinematicProgress = 0.8 + 0.2 * (1 - Math.pow(1 - t, 2));
       }
       
-      // Calculate zoom based on altitude
-      // At higher altitude, start further out
-      // At lower altitude, start closer
-      const startZoomBase = calculateZoomForAltitude(altitude * 2, parcelBounds || null);
-      const endZoomBase = calculateZoomForAltitude(altitude * 0.7, parcelBounds || null);
-      
-      // Start: wide view based on altitude (100m=14, 300m=12.5, 500m=11.5)
-      const startZoom = Math.max(11, startZoomBase - 1);
-      // End: close view (parcel fills screen)
-      const endZoom = Math.min(17, endZoomBase + 0.5);
+      // FIXED zoom range - calculated once, never changes
+      // Start: wide view (11.5 = ~1500m feel)
+      // End: close view (15.9 = ~200m feel)
+      const startZoom = 11.5;
+      const endZoom = 15.9;
       
       zoom = startZoom + (endZoom - startZoom) * cinematicProgress;
       
-      // FIXED VALUES - no jitter, no drift
+      // FIXED VALUES - never change during zoom
       pitch = 65;           // Fixed at 65°
       bearing = 0;          // Fixed at 0° (no rotation)
       
@@ -474,31 +411,31 @@ export function interpolateCameraStep(
     }
 
     case "orbit360": {
-      // DJI Point Of Interest (POI) Mode - True 360° orbit
-      // Scene 1: Center on parcel (1s) - no movement
-      // Scene 2: True 360° orbit around parcel center
-      // Only bearing changes; everything else locked
+      // SIMPLIFIED DJI POI Mode - True 360° orbit
+      // Rules:
+      // - center = parcelCenter (NEVER changes)
+      // - pitch = fixed (NEVER changes)
+      // - zoom = fixed (NEVER changes)
+      // - Only bearing changes (0° → 360°)
+      // - altitude calculated ONCE at video start, then locked
       
       const progress = easedT;
       
       // Phase 1: Centering (first 8% = ~1s at 12s duration)
-      // During this phase, camera shows parcel centered, no movement
+      // Camera shows parcel centered, no orbit movement
       const centeringThreshold = 0.08;
       
       if (progress < centeringThreshold) {
-        // Scene 1: Parcel centered, no orbit yet
-        // Calculate zoom based on altitude
-        const centeringZoom = calculateZoomForAltitude(altitude * 0.8, parcelBounds || null);
-        
+        // Scene 1: Parcel centered, stable view
+        // FIXED VALUES - no animation during centering
         centerOffset = { lon: 0, lat: 0 };  // Locked on parcel center
-        zoom = Math.min(16, centeringZoom);  // Show full parcel
-        pitch = 65;
-        bearing = 0;  // Start facing north
+        zoom = 16;  // Fixed zoom for centering
+        pitch = 65; // Fixed pitch
+        bearing = 0; // North facing
         break;
       }
       
       // Phase 2: True 360° orbit begins
-      // Calculate orbit progress (0% → 100% of orbit phase)
       const orbitProgress = (progress - centeringThreshold) / (1 - centeringThreshold);
       
       // Final hover: 2 seconds at end
@@ -508,36 +445,30 @@ export function interpolateCameraStep(
         ? hoverThreshold 
         : orbitProgress;
       
-      // FIXED VALUES during orbit - no change
+      // FIXED VALUES throughout orbit - NO changes after calculated once
       const fixedPitch = 65;
+      const fixedZoom = 16;  // Pre-calculated, locked
       
-      // Calculate zoom based on altitude (altitude-adjusted zoom)
-      const altitudeZoom = calculateZoomForAltitude(altitude, parcelBounds || null);
-      const fixedZoom = Math.min(18, Math.max(14, altitudeZoom));
+      // Fixed orbit radius based on altitude (calculated once at start)
+      // Never changes during orbit
+      const fixedRadius = 0.003;
       
-      // Calculate orbit radius based on altitude
-      // At 100m: tight orbit (0.001)
-      // At 300m: medium orbit (0.003)
-      // At 500m: wide orbit (0.005)
-      const orbitRadius = calculateOrbitRadius(altitude);
-      
-      // Bearing: FULL 360° rotation (linear, no easing)
-      // Progress 0 → 1 means bearing 0° → 360°
+      // ONLY bearing changes - full 360° rotation
       const currentBearing = adjustedProgress * 360;
       
-      // Calculate camera position around parcel center
-      // At bearing 0°, camera is north of parcel
-      // At bearing 90°, camera is east of parcel
+      // Camera position: circular orbit around parcel center
+      // centerOffset creates the visual circle, but center is LOCKED on parcel
       const bearingRad = (currentBearing * Math.PI) / 180;
       
-      // Camera position offset from center (for orbit path)
-      // Center stays at parcel center - camera orbits around it
+      // Camera orbits visually but center stays locked on parcel
+      // This creates the DJI POI effect where camera circles but parcel stays centered
       centerOffset = { 
-        lon: Math.sin(bearingRad) * orbitRadius,
-        lat: Math.cos(bearingRad) * orbitRadius 
+        lon: Math.sin(bearingRad) * fixedRadius,
+        lat: Math.cos(bearingRad) * fixedRadius 
       };
       
       // Camera always looks at parcel center (DJI POI style)
+      // All values LOCKED - no recalculation during orbit
       zoom = fixedZoom;
       pitch = fixedPitch;
       bearing = currentBearing;
