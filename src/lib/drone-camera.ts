@@ -325,8 +325,9 @@ export class DroneCamera {
         // FINAL - Stabil hover
         // ═══════════════════════════════════════════════════════════════
         // TÜM DEĞERLER SABİT
+        // Bearing = 90 (west'ten devam, ani değişim yok)
         
-        bearing = startBearing + 360;
+        bearing = 90;
         zoom = baseZoom + 0.5;
         
         break;
