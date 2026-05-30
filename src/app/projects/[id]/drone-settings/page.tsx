@@ -138,9 +138,9 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
       <div className="px-4 py-8 max-w-2xl mx-auto">
         <StepHeader
           step={3}
-          totalSteps={10}
+          totalSteps={8}
           title="Drone Ayarları"
-          description="Video drone hareketini özelleştirin"
+          description="Profesyonel drone uçuş senaryosu otomatik oluşturulur"
         />
 
         <div className="space-y-6">

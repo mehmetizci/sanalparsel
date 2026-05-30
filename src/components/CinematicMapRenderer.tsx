@@ -10,6 +10,7 @@
  * - Contrast/saturation enhancement
  * - Atmospheric fog for depth
  * - Frame-by-frame capture for video export
+ * - Progress-based camera blending (no camera mode jumps)
  */
 
 "use client";
@@ -21,9 +22,13 @@ import {
   CINEMATIC_PITCH,
   CINEMATIC_EASING,
   buildCinematicStyle,
-  generateOrbitKeyframes,
-  runCinematicAnimation,
 } from "@/lib/cinematic-renderer";
+import { 
+  CameraBlendingEngine, 
+  calculateBaseZoom, 
+  type CameraState 
+} from "@/lib/camera-blending-engine";
+import { useParcelStore } from "@/lib/parcel-store";
 import type { Feature, Polygon, MultiPolygon, Position } from "geojson";
 import type { LngLatLike } from "maplibre-gl";
 
@@ -141,7 +146,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
     onRenderCompleteRef.current = onRenderComplete;
   }, [onProgress, onFrameCapture, onRenderComplete]);
 
-  // Start frame capture
+  // Start frame capture with camera blending
   const startCapture = useCallback(() => {
     const map = mapRef.current;
     if (!map || isCancelledRef.current) return;
@@ -154,6 +159,24 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
     setRenderState(prev => ({ ...prev, phase: "capturing", progress: 0, currentFrame: 0 }));
     onProgressRef.current?.(0, "capturing_frames");
 
+    // Create Camera Blending Engine for the capture phase
+    const positions = flattenRings(parcel.geometry);
+    const parcelCenter = computeCenter(positions);
+    const droneSettings = useParcelStore.getState().droneSettings;
+    const baseZoom = calculateBaseZoom(droneSettings.startHeight);
+    const startBearing = Math.random() * 360;
+
+    let blendingEngine: CameraBlendingEngine | null = null;
+    if (parcelCenter) {
+      blendingEngine = new CameraBlendingEngine({
+        parcelCenter: [parcelCenter.lon, parcelCenter.lat],
+        baseZoom,
+        startBearing,
+        altitude: droneSettings.startHeight,
+        feel: droneSettings.cameraFeel,
+      });
+    }
+
     const captureFrame = () => {
       if (isCancelledRef.current) {
         if (captureIntervalRef.current) {
@@ -161,6 +184,18 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
           captureIntervalRef.current = null;
         }
         return;
+      }
+
+      // Update camera using blending engine during capture
+      if (blendingEngine) {
+        const progress = frameCount / totalFrames;
+        const cameraState = blendingEngine.getState(progress);
+        map.jumpTo({
+          center: cameraState.center as LngLatLike,
+          zoom: cameraState.zoom,
+          pitch: cameraState.pitch,
+          bearing: cameraState.bearing,
+        });
       }
 
       const canvas = map.getCanvas();
@@ -201,7 +236,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
     };
 
     captureIntervalRef.current = setInterval(captureFrame, frameInterval);
-  }, [duration, fps]);
+  }, [duration, fps, parcel]);
 
   // Start render sequence
   const startRenderInternal = useCallback(() => {
@@ -251,45 +286,71 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
       setRenderState(prev => ({ ...prev, phase: "animating", progress: 5 }));
       onProgressRef.current?.(10, "animating");
 
-      // Skip animation if bounds/center are invalid
+      // Skip if bounds/center are invalid
       if (!bounds || !center) {
         startCapture();
         return;
       }
 
-      // Generate keyframes
-      const keyframes = generateOrbitKeyframes(
-        [center.lon, center.lat] as LngLatLike,
-        bounds,
-        {
-          startPitch: CINEMATIC_PITCH.min,
-          endPitch: CINEMATIC_PITCH.max,
-          duration: Math.min(duration * 1000, 15000),
-          orbitCount: 0.5,
-        }
-      );
-
-      if (keyframes.length < 2) {
-        startCapture();
-        return;
-      }
-
-      // Run animation with proper cleanup
-      animationRef.current = runCinematicAnimation(map, {
-        keyframes,
-        onFrame: (frame) => {
-          if (!isCancelledRef.current) {
-            const frameProgress = Math.min(10 + (frame / (duration * fps)) * 40, 50);
-            onProgressRef.current?.(Math.round(frameProgress), "animating");
-            setRenderState(prev => ({ ...prev, progress: Math.round(frameProgress) }));
-          }
-        },
-        onComplete: () => {
-          if (!isCancelledRef.current) {
-            startCapture();
-          }
-        },
+      // Create Camera Blending Engine
+      const droneSettings = useParcelStore.getState().droneSettings;
+      const baseZoom = calculateBaseZoom(droneSettings.startHeight);
+      const startBearing = Math.random() * 360;
+      
+      const blendingEngine = new CameraBlendingEngine({
+        parcelCenter: [center.lon, center.lat],
+        baseZoom,
+        startBearing,
+        altitude: droneSettings.startHeight,
+        feel: droneSettings.cameraFeel,
       });
+
+      // Initial camera state
+      const initialState = blendingEngine.getState(0);
+      map.jumpTo({
+        center: initialState.center as LngLatLike,
+        zoom: initialState.zoom,
+        pitch: initialState.pitch,
+        bearing: initialState.bearing,
+      });
+
+      // Progress-based animation
+      const totalFrames = duration * fps;
+      let currentFrame = 0;
+      const animationDuration = Math.min(duration * 1000, 15000); // max 15s for intro
+      const animationStartTime = performance.now();
+
+      const animate = (timestamp: number) => {
+        if (isCancelledRef.current) return;
+
+        const elapsed = timestamp - animationStartTime;
+        const progress = Math.min(elapsed / animationDuration, 1);
+
+        // Get blended camera state
+        const cameraState = blendingEngine.getState(progress);
+
+        // Apply to map (smooth via jumpTo)
+        map.jumpTo({
+          center: cameraState.center as LngLatLike,
+          zoom: cameraState.zoom,
+          pitch: cameraState.pitch,
+          bearing: cameraState.bearing,
+        });
+
+        // Update progress
+        const frameProgress = Math.min(10 + progress * 40, 50);
+        onProgressRef.current?.(Math.round(frameProgress), "animating");
+        setRenderState(prev => ({ ...prev, progress: Math.round(frameProgress) }));
+
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          // Animation complete, start capture
+          startCapture();
+        }
+      };
+
+      requestAnimationFrame(animate);
     };
 
     // Listen for idle event

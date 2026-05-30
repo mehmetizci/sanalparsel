@@ -6,6 +6,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useParcelStore } from "@/lib/parcel-store";
 import { buildCameraSequence, interpolateCameraStep } from "@/lib/camera-sequence";
+import { CameraBlendingEngine, calculateBaseZoom } from "@/lib/camera-blending-engine";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
 
@@ -484,13 +485,10 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
     // CRITICAL: Set canvas size from videoSettings resolution
     // This ensures the recorded video matches the user's selected resolution
+    // ONLY 720x1280 and 1080x1920 are supported
     const { width, height } = videoSettings.resolution === "1080x1920" 
       ? { width: 1080, height: 1920 }
-      : videoSettings.resolution === "1440x2560"
-        ? { width: 1440, height: 2560 }
-        : videoSettings.resolution === "2160x3840"
-          ? { width: 2160, height: 3840 }
-          : { width: 720, height: 1280 }; // Default: 720x1280
+      : { width: 720, height: 1280 }; // Default: 720x1280
 
     canvas.width = width;
     canvas.height = height;
@@ -544,55 +542,56 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   // Camera animation loop - stored in ref to avoid circular deps
   const animateCameraCallbackRef = useRef<((map: mapboxgl.Map, center: { lat: number; lon: number }) => void) | null>(null);
   
+  // Camera blending engine ref
+  const blendingEngineRef = useRef<CameraBlendingEngine | null>(null);
+  
   animateCameraCallbackRef.current = (map: mapboxgl.Map, center: { lat: number; lon: number }) => {
     if (!mountedRef.current) return;
 
     const elapsed = (Date.now() - startTimeRef.current) / 1000;
     setRenderElapsed(Math.min(elapsed, totalDuration));
 
-    // Progress calculation (0-100%)
+    // Progress calculation (0-1)
     const progress = Math.min(elapsed / totalDuration, 1);
     
-    // Progress phases:
-    // 0-80%: recording in progress
-    // 80-95%: stopping recorder
-    // 95-100%: finalizing video
+    // Display progress (0-100%)
     let displayProgress = Math.round(progress * 100);
-    
-    // Cap progress at 99% until recording actually stops
     if (elapsed >= totalDuration && displayProgress >= 100) {
       displayProgress = 100;
     }
-    
     setRenderProgress(displayProgress);
 
-    // Get sequence from ref
-    const sequence = cameraSequenceRef.current;
-    
-    // Get current step and interpolation
-    if (sequence && sequence.steps.length > 0) {
-      let accumulatedTime = 0;
+    // Initialize blending engine if not done
+    if (!blendingEngineRef.current && parcelCenter) {
+      const baseZoom = calculateBaseZoom(droneSettings.startHeight);
+      const startBearing = Math.random() * 360;
       
-      for (const step of sequence.steps) {
-        if (elapsed < accumulatedTime + step.duration) {
-          const stepProgress = (elapsed - accumulatedTime) / step.duration;
-          const camera = interpolateCameraStep(step, stepProgress, center);
-          
-          // Log camera state for debugging
-          if (Math.floor(elapsed) % 5 === 0 && Math.floor(elapsed) > 0) {
-            console.log(`[WebRecorder] Mode: ${step.mode}, zoom=${camera.zoom.toFixed(2)}, pitch=${camera.pitch.toFixed(1)}°, bearing=${camera.bearing.toFixed(0)}°`);
-          }
-          
-          map.jumpTo({
-            center: camera.center,
-            zoom: camera.zoom,
-            pitch: camera.pitch,
-            bearing: camera.bearing,
-          });
-          break;
-        }
-        accumulatedTime += step.duration;
+      blendingEngineRef.current = new CameraBlendingEngine({
+        parcelCenter: [parcelCenter.lon, parcelCenter.lat],
+        baseZoom,
+        startBearing,
+        altitude: droneSettings.startHeight,
+        feel: droneSettings.cameraFeel,
+      });
+    }
+    
+    // Use camera blending engine for smooth, seamless animation
+    if (blendingEngineRef.current) {
+      const cameraState = blendingEngineRef.current.getState(progress);
+      
+      // Log camera state for debugging (every 5 seconds)
+      if (Math.floor(elapsed) % 5 === 0 && Math.floor(elapsed) > 0) {
+        const weights = blendingEngineRef.current.getWeights(progress);
+        console.log(`[WebRecorder] Progress: ${(progress * 100).toFixed(1)}%, zoom=${cameraState.zoom.toFixed(2)}, pitch=${cameraState.pitch.toFixed(1)}°`);
+        console.log(`[WebRecorder] Weights: Hero=${weights.hero.toFixed(2)}, Orbit=${weights.orbit.toFixed(2)}, Reveal=${weights.reveal.toFixed(2)}, Final=${weights.final.toFixed(2)}`);
       }
+      
+      map.jumpTo({
+        center: cameraState.center,
+        zoom: cameraState.zoom,
+        pitch: cameraState.pitch,
+        bearing: cameraState.bearing,
+      });
     }
 
     // Check if recording should stop

@@ -83,8 +83,7 @@ export interface CameraSequence {
 }
 
 // Video settings types
-export type VideoResolution = "1080x1920" | "720x1280" | "1440x2560" | "2160x3840";
-export type ListingType = "sale" | "investment";
+export type VideoResolution = "1080x1920" | "720x1280";
 
 export interface VideoOverlaySettings {
   consultantName: boolean;
@@ -95,6 +94,12 @@ export interface VideoOverlaySettings {
   nearbyPlaces: boolean;
   subtitles: boolean;
 }
+
+// Resolution configuration - ONLY these exact values are allowed
+export const VIDEO_RESOLUTIONS: Record<VideoResolution, { width: number; height: number }> = {
+  "720x1280": { width: 720, height: 1280 },
+  "1080x1920": { width: 1080, height: 1920 },
+};
 
 export interface VideoSettingsState {
   resolution: VideoResolution;
@@ -359,11 +364,11 @@ export const useParcelStore = create<ParcelState>()(
         cameraFeel: "cinematic",
       },
       cameraSequence: null,
-      // Video settings
+      // Video settings - defaults to 720x1280 for faster rendering
       videoSettings: {
-        resolution: "1080x1920",
-        width: 1080,
-        height: 1920,
+        resolution: "720x1280",
+        width: 720,
+        height: 1280,
         listingType: "sale",
         overlays: {
           consultantName: true,

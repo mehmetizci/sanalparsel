@@ -8,11 +8,11 @@ import StepHeader from "@/components/StepHeader";
 import GlassCard from "@/components/GlassCard";
 import VideoSettingToggle from "@/components/VideoSettingToggle";
 import PrimaryButton from "@/components/PrimaryButton";
-import { useParcelStore, VideoResolution, ListingType } from "@/lib/parcel-store";
+import { useParcelStore, VideoResolution, ListingType, VIDEO_RESOLUTIONS } from "@/lib/parcel-store";
 
-const VIDEO_RESOLUTIONS: { value: VideoResolution; label: string; sublabel: string }[] = [
-  { value: "1080x1920", label: "Premium HD", sublabel: "1080x1920 • Yüksek kalite" },
+const VIDEO_RESOLUTION_OPTIONS: { value: VideoResolution; label: string; sublabel: string }[] = [
   { value: "720x1280", label: "Hızlı Render", sublabel: "720x1280 • Daha hızlı export" },
+  { value: "1080x1920", label: "Premium HD", sublabel: "1080x1920 • Yüksek kalite" },
 ];
 
 const LISTING_TYPES: { value: ListingType; label: string }[] = [
@@ -59,8 +59,8 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
   }, [id, router]);
 
   const handleResolutionChange = (resolution: VideoResolution) => {
-    const [width, height] = resolution.split("x").map(Number);
-    setVideoSettings({ resolution, width, height });
+    const config = VIDEO_RESOLUTIONS[resolution];
+    setVideoSettings({ resolution, width: config.width, height: config.height });
   };
 
   const handleOverlayToggle = (key: keyof typeof videoSettings.overlays) => {
@@ -103,7 +103,7 @@ export default function VideoSettingsPage({ params }: { params: { id: string } }
           <GlassCard>
             <label className="text-white font-semibold mb-3 block">Video Formatı</label>
             <div className="grid grid-cols-2 gap-3">
-              {VIDEO_RESOLUTIONS.map((opt) => {
+              {VIDEO_RESOLUTION_OPTIONS.map((opt) => {
                 const isSelected = videoSettings.resolution === opt.value;
                 return (
                   <button
