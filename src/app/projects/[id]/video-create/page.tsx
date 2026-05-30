@@ -169,15 +169,16 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
       // All ready - schedule recording start
       animationScheduled = true;
-      console.log("[VideoCreate] All resources loaded - scheduling recording start in 1.5s");
+      console.log("[VideoCreate] All resources loaded - scheduling recording start in 2s");
       
-      // Wait extra 1.5s for map tiles to fully load
+      // Wait extra 2s for map tiles to fully load and render
+      // This ensures first frames have no black/loading tiles
       preparationTimeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
           console.log("[VideoCreate] Final check before recording...");
           startRecordingWhenReady(map, parcelCenter);
         }
-      }, 1500);
+      }, 2000);
     };
 
     let styleLoadTime = 0;
@@ -251,6 +252,25 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
             "line-width": 4,
             "line-opacity": 1,
           },
+        });
+
+        // Hide all Mapbox labels for clean professional video
+        // This removes "35-79" parcel numbers and other map labels
+        const labelLayers = [
+          'settlement-major-label',
+          'settlement-minor-label',
+          'airport-label',
+          'waterway-label',
+          'poi-label',
+          'road-number-shield',
+          'state-label',
+          'country-label',
+        ];
+        
+        labelLayers.forEach(layerId => {
+          if (map.getLayer(layerId)) {
+            map.setLayoutProperty(layerId, 'visibility', 'none');
+          }
         });
 
         console.log("[VideoCreate] GeoJSON layers added with red neon glow effect");

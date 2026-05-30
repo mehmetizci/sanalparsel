@@ -442,6 +442,25 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         },
       });
 
+      // Hide all Mapbox labels for clean professional video
+      // This removes "35-79" parcel numbers and other map labels
+      const labelLayers = [
+        'settlement-major-label',
+        'settlement-minor-label',
+        'airport-label',
+        'waterway-label',
+        'poi-label',
+        'road-number-shield',
+        'state-label',
+        'country-label',
+      ];
+      
+      labelLayers.forEach(layerId => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', 'none');
+        }
+      });
+
       // Cinematic fly-in animation
       const cinematicPitch = CINEMATIC_PITCH.min + Math.random() * (CINEMATIC_PITCH.max - CINEMATIC_PITCH.min);
       

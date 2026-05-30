@@ -209,10 +209,11 @@ export default function WebRecorder({
       onError?.(new Error("Map not ready"));
       return;
     }
-    console.log("[WebRecorder] Map ready, waiting 1.5s extra for tiles to fully load...");
+    console.log("[WebRecorder] Map ready, waiting 2s extra for tiles to fully render...");
     
     // Extra delay for tiles to fully load (prevents tile loading artifacts in video)
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // First 1-2 seconds of recording should have clean tiles, no black areas
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
     console.log("[WebRecorder] Map ready, starting recording");
     console.log("[WebRecorder] recording started");
@@ -464,6 +465,25 @@ export default function WebRecorder({
           "line-width": 4,
           "line-opacity": 1,
         },
+      });
+
+      // Hide all Mapbox labels for clean professional video
+      // This removes "35-79" parcel numbers and other map labels
+      const labelLayers = [
+        'settlement-major-label',
+        'settlement-minor-label',
+        'airport-label',
+        'waterway-label',
+        'poi-label',
+        'road-number-shield',
+        'state-label',
+        'country-label',
+      ];
+      
+      labelLayers.forEach(layerId => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', 'none');
+        }
       });
 
       // Initial fly-in

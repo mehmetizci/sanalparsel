@@ -367,27 +367,24 @@ export function interpolateCameraStep(
       const progress = easedT;
       
       // Final hover: max 2 seconds at end (calculated from step duration)
-      // At 30fps and typical step duration, hoverThreshold will be ~0.93-0.97
       const hoverDurationSeconds = 2;
       const hoverThreshold = Math.max(0.85, (step.duration - hoverDurationSeconds) / step.duration);
       const actualProgress = progress > hoverThreshold 
         ? hoverThreshold  // Freeze at end for 2 seconds max
         : progress;
       
-      // Pure zoom interpolation: 13 → 16.5 (keeping parcel in frame)
-      // endZoom 16.5 ensures parcel is ~60-70% of screen, no edges cut
+      // Pure zoom interpolation: 13 → 16.3 (keeping parcel in frame, no edge cut)
       const startZoom = 13;
-      const endZoom = 16.5;
+      const endZoom = 16.3;
       
       // Single easing application - no double easing
       zoom = startZoom + (endZoom - startZoom) * actualProgress;
       
       // FIXED VALUES - no interpolation, no drift, no jitter
       pitch = 65;           // Fixed pitch at 65°
-      bearing = 0;          // Fixed bearing at 0° (or use step.bearingFrom)
+      bearing = 0;          // Fixed bearing at 0° (no rotation)
       
       // CRITICAL: Camera is LOCKED on parcel center - no X/Y movement whatsoever
-      // centerOffset is ALWAYS 0 - this prevents all jitter
       centerOffset = { lon: 0, lat: 0 };
       
       break;
