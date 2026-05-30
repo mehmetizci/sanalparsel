@@ -9,9 +9,25 @@
  * - Each behavior has a weight (0-1) that determines its influence
  * - Weights change smoothly over time - one increases as another decreases
  * - The viewer never sees transitions - just one continuous flight
+ * 
+ * Safety rules:
+ * - Center must stay within maxCenterOffsetRatio of parcelCenter
+ * - Zoom must stay within safe bounds (minZoom, maxZoom)
+ * - Parcel must always be visible on screen
  */
 
 import type { CameraFeel } from "@/lib/parcel-store";
+
+// ─── Safety Constants ───────────────────────────────────────────────────────────
+
+// Maximum allowed offset from parcel center (as ratio of viewport)
+// This ensures parcel stays near center at all times
+const MAX_CENTER_OFFSET_RATIO = 0.05; // 5% of viewport
+
+// Zoom limits to keep parcel visible and properly framed
+const MIN_ZOOM = 13; // Maximum zoom out (parcel shows more area)
+const MAX_ZOOM = 17; // Maximum zoom in (parcel shows less area)
+// Note: We allow zoom to go slightly higher during Hero zoom phase for dramatic effect
 
 // ─── Easing functions ─────────────────────────────────────────────────────────
 
@@ -160,23 +176,15 @@ export class HeroZoomBehavior implements CameraBehavior {
   }
 
   getState(progress: number, baseState: CameraState, parcelCenter: [number, number]): CameraState {
-    // Hero starts far, zooms in while slightly rotating
-    const startOffset = this.feel === "soft" ? 0.008 : 0.006;
+    // Hero zoom: camera zooms in toward parcel while staying LOCKED on center
+    // CRITICAL: center is ALWAYS parcelCenter - never moves
     const zoomRange = this.feel === "soft" ? 2.5 : this.feel === "dynamic" ? 3.0 : 2.8;
     
-    // Start from far position
-    const startLon = parcelCenter[0];
-    const startLat = parcelCenter[1] + startOffset;
+    // CRITICAL: Center stays LOCKED on parcel center
+    const center: [number, number] = [parcelCenter[0], parcelCenter[1]];
     
-    // Interpolate to center
+    // Zoom in from far to close (dramatic effect)
     const t = smoothstep(Math.min(progress * 2, 1));
-    
-    const center: [number, number] = [
-      startLon + (parcelCenter[0] - startLon) * t,
-      startLat + (parcelCenter[1] - startLat) * t,
-    ];
-    
-    // Zoom in from far to close
     const zoomStart = this.baseZoom - zoomRange;
     const zoomEnd = this.baseZoom + 0.3;
     const zoom = zoomStart + (zoomEnd - zoomStart) * t;
@@ -273,16 +281,13 @@ export class RevealBehavior implements CameraBehavior {
 
   getState(progress: number, baseState: CameraState, parcelCenter: [number, number]): CameraState {
     // Reveal: Top-down approach that shows parcel and context
+    // CRITICAL: center stays LOCKED on parcelCenter - minimal movement only
     const normalizedProgress = Math.max(0, (progress - 0.45) / 0.35);
     
-    // Slight offset for dynamic view, centered for soft
-    const offsetAmount = this.feel === "soft" ? 0.001 : this.feel === "dynamic" ? 0.002 : 0.0015;
-    const center: [number, number] = [
-      parcelCenter[0] + offsetAmount * Math.sin(normalizedProgress * Math.PI),
-      parcelCenter[1] + offsetAmount * Math.cos(normalizedProgress * Math.PI * 0.5),
-    ];
+    // CRITICAL: Center stays LOCKED on parcel
+    const center: [number, number] = [parcelCenter[0], parcelCenter[1]];
     
-    // Zoom to show parcel clearly (don't zoom too much)
+    // Zoom to show parcel clearly with tighter bounds
     const zoomMin = this.feel === "soft" ? 14.5 : this.feel === "dynamic" ? 15 : 14.8;
     const zoomMax = this.feel === "soft" ? 16 : this.feel === "dynamic" ? 17 : 16.5;
     const zoom = zoomMin + (zoomMax - zoomMin) * Math.sin(normalizedProgress * Math.PI * 0.7);
@@ -445,13 +450,59 @@ export class CameraBlendingEngine {
       revealState.bearing * normalizedWeights.reveal +
       finalState.bearing * normalizedWeights.final;
     
+    // Apply safety constraints
+    // 1. Clamp center to stay within MAX_CENTER_OFFSET_RATIO of parcelCenter
+    const clampedCenter = this.clampCenter(blendedCenter, this.options.parcelCenter);
+    
+    // 2. Apply zoom constraints based on progress phase
+    // During Hero zoom phase (0-20%), allow higher zoom for dramatic effect
+    // But enforce stricter limits during Orbit/Reveal/Final phases
+    let constrainedZoom = blendedZoom;
+    if (p > 0.20) {
+      // After Hero phase, enforce stricter zoom limits
+      constrainedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, blendedZoom));
+    } else {
+      // During Hero phase, allow zoom up to 18 for dramatic zoom-in effect
+      constrainedZoom = Math.max(MIN_ZOOM, Math.min(18, blendedZoom));
+    }
+    
     return {
-      center: blendedCenter,
-      zoom: blendedZoom,
+      center: clampedCenter,
+      zoom: constrainedZoom,
       pitch: Math.max(0, Math.min(85, blendedPitch)),
       bearing: ((blendedBearing % 360) + 360) % 360,
       altitude: this.options.altitude,
     };
+  }
+  
+  /**
+   * Clamp center to stay within MAX_CENTER_OFFSET_RATIO of parcelCenter
+   * This ensures the parcel always stays near the center of the screen
+   */
+  private clampCenter(
+    current: [number, number],
+    parcelCenter: [number, number]
+  ): [number, number] {
+    const maxOffset = MAX_CENTER_OFFSET_RATIO;
+    
+    // Calculate offset
+    const lonOffset = current[0] - parcelCenter[0];
+    const latOffset = current[1] - parcelCenter[1];
+    
+    // Calculate distance (approximate)
+    const distance = Math.sqrt(lonOffset * lonOffset + latOffset * latOffset);
+    
+    // If within limit, return current center
+    if (distance <= maxOffset) {
+      return current;
+    }
+    
+    // Otherwise, clamp to max offset from parcel center
+    const scale = maxOffset / distance;
+    return [
+      parcelCenter[0] + lonOffset * scale,
+      parcelCenter[1] + latOffset * scale,
+    ];
   }
 
   /**

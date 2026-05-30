@@ -171,16 +171,29 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
       // All ready - schedule recording start
       animationScheduled = true;
-      console.log("[VideoCreate] All resources loaded - scheduling recording start in 2.5s");
+      console.log("[VideoCreate] All resources loaded - scheduling recording start in 3s");
       
-      // Wait extra 2.5s for map tiles to fully load and render
+      // Wait extra 3s for map tiles to fully load and render
       // This ensures first frames have no black/loading tiles
+      // CRITICAL: First frame must show parcel clearly centered
       preparationTimeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
           console.log("[VideoCreate] Final check before recording...");
-          startRecordingWhenReady(map, parcelCenter);
+          
+          // Additional check: wait for map to be fully idle
+          if (map.isStyleLoaded() && map.loaded()) {
+            // Trigger one frame render before starting
+            map.triggerRepaint();
+            setTimeout(() => {
+              if (mountedRef.current) {
+                startRecordingWhenReady(map, parcelCenter);
+              }
+            }, 500); // Wait 500ms for repaint
+          } else {
+            startRecordingWhenReady(map, parcelCenter);
+          }
         }
-      }, 2500);
+      }, 3000);
     };
 
     let styleLoadTime = 0;
