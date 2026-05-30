@@ -390,11 +390,11 @@ export function interpolateCameraStep(
         cinematicProgress = 0.8 + 0.2 * (1 - Math.pow(1 - t, 2));
       }
       
-      // Zoom: 11.5 → 16.1 (wider start, balanced end)
+      // Zoom: 11.5 → 15.9 (wider start, slightly relaxed end)
       // Start: 11.5 gives ~1500m feel (very wide, regional view)
-      // End: 16.1 gives ~200m feel (parcel ~65% of screen, roads visible)
+      // End: 15.9 gives ~200m feel (parcel ~60-65% of screen, surroundings visible)
       const startZoom = 11.5;
-      const endZoom = 16.1;
+      const endZoom = 15.9;
       
       zoom = startZoom + (endZoom - startZoom) * cinematicProgress;
       

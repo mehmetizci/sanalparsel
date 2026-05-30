@@ -169,16 +169,16 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
       // All ready - schedule recording start
       animationScheduled = true;
-      console.log("[VideoCreate] All resources loaded - scheduling recording start in 2s");
+      console.log("[VideoCreate] All resources loaded - scheduling recording start in 2.5s");
       
-      // Wait extra 2s for map tiles to fully load and render
+      // Wait extra 2.5s for map tiles to fully load and render
       // This ensures first frames have no black/loading tiles
       preparationTimeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
           console.log("[VideoCreate] Final check before recording...");
           startRecordingWhenReady(map, parcelCenter);
         }
-      }, 2000);
+      }, 2500);
     };
 
     let styleLoadTime = 0;

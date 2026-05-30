@@ -209,11 +209,11 @@ export default function WebRecorder({
       onError?.(new Error("Map not ready"));
       return;
     }
-    console.log("[WebRecorder] Map ready, waiting 2s extra for tiles to fully render...");
+    console.log("[WebRecorder] Map ready, waiting 2.5s extra for tiles to fully render...");
     
     // Extra delay for tiles to fully load (prevents tile loading artifacts in video)
-    // First 1-2 seconds of recording should have clean tiles, no black areas
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // First frames should have clean tiles, no black areas
+    await new Promise(resolve => setTimeout(resolve, 2500));
     
     console.log("[WebRecorder] Map ready, starting recording");
     console.log("[WebRecorder] recording started");
@@ -343,10 +343,10 @@ export default function WebRecorder({
         animationRef.current = requestAnimationFrame(animate);
       };
 
-      // Start animation after initial fly-in + tile loading delay (3.5 seconds total)
+      // Start animation after initial fly-in + tile loading delay (4.5 seconds total)
       setTimeout(() => {
         animationRef.current = requestAnimationFrame(animate);
-      }, 3500);
+      }, 4500);
 
     } catch (err) {
       console.error("[WebRecorder] Recording error:", err);
