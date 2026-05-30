@@ -169,14 +169,19 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
 
       // All ready - schedule recording start
       animationScheduled = true;
-      console.log("[VideoCreate] All resources loaded - scheduling recording start in 3s");
+      console.log("[VideoCreate] All resources loaded - scheduling recording start in 2s");
       
-      // Wait extra 3s for map tiles to fully load and render
+      // Wait 2s for map tiles to fully load and render
       // This ensures first frames have no black/loading tiles
       // CRITICAL: First frame must show parcel clearly centered
       preparationTimeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
           console.log("[VideoCreate] Final check before recording...");
+          console.log("[VideoCreate] Final state:", {
+            styleLoaded: map.isStyleLoaded(),
+            mapLoaded: map.loaded(),
+            tilesLoaded: map.areTilesLoaded(),
+          });
           
           // Additional check: wait for map to be fully idle
           if (map.isStyleLoaded() && map.loaded()) {
@@ -186,12 +191,12 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
               if (mountedRef.current) {
                 startRecordingWhenReady(map, parcelCenter);
               }
-            }, 500); // Wait 500ms for repaint
+            }, 300); // Wait 300ms for repaint
           } else {
             startRecordingWhenReady(map, parcelCenter);
           }
         }
-      }, 3000);
+      }, 2000);
     };
 
     let styleLoadTime = 0;
@@ -478,19 +483,44 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
       
       // Wait for map to settle on initial position and for tiles to fully load
       // Check if map is idle before starting recording
+      // CRITICAL: Add timeout to prevent infinite waiting
+      const idleCheckStartTime = Date.now();
+      const MAX_IDLE_WAIT = 8000; // 8 seconds max wait
+      
       const waitForIdle = () => {
         if (!mountedRef.current) return;
         
-        // Check if map is in idle state (all tiles loaded, no pending requests)
-        
+        const elapsed = Date.now() - idleCheckStartTime;
         const tilesLoaded = map.areTilesLoaded();
+        const styleLoaded = map.isStyleLoaded();
+        const mapLoaded = map.loaded();
         
+        console.log("[VideoCreate] Idle check:", {
+          elapsed: elapsed + "ms",
+          tilesLoaded,
+          styleLoaded,
+          mapLoaded,
+          maxWait: MAX_IDLE_WAIT + "ms",
+        });
+        
+        // Check if we should proceed
         if (tilesLoaded) {
           console.log("[VideoCreate] Map idle - starting recording");
           startRecording(map, center);
+        } else if (elapsed >= MAX_IDLE_WAIT) {
+          // Timeout reached - proceed if style is loaded and map is ready
+          console.log("[VideoCreate] Idle wait timeout - proceeding anyway");
+          if (styleLoaded && mapLoaded) {
+            startRecording(map, center);
+          } else {
+            console.error("[VideoCreate] Cannot start - style or map not loaded");
+            setErrorMessage("Harita yüklenemedi");
+            setRenderState("error");
+          }
         } else {
-          console.log("[VideoCreate] Waiting for map idle...");
-          setTimeout(waitForIdle, 500); // Check again in 500ms
+          // Continue waiting
+          console.log("[VideoCreate] Waiting for map idle... (" + elapsed + "ms)");
+          setTimeout(waitForIdle, 500);
         }
       };
       
