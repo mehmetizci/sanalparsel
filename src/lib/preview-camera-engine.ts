@@ -1,20 +1,20 @@
 /**
  * Simplified Camera Engine v2
  * 
- * Sadece iki ana hareket:
- * 1. SABİT YÜKSEKLİKTE ORBIT (5 km/saat)
- * 2. KUZEY-GÜNEY HATTI BOYUNCA GEÇİŞ
+ * ParcelMap.tsx ön izleme mantığı:
+ * 1. ORBIT: center=sabit, bearing yavaşça artar (3°/saniye)
+ * 2. N-S GEÇİŞİ: bearing=180, center kontrollü hareket
+ * 3. FINAL: tamamen sabit
  * 
- * Karmaşık 4 yön çekimi ve zoom değişimi YOK.
+ * Karmaşık dairesel orbit YOK.
+ * Ön izleme ekranındaki çalışan davranış kullanılıyor.
  */
 
 import type { CameraFeel } from "@/lib/parcel-store";
 
 // ─── SABİTLER ────────────────────────────────────────────────────────────────
 
-// Orbit hızı: 5 km/saat (yürüyüş hızı)
-const ORBIT_SPEED_KMH = 5;
-const SPEED_MPS = ORBIT_SPEED_KMH / 3.6; // ~1.39 m/s
+const BEARING_SPEED_DEG_PER_SEC = 3; // Yavaş rotation - ön izleme gibi
 
 // ─── EASING ────────────────────────────────────────────────────────────────
 
@@ -24,32 +24,6 @@ const SPEED_MPS = ORBIT_SPEED_KMH / 3.6; // ~1.39 m/s
 
 export function altitudeToZoom(altitude: number): number {
   return 18 - Math.log2(altitude / 50);
-}
-
-/**
- * İki nokta arasındaki bearing (pusula yönü) hesapla
- * @param fromLon Başlangıç boylam
- * @param fromLat Başlangıç enlem
- * @param toLon Hedef boylam
- * @param toLat Hedef enlem
- * @returns Bearing (0-360°, 0=North, 90=East, 180=South, 270=West)
- */
-function bearingToTarget(
-  fromLon: number,
-  fromLat: number,
-  toLon: number,
-  toLat: number
-): number {
-  const dLon = (toLon - fromLon) * (Math.PI / 180);
-  const lat1 = fromLat * (Math.PI / 180);
-  const lat2 = toLat * (Math.PI / 180);
-
-  const y = Math.sin(dLon) * Math.cos(lat2);
-  const x =
-    Math.cos(lat1) * Math.sin(lat2) -
-    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-
-  return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
 }
 
 // ─── TİPLER ────────────────────────────────────────────────────────────────
@@ -77,15 +51,13 @@ export interface SimpleCameraOptions {
   altitude: number;
   duration: number;
   feel: CameraFeel;
-  /** Orbit radius (derece cinsinden, varsayılan ~300m) */
-  orbitRadiusDegrees?: number;
   /** Geçiş mesafesi (derece cinsinden) */
   passDistanceDegrees?: number;
 }
 
 export class SimpleCameraEngine {
   private options: Required<SimpleCameraOptions>;
-  private startAngleRad: number;
+  private startBearing: number;
   
   // Scene durations (ratio of total)
   private readonly SCENE_RATIOS = {
@@ -93,23 +65,17 @@ export class SimpleCameraEngine {
     transition: 0.45,
     final: 0.10,
   };
+  
+  // Sabit kamera değerleri (ön izleme gibi)
+  private readonly BASE_PITCH = 55; // Stabil pitch
 
   constructor(options: SimpleCameraOptions) {
     this.options = {
-      orbitRadiusDegrees: 0.006, // ~600m - daha büyük daire
-      passDistanceDegrees: 0.002, // ~200m - güvenli
+      passDistanceDegrees: 0.001, // ~100m - güvenli
       ...options,
     };
-    // Random starting angle for circular orbit
-    this.startAngleRad = Math.random() * Math.PI * 2;
-  }
-  
-  private radToDeg(rad: number): number {
-    return rad * (180 / Math.PI);
-  }
-  
-  private degToRad(deg: number): number {
-    return deg * (Math.PI / 180);
+    // Başlangıç bearing: hafif offset ile
+    this.startBearing = -25; // Ön izleme gibi
   }
   
   /**
@@ -120,7 +86,10 @@ export class SimpleCameraEngine {
     const scene = this.getCurrentScene(p);
     const sceneProgress = this.getSceneProgress(p, scene);
     
-    return this.calculateSceneState(scene, sceneProgress, p);
+    // Elapsed seconds for bearing calculation
+    const elapsedSeconds = p * this.options.duration;
+    
+    return this.calculateSceneState(scene, sceneProgress, elapsedSeconds);
   }
   
   /**
@@ -155,136 +124,90 @@ export class SimpleCameraEngine {
   private calculateSceneState(
     scene: SceneName, 
     sceneProgress: number,
-    globalProgress: number
+    elapsedSeconds: number
   ): CameraState {
-    const { parcelCenter, orbitRadiusDegrees, passDistanceDegrees } = this.options;
-    const { baseZoom, basePitch } = this;
+    const { parcelCenter, passDistanceDegrees } = this.options;
     
     switch (scene) {
       case "orbit":
-        return this.calculateOrbitState(sceneProgress, parcelCenter, baseZoom, basePitch, orbitRadiusDegrees);
+        return this.calculateOrbitState(elapsedSeconds, parcelCenter);
       
       case "transition":
-        return this.calculateTransitionState(sceneProgress, parcelCenter, baseZoom, basePitch, passDistanceDegrees);
+        return this.calculateTransitionState(sceneProgress, parcelCenter, passDistanceDegrees);
       
       case "final":
-        return this.calculateFinalState(globalProgress, parcelCenter, baseZoom, basePitch);
+        return this.calculateFinalState(parcelCenter);
     }
   }
   
   /**
-   * ORBIT: Dairesel hareket - drone parsel etrafında daire üzerinde
+   * ORBIT: Ön izleme gibi - center sabit, bearing yavaşça artar
    * 
-   * center, parsel merkezi etrafında küçük bir daire üzerinde hareket eder
-   * offsetFactor = 0.30 ile parsel kadrajda kalır
-   * Hız: 5 km/saat (lineer, easing yok)
+   * ParcelMap.tsx mantığı:
+   * - center = parcelCenter (değişmez)
+   * - bearing = startBearing + elapsedSeconds * 3°/saniye
+   * - pitch = 55 (sabit)
+   * - zoom = sabit
    */
   private calculateOrbitState(
-    sceneProgress: number,
-    parcelCenter: [number, number],
-    zoom: number,
-    pitch: number,
-    orbitRadiusDegrees: number
+    elapsedSeconds: number,
+    parcelCenter: [number, number]
   ): CameraState {
-    // Lineer sabit hız - easing YOK
-    const linearProgress = sceneProgress;
-    
-    // Açısal hız hesapla (5 km/saat)
-    const radiusMeters = orbitRadiusDegrees * 111000; // derece → metre
-    const angularSpeedRadPerSec = SPEED_MPS / radiusMeters;
-    
-    // Elapsed time (orbit sahnesi içinde)
-    const elapsedSeconds = linearProgress * this.options.duration * this.SCENE_RATIOS.orbit;
-    
-    // Açı hesapla - dairesel hareket
-    const currentAngleRad = this.startAngleRad + angularSpeedRadPerSec * elapsedSeconds;
-    
-    // Orbit pozisyonu hesapla (daire üzerinde)
-    const orbitLon = parcelCenter[0] + Math.cos(currentAngleRad) * orbitRadiusDegrees;
-    const orbitLat = parcelCenter[1] + Math.sin(currentAngleRad) * orbitRadiusDegrees;
-    
-    // Center, parcelCenter'dan orbit noktasına doğru %60 kayar
-    // Daha görünür dairesel hareket için artırıldı
-    const offsetFactor = 0.60;
-    const centerLon = parcelCenter[0] + (orbitLon - parcelCenter[0]) * offsetFactor;
-    const centerLat = parcelCenter[1] + (orbitLat - parcelCenter[1]) * offsetFactor;
-    
-    // Bearing - kameranın parsel merkezine bakması + hafif drift
-    // Hareket hissi için küçük drift ekle
-    const baseBearing = bearingToTarget(centerLon, centerLat, parcelCenter[0], parcelCenter[1]);
-    const bearingDrift = Math.sin(currentAngleRad) * 5; // ±5° drift
-    const bearing = (baseBearing + bearingDrift + 360) % 360;
-    
-    // Debug log (production'da kaldırılabilir)
-    console.log("orbit", {
-      centerLon: centerLon.toFixed(6),
-      centerLat: centerLat.toFixed(6),
-      bearing: bearing.toFixed(1),
-      angleDeg: this.radToDeg(currentAngleRad).toFixed(1),
-    });
+    // Bearing: 3 derece/saniye (ön izleme gibi)
+    const bearing = this.startBearing + elapsedSeconds * BEARING_SPEED_DEG_PER_SEC;
     
     return {
-      center: [centerLon, centerLat],
-      zoom,
-      pitch,
-      bearing,
+      center: [parcelCenter[0], parcelCenter[1]], // Center sabit
+      zoom: this.baseZoom,
+      pitch: this.BASE_PITCH,
+      bearing: ((bearing % 360) + 360) % 360,
       altitude: this.options.altitude,
     };
   }
   
   /**
-   * TRANSITION: Kuzey-Güney düz geçiş
-   * NOT: Easing YOK - lineer sabit hız, parsel kadrajda kalır
+   * TRANSITION: Kuzey-Güney geçiş
+   * 
+   * - bearing = 180 (güneye bak)
+   * - pitch = 55 (sabit)
+   * - center kontrollü N-S hareket
+   * - zoom sabit
    */
   private calculateTransitionState(
     sceneProgress: number,
     parcelCenter: [number, number],
-    zoom: number,
-    pitch: number,
     passDistanceDegrees: number
   ): CameraState {
-    // Lineer sabit hız - easing YOK
-    const linearProgress = sceneProgress;
-    
-    // Kuzeyden güneye doğru düz hat
-    // start: parcelCenter + northOffset
-    // end: parcelCenter + southOffset
-    // Geçiş çok küçük (<200m) - parsel her zaman kadrajda
-    
+    // Center: kuzeyden güneye yavaş geçiş
     const northOffset = passDistanceDegrees / 2;
     const southOffset = -passDistanceDegrees / 2;
-    
-    // Linear interpolation: north → south
-    const centerLat = parcelCenter[1] + northOffset + (southOffset - northOffset) * linearProgress;
-    
-    // Bearing: 180° (güneye doğru bak) - sabit
-    const bearing = 180;
+    const centerLat = parcelCenter[1] + northOffset + (southOffset - northOffset) * sceneProgress;
     
     return {
       center: [parcelCenter[0], centerLat],
-      zoom,
-      pitch,
-      bearing,
+      zoom: this.baseZoom,
+      pitch: this.BASE_PITCH,
+      bearing: 180, // Güneye bak
       altitude: this.options.altitude,
     };
   }
   
   /**
    * FINAL: Tamamen sabit hover
-   * NOT: Drift YOK - tamamen sabit
+   * 
+   * bearing = 180
+   * center = parcelCenter
+   * zoom sabit
+   * pitch sabit
    */
   private calculateFinalState(
-    globalProgress: number,
-    parcelCenter: [number, number],
-    zoom: number,
-    pitch: number
+    parcelCenter: [number, number]
   ): CameraState {
-    // Tamamen sabit - hiçbir şey değişmez
     return {
       center: [parcelCenter[0], parcelCenter[1]],
-      zoom,
-      pitch,
-      bearing: 180, // Sabit
+      zoom: this.baseZoom,
+      pitch: this.BASE_PITCH,
+      bearing: 180, // Sabit güney
       altitude: this.options.altitude,
     };
   }
@@ -294,13 +217,6 @@ export class SimpleCameraEngine {
    */
   private get baseZoom(): number {
     return 18 - Math.log2(this.options.altitude / 50);
-  }
-  
-  /**
-   * Base pitch hesapla
-   */
-  private get basePitch(): number {
-    return 57; // Stabil pitch
   }
   
   getSceneInfo(progress: number): SceneInfo {
