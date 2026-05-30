@@ -409,9 +409,9 @@ export function interpolateCameraStep(
     }
 
     case "orbit360": {
-      // DJI Point Of Interest (POI) Mode
-      // Camera orbits around parcel center at fixed radius and height
-      // Only bearing changes; everything else is locked
+      // DJI Point Of Interest (POI) Mode - True 360° orbit
+      // Camera orbits around parcel center at FIXED radius
+      // Only bearing changes (0° → 360°); everything else locked
       
       const progress = easedT;
       
@@ -423,28 +423,31 @@ export function interpolateCameraStep(
         : progress;
       
       // FIXED VALUES - no change during orbit
-      const fixedPitch = step.pitch || 65;  // Fixed pitch at 65°
-      const fixedZoom = step.zoomFrom || 15;  // Fixed zoom level
+      const fixedPitch = 65;
+      const fixedZoom = 16;
       
-      // Orbit parameters (DJI POI style)
-      const orbitRadius = 0.0005 * (step.startHeight / 100);  // Fixed radius
+      // Orbit radius - FIXED throughout (350m equivalent)
+      const orbitRadius = 0.003;
       
-      // Bearing: full 360° rotation (clockwise)
-      const startBearing = step.bearingFrom || 0;
-      const endBearing = startBearing + 360;  // Full 360° rotation
+      // Bearing: FULL 360° rotation (linear, no easing)
+      // Progress 0 → 1 means bearing 0° → 360°
+      const currentBearing = actualProgress * 360;
       
-      // Linear bearing progression (constant speed, no easing on bearing)
-      const currentBearing = startBearing + (endBearing - startBearing) * actualProgress;
+      // Calculate camera position around parcel center
+      // At bearing 0°, camera is north of parcel
+      // At bearing 90°, camera is east of parcel
+      // etc.
+      const bearingRad = (currentBearing * Math.PI) / 180;
       
-      // Calculate camera position offset from center (for visual orbit effect)
-      const angleRad = (currentBearing * Math.PI) / 180;
-      const cameraLonOffset = Math.sin(angleRad) * orbitRadius;
-      const cameraLatOffset = Math.cos(angleRad) * orbitRadius;
+      // Camera position offset from center (for orbit path)
+      // sin gives X (longitude), cos gives Y (latitude)
+      centerOffset = { 
+        lon: Math.sin(bearingRad) * orbitRadius,
+        lat: Math.cos(bearingRad) * orbitRadius 
+      };
       
-      // Center stays locked on parcel (camera orbits around it)
-      centerOffset = { lon: cameraLonOffset, lat: cameraLatOffset };
-      
-      // All other values FIXED
+      // Camera always looks at parcel center (DJI POI style)
+      // Bearing matches the orbit angle for proper orientation
       zoom = fixedZoom;
       pitch = fixedPitch;
       bearing = currentBearing;
