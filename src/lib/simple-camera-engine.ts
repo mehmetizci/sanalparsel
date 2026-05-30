@@ -1,25 +1,27 @@
 /**
- * Simple Cinematic Camera Engine v5
+ * Simple Cinematic Camera Engine v6
  * 
  * Sıralı 6 sahne sistemi:
- * 1. 360 Orbit - %30 (tam tur, sabit zoom)
- * 2. Kuzeyden Yaklaşım - %15 (düz hat, center kayar)
- * 3. Güneyden Yaklaşım - %15 (düz hat, center kayar)
- * 4. Doğudan Yaklaşım - %15 (düz hat, center kayar)
- * 5. Batıdan Yaklaşım - %15 (düz hat, center kayar)
+ * 1. 360 Orbit - %30 (tam tur, sabit zoom, sabit center)
+ * 2. Kuzeyden Yaklaşım - %15 (düz hat, lineer)
+ * 3. Güneyden Yaklaşım - %15 (düz hat, lineer)
+ * 4. Doğudan Yaklaşım - %15 (düz hat, lineer)
+ * 5. Batıdan Yaklaşım - %15 (düz hat, lineer)
  * 6. Final Yaklaşım - %10 (yavaş zoom)
  * 
- * Kurallar:
+ * KRİTİK KURALLAR:
  * - Orbit: center = parcelCenter (SABİT), zoom = SABİT, sadece bearing döner
- * - 4 Köşe: center kayar (düz hat), bearing sabit, zoom sabit
- * - Pitch = 45 sabit tüm sahnelerde
+ * - 4 Köşe: center kayar (düz hat), bearing SABİT, zoom SABİT
+ * - Parsel HER ZAMAN görünür olmalı
+ * - Ani hızlanma veya ani dönüş YOK
+ * - easeInOutCubic kullan (smooth)
  */
 
 import type { CameraFeel } from "@/lib/parcel-store";
 
 // ─── Sabitler ────────────────────────────────────────────────────────────────
 
-const MIN_ZOOM = 14;      // Parsel küçük kalmaz
+const MIN_ZOOM = 13;      // Parsel görünür kalır (güvenli minimum)
 const MAX_ZOOM = 17;      // Parsel kadrajdan taşmaz
 
 const SCENE_DURATIONS = {
@@ -29,16 +31,6 @@ const SCENE_DURATIONS = {
   east: 0.15,            // %15
   west: 0.15,            // %15
   final: 0.10,           // %10
-};
-
-// Yükseklik bazlı offset mesafeleri (derece cinsinden)
-// Daha yüksek = daha uzak başlangıç
-const ALTITUDE_TO_OFFSET = {
-  100: 0.008,
-  200: 0.012,
-  300: 0.015,
-  400: 0.018,
-  500: 0.020,
 };
 
 // ─── Easing ─────────────────────────────────────────────────────────────────
@@ -64,6 +56,63 @@ function getEasing(feel: CameraFeel): (t: number) => number {
     case "dynamic":
       return easeOutExpo;
   }
+}
+
+// ─── Yardımcı Fonksiyonlar ───────────────────────────────────────────────────
+
+/**
+ * Yükseklikten zoom hesapla
+ */
+export function altitudeToZoom(altitude: number): number {
+  return 18 - Math.log2(altitude / 50);
+}
+
+/**
+ * Yükseklikten offset mesafesi hesapla (derece cinsinden)
+ * Daha yüksek = daha uzak başlangıç
+ */
+function altitudeToOffset(altitude: number): number {
+  // Her 100m için ~0.004 derece offset
+  const baseOffset = altitude / 100 * 0.004;
+  // Minimum 0.004, maximum 0.025
+  return Math.max(0.004, Math.min(0.025, baseOffset));
+}
+
+/**
+ * Parsel bounds'dan uygun zoom hesapla
+ */
+export function calculateOptimalZoom(
+  altitude: number,
+  parcelBounds: { width: number; height: number }
+): number {
+  const avgSize = (parcelBounds.width + parcelBounds.height) / 2;
+  const sizeAdjustment = Math.log2(avgSize * 10000) * 0.3;
+  const baseZoom = altitudeToZoom(altitude);
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, baseZoom - sizeAdjustment + 1));
+}
+
+/**
+ * Süreye göre sahne zamanlamalarını hesapla
+ */
+export function calculateSceneTimings(
+  duration: number
+): Array<{ name: SceneName; start: number; end: number }> {
+  const timings: Array<{ name: SceneName; start: number; end: number }> = [];
+  
+  let currentTime = 0;
+  
+  for (const [scene, ratio] of Object.entries(SCENE_DURATIONS)) {
+    const start = currentTime;
+    const end = currentTime + (duration * ratio);
+    timings.push({
+      name: scene as SceneName,
+      start,
+      end,
+    });
+    currentTime = end;
+  }
+  
+  return timings;
 }
 
 // ─── Türler ─────────────────────────────────────────────────────────────────
@@ -98,22 +147,20 @@ export class SimpleCameraEngine {
   private easing: (t: number) => number;
   private baseZoom: number;
   private startBearing: number;
-  private offset: number; // Başlangıç offset mesafesi
+  private offset: number; // Başlangıç offset mesafesi (derece)
 
   constructor(options: SimpleCameraOptions) {
     this.options = options;
     this.easing = getEasing(options.feel);
     
     // Base zoom altitude'dan hesaplanır
-    // 100m → zoom ~16, 300m → zoom ~14, 400m → zoom ~13.5
     this.baseZoom = 18 - Math.log2(options.altitude / 50);
     
-    // Rastgele başlangıç bearing'i (çeşitlilik için)
+    // Rastgele başlangıç bearing'i
     this.startBearing = Math.random() * 360;
     
     // Yükseklik bazlı offset
-    const altKey = Math.round(options.altitude / 100) * 100;
-    this.offset = ALTITUDE_TO_OFFSET[altKey as keyof typeof ALTITUDE_TO_OFFSET] || 0.015;
+    this.offset = altitudeToOffset(options.altitude);
   }
 
   /**
@@ -179,7 +226,7 @@ export class SimpleCameraEngine {
    */
   private calculateSceneState(scene: SceneName, sceneProgress: number): CameraState {
     const { parcelCenter, altitude } = this.options;
-    const easedSceneProgress = this.easing(sceneProgress);
+    const easedSceneProgress = easeInOutCubic(sceneProgress); // Her zaman smooth easing
     
     let center: [number, number];
     let zoom: number;
@@ -188,38 +235,51 @@ export class SimpleCameraEngine {
 
     switch (scene) {
       case 'orbit':
+        // ═══════════════════════════════════════════════════════════════
         // SAHNE 1: 360° ORBIT
-        // center = parcelCenter (SABİT)
-        // zoom = SABİT
-        // bearing = 0→360 (sadece bearing döner)
-        // Son 2sn: hover (bearing sabit)
+        // ═══════════════════════════════════════════════════════════════
+        // center = parcelCenter (SABİT - ASLA değişmez)
+        // zoom = SABİT (ASLA değişmez)
+        // pitch = SABİT
+        // Sadece bearing döner: 0→360 (tam tur)
+        // Son %15: hover (yavaş son)
+        // ═══════════════════════════════════════════════════════════════
         
         center = [parcelCenter[0], parcelCenter[1]];
-        zoom = this.baseZoom + 0.5; // SABİT zoom
+        zoom = this.baseZoom + 0.5; // SABİT zoom - değişmez!
         pitch = 45;
         
-        // Son 2 saniye için hover
-        const hoverStart = sceneProgress > 0.85;
-        if (hoverStart) {
-          // Hover: bearing sabit, sadece son pozisyonda kal
+        // Tam 360° dönüş, sabit hız
+        // Son 15%'de yavaş hover
+        const isHovering = sceneProgress > 0.85;
+        
+        if (isHovering) {
+          // Hover: son 15%'de yavaşla
           const hoverProgress = (sceneProgress - 0.85) / 0.15;
-          const targetBearing = this.startBearing + 0.85 * 360;
-          bearing = targetBearing + (hoverProgress * 30); // Son 30° yavaş
+          const preHoverBearing = this.startBearing + 0.85 * 360;
+          // Son 54° (15% * 360) yavaş geçiş
+          bearing = preHoverBearing + (hoverProgress * 54);
         } else {
-          // Normal orbit: 0→360
+          // Normal: sabit hızda 360°
           bearing = this.startBearing + easedSceneProgress * 360;
         }
         break;
 
       case 'north':
+        // ═══════════════════════════════════════════════════════════════
         // SAHNE 2: KUZEYDEN YAKLAŞIM
+        // ═══════════════════════════════════════════════════════════════
         // Düz hat boyunca parsele yaklaşır
-        // center kayar, bearing sabit, zoom sabit
+        // center kayar, bearing SABİT, zoom SABİT
+        // ═══════════════════════════════════════════════════════════════
         
-        const northStart = parcelCenter[1] + this.offset; // Kuzeyde başla
-        const northEnd = parcelCenter[1] + this.offset * 0.3; // Yaklaş
+        // Başlangıç: kuzeyde uzak
+        const northStart = parcelCenter[1] + this.offset;
+        // Bitiş: parsel merkezine yaklaş
+        const northEnd = parcelCenter[1] + this.offset * 0.2;
+        
         center = [
-          parcelCenter[0], // lon sabit
+          parcelCenter[0], // lon SABİT
           northStart + (northEnd - northStart) * easedSceneProgress, // lat değişir
         ];
         zoom = this.baseZoom + 0.5; // SABİT zoom
@@ -228,58 +288,66 @@ export class SimpleCameraEngine {
         break;
 
       case 'south':
+        // ═══════════════════════════════════════════════════════════════
         // SAHNE 3: GÜNEYDEN YAKLAŞIM
-        // Düz hat boyunca parsele yaklaşır
+        // ═══════════════════════════════════════════════════════════════
         
-        const southStart = parcelCenter[1] - this.offset; // Güneyde başla
-        const southEnd = parcelCenter[1] - this.offset * 0.3; // Yaklaş
+        const southStart = parcelCenter[1] - this.offset;
+        const southEnd = parcelCenter[1] - this.offset * 0.2;
+        
         center = [
           parcelCenter[0],
           southStart + (southEnd - southStart) * easedSceneProgress,
         ];
-        zoom = this.baseZoom + 0.5;
+        zoom = this.baseZoom + 0.5; // SABİT zoom
         pitch = 45;
         bearing = 0; // Güneye doğru bak (SABİT)
         break;
 
       case 'east':
+        // ═══════════════════════════════════════════════════════════════
         // SAHNE 4: DOĞUDAN YAKLAŞIM
-        // Düz hat boyunca parsele yaklaşır
+        // ═══════════════════════════════════════════════════════════════
         
-        const eastStart = parcelCenter[0] + this.offset; // Doğuda başla
-        const eastEnd = parcelCenter[0] + this.offset * 0.3; // Yaklaş
+        const eastStart = parcelCenter[0] + this.offset;
+        const eastEnd = parcelCenter[0] + this.offset * 0.2;
+        
         center = [
           eastStart + (eastEnd - eastStart) * easedSceneProgress, // lon değişir
-          parcelCenter[1], // lat sabit
+          parcelCenter[1], // lat SABİT
         ];
-        zoom = this.baseZoom + 0.5;
+        zoom = this.baseZoom + 0.5; // SABİT zoom
         pitch = 45;
         bearing = 90; // Doğuya doğru bak (SABİT)
         break;
 
       case 'west':
+        // ═══════════════════════════════════════════════════════════════
         // SAHNE 5: BATIDAN YAKLAŞIM
-        // Düz hat boyunca parsele yaklaşır
+        // ═══════════════════════════════════════════════════════════════
         
-        const westStart = parcelCenter[0] - this.offset; // Batıda başla
-        const westEnd = parcelCenter[0] - this.offset * 0.3; // Yaklaş
+        const westStart = parcelCenter[0] - this.offset;
+        const westEnd = parcelCenter[0] - this.offset * 0.2;
+        
         center = [
           westStart + (westEnd - westStart) * easedSceneProgress, // lon değişir
-          parcelCenter[1], // lat sabit
+          parcelCenter[1], // lat SABİT
         ];
-        zoom = this.baseZoom + 0.5;
+        zoom = this.baseZoom + 0.5; // SABİT zoom
         pitch = 45;
         bearing = 270; // Batıya doğru bak (SABİT)
         break;
 
       case 'final':
+        // ═══════════════════════════════════════════════════════════════
         // SAHNE 6: FİNAL YAKLAŞIM
+        // ═══════════════════════════════════════════════════════════════
         // Yavaşça zoom yap, parsel merkezde kalır
         
         center = [parcelCenter[0], parcelCenter[1]];
-        zoom = this.clampZoom(this.baseZoom + 0.5 + easedSceneProgress * 1.5); // Zoom in
+        zoom = this.clampZoom(this.baseZoom + 0.5 + easedSceneProgress * 1.5);
         pitch = 45;
-        bearing = this.startBearing + 360 + easedSceneProgress * 45; // Devam eden dönüş
+        bearing = this.startBearing + 360 + easedSceneProgress * 45;
         break;
 
       default:
@@ -334,50 +402,4 @@ export class SimpleCameraEngine {
       case 'final': return 'Final Yaklaşımı';
     }
   }
-}
-
-// ─── Yardımcı Fonksiyonlar ───────────────────────────────────────────────────
-
-/**
- * Yükseklikten zoom hesapla
- */
-export function altitudeToZoom(altitude: number): number {
-  return 18 - Math.log2(altitude / 50);
-}
-
-/**
- * Parsel bounds'dan uygun zoom hesapla
- */
-export function calculateOptimalZoom(
-  altitude: number,
-  parcelBounds: { width: number; height: number }
-): number {
-  const avgSize = (parcelBounds.width + parcelBounds.height) / 2;
-  const sizeAdjustment = Math.log2(avgSize * 10000) * 0.3;
-  const baseZoom = altitudeToZoom(altitude);
-  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, baseZoom - sizeAdjustment + 1));
-}
-
-/**
- * Süreye göre sahne zamanlamalarını hesapla (30s, 45s, 60s)
- */
-export function calculateSceneTimings(
-  duration: number
-): Array<{ name: SceneName; start: number; end: number }> {
-  const timings: Array<{ name: SceneName; start: number; end: number }> = [];
-  
-  let currentTime = 0;
-  
-  for (const [scene, ratio] of Object.entries(SCENE_DURATIONS)) {
-    const start = currentTime;
-    const end = currentTime + (duration * ratio);
-    timings.push({
-      name: scene as SceneName,
-      start,
-      end,
-    });
-    currentTime = end;
-  }
-  
-  return timings;
 }
