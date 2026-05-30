@@ -55,10 +55,6 @@ function easeOutExpo(t: number): number {
   return t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
 }
 
-function easeOutQuad(t: number): number {
-  return 1 - (1 - t) * (1 - t);
-}
-
 function getEasing(feel: CameraFeel): (t: number) => number {
   switch (feel) {
     case "soft":
