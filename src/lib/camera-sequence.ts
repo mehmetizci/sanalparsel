@@ -409,18 +409,46 @@ export function interpolateCameraStep(
     }
 
     case "orbit360": {
-      // Simple circular orbit around center
-      const orbitRadius = 0.0005 * (step.startHeight / 100);
-      const angle = easedT * 2 * Math.PI; // Full circle
+      // DJI Point Of Interest (POI) Mode
+      // Camera orbits around parcel center at fixed radius and height
+      // Only bearing changes; everything else is locked
       
-      centerOffset = {
-        lon: Math.sin(angle) * orbitRadius,
-        lat: Math.cos(angle) * orbitRadius,
-      };
+      const progress = easedT;
       
-      zoom = step.zoomFrom + (step.zoomTo - step.zoomFrom) * easedT;
-      pitch = step.pitch; // Constant pitch
-      bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * easedT;
+      // Final hover: 2 seconds at end
+      const hoverDurationSeconds = 2;
+      const hoverThreshold = Math.max(0.85, (step.duration - hoverDurationSeconds) / step.duration);
+      const actualProgress = progress > hoverThreshold 
+        ? hoverThreshold 
+        : progress;
+      
+      // FIXED VALUES - no change during orbit
+      const fixedPitch = step.pitch || 65;  // Fixed pitch at 65°
+      const fixedZoom = step.zoomFrom || 15;  // Fixed zoom level
+      
+      // Orbit parameters (DJI POI style)
+      const orbitRadius = 0.0005 * (step.startHeight / 100);  // Fixed radius
+      
+      // Bearing: full 360° rotation (clockwise)
+      const startBearing = step.bearingFrom || 0;
+      const endBearing = startBearing + 360;  // Full 360° rotation
+      
+      // Linear bearing progression (constant speed, no easing on bearing)
+      const currentBearing = startBearing + (endBearing - startBearing) * actualProgress;
+      
+      // Calculate camera position offset from center (for visual orbit effect)
+      const angleRad = (currentBearing * Math.PI) / 180;
+      const cameraLonOffset = Math.sin(angleRad) * orbitRadius;
+      const cameraLatOffset = Math.cos(angleRad) * orbitRadius;
+      
+      // Center stays locked on parcel (camera orbits around it)
+      centerOffset = { lon: cameraLonOffset, lat: cameraLatOffset };
+      
+      // All other values FIXED
+      zoom = fixedZoom;
+      pitch = fixedPitch;
+      bearing = currentBearing;
+      
       break;
     }
     
