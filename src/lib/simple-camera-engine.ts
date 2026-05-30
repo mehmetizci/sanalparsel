@@ -1,35 +1,44 @@
 /**
- * Simple Cinematic Camera Engine v4
+ * Simple Cinematic Camera Engine v5
  * 
  * Sıralı 6 sahne sistemi:
- * 1. 360 Orbit - %30 (dönüş)
- * 2. Kuzeyden Yaklaşım - %15
- * 3. Güneyden Yaklaşım - %15
- * 4. Doğudan Yaklaşım - %15
- * 5. Batıdan Yaklaşım - %15
- * 6. Final Yaklaşım - %10
+ * 1. 360 Orbit - %30 (tam tur, sabit zoom)
+ * 2. Kuzeyden Yaklaşım - %15 (düz hat, center kayar)
+ * 3. Güneyden Yaklaşım - %15 (düz hat, center kayar)
+ * 4. Doğudan Yaklaşım - %15 (düz hat, center kayar)
+ * 5. Batıdan Yaklaşım - %15 (düz hat, center kayar)
+ * 6. Final Yaklaşım - %10 (yavaş zoom)
  * 
  * Kurallar:
- * - center = parcelCenter (ASLA değişmez)
- * - Zoom sınırları içinde kalır
- * - Bearing + zoom ile yaklaşım
- * - Karmaşık blending YOK
+ * - Orbit: center = parcelCenter (SABİT), zoom = SABİT, sadece bearing döner
+ * - 4 Köşe: center kayar (düz hat), bearing sabit, zoom sabit
+ * - Pitch = 45 sabit tüm sahnelerde
  */
 
 import type { CameraFeel } from "@/lib/parcel-store";
 
 // ─── Sabitler ────────────────────────────────────────────────────────────────
 
-const MIN_ZOOM = 14;      // Parsel küçük kalmaz (max görüntü)
-const MAX_ZOOM = 17;      // Parsel kadrajdan taşmaz (min görüntü)
+const MIN_ZOOM = 14;      // Parsel küçük kalmaz
+const MAX_ZOOM = 17;      // Parsel kadrajdan taşmaz
 
 const SCENE_DURATIONS = {
   orbit: 0.30,           // %30
-  north: 0.15,          // %15
-  south: 0.15,          // %15
-  east: 0.15,           // %15
-  west: 0.15,           // %15
-  final: 0.10,          // %10
+  north: 0.15,           // %15
+  south: 0.15,           // %15
+  east: 0.15,            // %15
+  west: 0.15,            // %15
+  final: 0.10,           // %10
+};
+
+// Yükseklik bazlı offset mesafeleri (derece cinsinden)
+// Daha yüksek = daha uzak başlangıç
+const ALTITUDE_TO_OFFSET = {
+  100: 0.008,
+  200: 0.012,
+  300: 0.015,
+  400: 0.018,
+  500: 0.020,
 };
 
 // ─── Easing ─────────────────────────────────────────────────────────────────
@@ -44,6 +53,10 @@ function easeInOutQuint(t: number): number {
 
 function easeOutExpo(t: number): number {
   return t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
+}
+
+function easeOutQuad(t: number): number {
+  return 1 - (1 - t) * (1 - t);
 }
 
 function getEasing(feel: CameraFeel): (t: number) => number {
@@ -89,6 +102,7 @@ export class SimpleCameraEngine {
   private easing: (t: number) => number;
   private baseZoom: number;
   private startBearing: number;
+  private offset: number; // Başlangıç offset mesafesi
 
   constructor(options: SimpleCameraOptions) {
     this.options = options;
@@ -100,6 +114,10 @@ export class SimpleCameraEngine {
     
     // Rastgele başlangıç bearing'i (çeşitlilik için)
     this.startBearing = Math.random() * 360;
+    
+    // Yükseklik bazlı offset
+    const altKey = Math.round(options.altitude / 100) * 100;
+    this.offset = ALTITUDE_TO_OFFSET[altKey as keyof typeof ALTITUDE_TO_OFFSET] || 0.015;
   }
 
   /**
@@ -167,68 +185,116 @@ export class SimpleCameraEngine {
     const { parcelCenter, altitude } = this.options;
     const easedSceneProgress = this.easing(sceneProgress);
     
+    let center: [number, number];
     let zoom: number;
     let pitch: number;
     let bearing: number;
 
     switch (scene) {
       case 'orbit':
-        // SAHNE 1: 360 derece dönüş
-        // pitch = 45, bearing 0→360, zoom sabit
-        zoom = this.baseZoom + 0.5; // Orta mesafe
+        // SAHNE 1: 360° ORBIT
+        // center = parcelCenter (SABİT)
+        // zoom = SABİT
+        // bearing = 0→360 (sadece bearing döner)
+        // Son 2sn: hover (bearing sabit)
+        
+        center = [parcelCenter[0], parcelCenter[1]];
+        zoom = this.baseZoom + 0.5; // SABİT zoom
         pitch = 45;
-        // 360° dönerken smooth devam
-        bearing = this.startBearing + easedSceneProgress * 360;
+        
+        // Son 2 saniye için hover
+        const hoverStart = sceneProgress > 0.85;
+        if (hoverStart) {
+          // Hover: bearing sabit, sadece son pozisyonda kal
+          const hoverProgress = (sceneProgress - 0.85) / 0.15;
+          const targetBearing = this.startBearing + 0.85 * 360;
+          bearing = targetBearing + (hoverProgress * 30); // Son 30° yavaş
+        } else {
+          // Normal orbit: 0→360
+          bearing = this.startBearing + easedSceneProgress * 360;
+        }
         break;
 
       case 'north':
-        // SAHNE 2: Kuzeyden yaklaşım
-        // bearing = 180 (kuzey)
-        zoom = this.clampZoom(this.baseZoom + 0.5 + easedSceneProgress * 1.0);
+        // SAHNE 2: KUZEYDEN YAKLAŞIM
+        // Düz hat boyunca parsele yaklaşır
+        // center kayar, bearing sabit, zoom sabit
+        
+        const northStart = parcelCenter[1] + this.offset; // Kuzeyde başla
+        const northEnd = parcelCenter[1] + this.offset * 0.3; // Yaklaş
+        center = [
+          parcelCenter[0], // lon sabit
+          northStart + (northEnd - northStart) * easedSceneProgress, // lat değişir
+        ];
+        zoom = this.baseZoom + 0.5; // SABİT zoom
         pitch = 45;
-        bearing = 180 + easedSceneProgress * 30; // 180→210 arası hafif dönüş
+        bearing = 180; // Kuzeye doğru bak (SABİT)
         break;
 
       case 'south':
-        // SAHNE 3: Güneyden yaklaşım
-        // bearing = 0 (güney)
-        zoom = this.clampZoom(this.baseZoom + 0.5 + easedSceneProgress * 1.0);
+        // SAHNE 3: GÜNEYDEN YAKLAŞIM
+        // Düz hat boyunca parsele yaklaşır
+        
+        const southStart = parcelCenter[1] - this.offset; // Güneyde başla
+        const southEnd = parcelCenter[1] - this.offset * 0.3; // Yaklaş
+        center = [
+          parcelCenter[0],
+          southStart + (southEnd - southStart) * easedSceneProgress,
+        ];
+        zoom = this.baseZoom + 0.5;
         pitch = 45;
-        bearing = 0 + easedSceneProgress * 30; // 0→30 arası hafif dönüş
+        bearing = 0; // Güneye doğru bak (SABİT)
         break;
 
       case 'east':
-        // SAHNE 4: Doğudan yaklaşım
-        // bearing = 270 (doğu)
-        zoom = this.clampZoom(this.baseZoom + 0.5 + easedSceneProgress * 1.0);
+        // SAHNE 4: DOĞUDAN YAKLAŞIM
+        // Düz hat boyunca parsele yaklaşır
+        
+        const eastStart = parcelCenter[0] + this.offset; // Doğuda başla
+        const eastEnd = parcelCenter[0] + this.offset * 0.3; // Yaklaş
+        center = [
+          eastStart + (eastEnd - eastStart) * easedSceneProgress, // lon değişir
+          parcelCenter[1], // lat sabit
+        ];
+        zoom = this.baseZoom + 0.5;
         pitch = 45;
-        bearing = 270 + easedSceneProgress * 30; // 270→300 arası hafif dönüş
+        bearing = 90; // Doğuya doğru bak (SABİT)
         break;
 
       case 'west':
-        // SAHNE 5: Batıdan yaklaşım
-        // bearing = 90 (batı)
-        zoom = this.clampZoom(this.baseZoom + 0.5 + easedSceneProgress * 1.0);
+        // SAHNE 5: BATIDAN YAKLAŞIM
+        // Düz hat boyunca parsele yaklaşır
+        
+        const westStart = parcelCenter[0] - this.offset; // Batıda başla
+        const westEnd = parcelCenter[0] - this.offset * 0.3; // Yaklaş
+        center = [
+          westStart + (westEnd - westStart) * easedSceneProgress, // lon değişir
+          parcelCenter[1], // lat sabit
+        ];
+        zoom = this.baseZoom + 0.5;
         pitch = 45;
-        bearing = 90 + easedSceneProgress * 30; // 90→120 arası hafif dönüş
+        bearing = 270; // Batıya doğru bak (SABİT)
         break;
 
       case 'final':
-        // SAHNE 6: Final yaklaşımı (yavaş)
-        // Yavaşça yaklaşır, parsel merkezde kalır
-        zoom = this.clampZoom(this.baseZoom + 1.5 + easedSceneProgress * 1.5);
+        // SAHNE 6: FİNAL YAKLAŞIM
+        // Yavaşça zoom yap, parsel merkezde kalır
+        
+        center = [parcelCenter[0], parcelCenter[1]];
+        zoom = this.clampZoom(this.baseZoom + 0.5 + easedSceneProgress * 1.5); // Zoom in
         pitch = 45;
-        bearing = 120 + easedSceneProgress * 45; // Final dönüş
+        bearing = this.startBearing + 360 + easedSceneProgress * 45; // Devam eden dönüş
         break;
 
       default:
+        center = [parcelCenter[0], parcelCenter[1]];
         zoom = this.baseZoom;
         pitch = 45;
         bearing = this.startBearing;
     }
 
     return {
-      center: [parcelCenter[0], parcelCenter[1]], // ASLA değişmez
+      center,
       zoom,
       pitch,
       bearing: ((bearing % 360) + 360) % 360,
@@ -264,7 +330,7 @@ export class SimpleCameraEngine {
    */
   getSceneNameTR(scene: SceneName): string {
     switch (scene) {
-      case 'orbit': return '360° Dönüş';
+      case 'orbit': return '360° Orbit';
       case 'north': return 'Kuzey Yaklaşımı';
       case 'south': return 'Güney Yaklaşımı';
       case 'east': return 'Doğu Yaklaşımı';
@@ -280,7 +346,6 @@ export class SimpleCameraEngine {
  * Yükseklikten zoom hesapla
  */
 export function altitudeToZoom(altitude: number): number {
-  // 50m → zoom ~18, 100m → zoom ~16, 300m → zoom ~14, 400m → zoom ~13.5
   return 18 - Math.log2(altitude / 50);
 }
 
@@ -291,12 +356,8 @@ export function calculateOptimalZoom(
   altitude: number,
   parcelBounds: { width: number; height: number }
 ): number {
-  // Parsel boyutlarına göre zoom ayarla
   const avgSize = (parcelBounds.width + parcelBounds.height) / 2;
-  
-  // Büyük parseller için daha düşük zoom
   const sizeAdjustment = Math.log2(avgSize * 10000) * 0.3;
-  
   const baseZoom = altitudeToZoom(altitude);
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, baseZoom - sizeAdjustment + 1));
 }
