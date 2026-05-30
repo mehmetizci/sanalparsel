@@ -1,28 +1,22 @@
 /**
- * Natural Drone Camera Engine v9
+ * Drone Camera Engine v10
  * 
- * Görüntü hissi öncelikli - teknik kurallardan çok doğallık
- * 
- * Referans: Gerçek drone arazi tanıtım filmi hissi
- * 
- * SAHNELER:
- * 1. INTRO - Hızlı kurulum (%8)
- * 2. ORBIT - Kısa bakış (%10)
- * 3. DISCOVERY - Kuzey yaklaşımı (%18)
- * 4. DISCOVERY - Güney yaklaşımı (%18)
- * 5. DISCOVERY - Doğu yaklaşımı (%18)
- * 6. DISCOVERY - Batı yaklaşımı (%18)
- * 7. FINAL - Sakin hover (%10)
- * 
- * TOPLAM: 1.00
+ * Gerçek drone yaklaşma hissi için yeniden yazıldı
  * 
  * TEMEL İLKELER:
- * - Kamera acele etmez
- * - Sürekli açı değiştirmez
- * - Sürekli zoom yapmaz
- * - Sakin şekilde süzülür
- * - Sahneler arası doğal geçiş
- * - "Bu gerçek drone çekimi" hissi
+ * 1. Kamera pozisyonu parsele doğru hareket eder
+ * 2. center = parcelCenter + offset (offset azalır)
+ * 3. Bearing = hareket yönüne bakar
+ * 4. Parsel görünür kalır ama tam merkezde olmak zorunda değil
+ * 
+ * SAHNELER:
+ * 1. INTRO - %5 (hızlı kurulum)
+ * 2. ORBIT - %10 (kısa tur, sabit zoom)
+ * 3. NORTH - %20 (kuzeyden yaklaşma)
+ * 4. SOUTH - %20 (güneyden yaklaşma)
+ * 5. EAST - %20 (doğudan yaklaşma)
+ * 6. WEST - %20 (batıdan yaklaşma)
+ * 7. FINAL - %5 (sabit hover)
  */
 
 import type { CameraFeel } from "@/lib/parcel-store";
@@ -32,46 +26,39 @@ import type { CameraFeel } from "@/lib/parcel-store";
 const MIN_ZOOM = 14;
 const MAX_ZOOM = 17;
 
-// Sahne süreleri - discovery daha uzun, orbit kısa
+// Sahne süreleri (toplam = 1.00)
 const SCENE_DURATIONS = {
-  intro: 0.08,
+  intro: 0.05,
   orbit: 0.10,
-  north: 0.18,
-  south: 0.18,
-  east: 0.18,
-  west: 0.18,
-  final: 0.10,
+  north: 0.20,
+  south: 0.20,
+  east: 0.20,
+  west: 0.20,
+  final: 0.05,
 };
 
 // Toplam kontrol
 const TOTAL = Object.values(SCENE_DURATIONS).reduce((a, b) => a + b, 0);
 console.log(`[DroneCamera] Scene total: ${TOTAL}`);
 
-// ─── DRIFT EASING ────────────────────────────────────────────────────────────
-// Çok yavaş, doğal geçişler için
-// Hiçbir şey ani olmamalı
+// ─── EASING ────────────────────────────────────────────────────────────────
 
-function driftEase(t: number): number {
-  // S-curve for ultra-smooth transitions
-  // Başlangıç ve bitiş çok yavaş, orta kısım normal
-  return t * t * (3 - 2 * t);
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-function gentleEase(t: number): number {
-  // Çok daha yavaş ease
-  return t < 0.5 
-    ? 4 * t * t * t 
-    : 1 - Math.pow(-2 * t + 2, 3) / 2;
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
 }
 
 function getEasing(feel: CameraFeel): (t: number) => number {
   switch (feel) {
     case "soft":
-      return driftEase;
+      return easeInOutCubic;
     case "cinematic":
-      return gentleEase;
+      return easeInOutCubic;
     case "dynamic":
-      return driftEase;
+      return easeOutCubic;
   }
 }
 
@@ -139,13 +126,22 @@ export class DroneCamera {
   private easing: (t: number) => number;
   private baseZoom: number;
   private startBearing: number;
+  
+  // Yükseklik bazlı offset (derece cinsinden)
+  // Daha yüksek = daha uzak başlangıç
+  private get offset(): number {
+    const alt = this.options.altitude;
+    if (alt <= 100) return 0.010;
+    if (alt <= 200) return 0.015;
+    if (alt <= 300) return 0.020;
+    if (alt <= 400) return 0.025;
+    return 0.030;
+  }
 
   constructor(options: DroneCameraOptions) {
     this.options = options;
     this.easing = getEasing(options.feel);
     this.baseZoom = altitudeToZoom(options.altitude);
-    
-    // Rastgele ama tutarlı başlangıç
     this.startBearing = Math.floor(Math.random() * 360);
   }
 
@@ -155,7 +151,6 @@ export class DroneCamera {
   getState(progress: number): CameraState {
     const p = Math.max(0, Math.min(1, progress));
     
-    // Sahne seçimi
     const scene = this.getCurrentScene(p);
     const sceneProgress = this.getSceneProgress(p, scene);
     
@@ -209,58 +204,60 @@ export class DroneCamera {
   }
 
   /**
+   * DEBUG: Sahne bilgilerini logla
+   */
+  getDebugInfo(progress: number): string {
+    const state = this.getState(progress);
+    const info = this.getSceneInfo(progress);
+    return `[${info.name.toUpperCase()}] p=${(info.progress * 100).toFixed(1)}% | center=[${state.center[0].toFixed(5)}, ${state.center[1].toFixed(5)}] | zoom=${state.zoom.toFixed(2)} | pitch=${state.pitch}° | bearing=${state.bearing.toFixed(1)}°`;
+  }
+
+  /**
    * Sahneye göre kamera durumunu hesapla
    * 
-   * ÖNEMLİ: Tüm sahneler için TEMEL DEĞERLER ortak:
-   * - center = parcelCenter (SABİT)
-   * - zoom = baseZoom + 0.5 (SABİT - çok az değişim)
-   * - pitch = 45° (SABİT)
-   * 
-   * Sadece bearing ve hafif zoom değişimi var
+   * ÖNEMLİ: center = parcelCenter + offset
+   * offset sahne ilerledikçe azalır (yaklaşıyoruz)
    */
   private calculateSceneState(scene: SceneName, sceneProgress: number): CameraState {
     const { parcelCenter, altitude } = this.options;
-    const { baseZoom, startBearing } = this;
-
-    // Temel değerler - tüm sahneler için aynı
-    const center: [number, number] = [parcelCenter[0], parcelCenter[1]];
-    const pitch = 45;
+    const { baseZoom, startBearing, offset } = this;
     
-    // Zoom çok az değişir - SABİT yakın
+    // Temel değerler
+    const pitch = 45;
     const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, baseZoom + 0.5));
 
+    let center: [number, number];
     let bearing: number;
 
     switch (scene) {
       case "intro": {
         // ═══════════════════════════════════════════════════════════════
-        // INTRO - Hızlı kurulum ama yine de sakin
+        // INTRO - Hızlı kurulum
         // ═══════════════════════════════════════════════════════════════
-        // Başlangıç: yukarıdan parseli göster
-        // Hafif zoom out yap, sonra normalleştir
+        // Orbit başlangıcına hazırlık
         
-        const eased = driftEase(sceneProgress);
-        bearing = startBearing + eased * 15; // Sadece hafif dönüş
+        center = [parcelCenter[0], parcelCenter[1]];
+        bearing = startBearing + sceneProgress * 45;
         
         break;
       }
 
       case "orbit": {
         // ═══════════════════════════════════════════════════════════════
-        // ORBIT - Kısa bakış, "parsel burada" demek için
+        // ORBIT - Kısa tur
         // ═══════════════════════════════════════════════════════════════
-        // ÇOK KISA - sadece 1 tur, sonra geç
-        // Yavaş, sakin dönüş
+        // center = parcelCenter (sabit)
+        // sadece bearing döner
         
-        const eased = driftEase(sceneProgress);
+        center = [parcelCenter[0], parcelCenter[1]];
         
-        // Son %20'de yavaşla (hover effect)
+        // Son %20'de yavaşla
         if (sceneProgress > 0.8) {
           const hoverProgress = (sceneProgress - 0.8) / 0.2;
           const preHoverBearing = startBearing + 0.8 * 360;
-          bearing = preHoverBearing + hoverProgress * 72; // Son ~72°
+          bearing = preHoverBearing + hoverProgress * 72;
         } else {
-          bearing = startBearing + eased * 360;
+          bearing = startBearing + sceneProgress * 360;
         }
         
         break;
@@ -268,80 +265,95 @@ export class DroneCamera {
 
       case "north": {
         // ═══════════════════════════════════════════════════════════════
-        // NORTH DISCOVERY - Kuzeyden yaklaşma
+        // NORTH - Kuzeyden yaklaşma
         // ═══════════════════════════════════════════════════════════════
-        // "Drone kuzey tarafından geliyor, parsele doğru süzülüyor"
-        // 
-        // Başlangıç: parsel kuzeye bakıyor (bearing = 180)
-        // Orta: hafif bearing değişimi (doğal drone漂移)
-        // Bitiş: parsel üzerinde hafif offset
+        // Kamera kuzeyde başlar, parsele doğru ilerler
+        // center kuzeyden parcelCenter'a kayar
         
-        const eased = driftEase(sceneProgress);
+        const eased = this.easing(sceneProgress);
         
-        // Kuzeyden gelirken hafif doğuya kayma (doğal drift)
-        bearing = 180 + Math.sin(eased * Math.PI) * 15; // ±15° wiggle
+        // center kayar: parcelCenter + offset → parcelCenter
+        // offset azaldıkça parsele yaklaşıyoruz
+        const lon = parcelCenter[0];
+        const lat = parcelCenter[1] + offset * (1 - eased);
+        
+        center = [lon, lat];
+        
+        // bearing = 180 (güneye bak = parsele doğru)
+        bearing = 180;
         
         break;
       }
 
       case "south": {
         // ═══════════════════════════════════════════════════════════════
-        // SOUTH DISCOVERY - Güneyden yaklaşma
+        // SOUTH - Güneyden yaklaşma
         // ═══════════════════════════════════════════════════════════════
         
-        const eased = driftEase(sceneProgress);
+        const eased = this.easing(sceneProgress);
         
-        // Güneyden gelirken hafif sola kayma
-        bearing = 0 + Math.sin(eased * Math.PI) * 15;
+        const lon = parcelCenter[0];
+        const lat = parcelCenter[1] - offset * (1 - eased);
+        
+        center = [lon, lat];
+        
+        // bearing = 0 (kuzeye bak = parsele doğru)
+        bearing = 0;
         
         break;
       }
 
       case "east": {
         // ═══════════════════════════════════════════════════════════════
-        // EAST DISCOVERY - Doğudan yaklaşma
+        // EAST - Doğudan yaklaşma
         // ═══════════════════════════════════════════════════════════════
         
-        const eased = driftEase(sceneProgress);
+        const eased = this.easing(sceneProgress);
         
-        // Doğudan gelirken hafif aşağı kayma
-        bearing = 90 + Math.sin(eased * Math.PI) * 15;
+        const lon = parcelCenter[0] + offset * (1 - eased);
+        const lat = parcelCenter[1];
+        
+        center = [lon, lat];
+        
+        // bearing = 270 (batıya bak = parsele doğru)
+        bearing = 270;
         
         break;
       }
 
       case "west": {
         // ═══════════════════════════════════════════════════════════════
-        // WEST DISCOVERY - Batıdan yaklaşma
+        // WEST - Batıdan yaklaşma
         // ═══════════════════════════════════════════════════════════════
         
-        const eased = driftEase(sceneProgress);
+        const eased = this.easing(sceneProgress);
         
-        // Batıdan gelirken hafif yukarı kayma
-        bearing = 270 + Math.sin(eased * Math.PI) * 15;
+        const lon = parcelCenter[0] - offset * (1 - eased);
+        const lat = parcelCenter[1];
+        
+        center = [lon, lat];
+        
+        // bearing = 90 (doğuya bak = parsele doğru)
+        bearing = 90;
         
         break;
       }
 
       case "final": {
         // ═══════════════════════════════════════════════════════════════
-        // FINAL - Stabil hover, parsel üzerinde
+        // FINAL - Stabil hover
         // ═══════════════════════════════════════════════════════════════
-        // TÜM DEĞERLER SABİT - bearing dönmez
-        // Sadece çok hafif zoom
+        // center = parcelCenter
+        // TÜM DEĞERLER SABİT
         
-        const finalZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + sceneProgress * 0.5));
+        center = [parcelCenter[0], parcelCenter[1]];
+        bearing = startBearing + 360;
         
-        return {
-          center,
-          zoom: finalZoom,
-          pitch,
-          bearing: startBearing + 360, // SABİT - dönmez
-          altitude,
-        };
+        break;
       }
 
       default:
+        center = [parcelCenter[0], parcelCenter[1]];
         bearing = startBearing;
     }
 
@@ -369,16 +381,12 @@ export class DroneCamera {
   getSceneNameTR(scene: SceneName): string {
     switch (scene) {
       case "intro": return "Giriş";
-      case "orbit": return "360° Bakış";
-      case "north": return "Kuzey Keşfi";
-      case "south": return "Güney Keşfi";
-      case "east": return "Doğu Keşfi";
-      case "west": return "Batı Keşfi";
+      case "orbit": return "360° Tur";
+      case "north": return "Kuzey";
+      case "south": return "Güney";
+      case "east": return "Doğu";
+      case "west": return "Batı";
       case "final": return "Final";
     }
   }
 }
-
-// Export for compatibility
-export const SimpleCameraEngine = DroneCamera;
-export type { DroneCameraOptions as SimpleCameraOptions };
