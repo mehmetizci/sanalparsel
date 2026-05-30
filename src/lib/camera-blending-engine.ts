@@ -22,11 +22,12 @@ import type { CameraFeel } from "@/lib/parcel-store";
 
 // Maximum allowed offset from parcel center (as ratio of viewport)
 // This ensures parcel stays near center at all times
-const MAX_CENTER_OFFSET_RATIO = 0.05; // 5% of viewport
+const MAX_CENTER_OFFSET_RATIO = 0.03; // 3% of viewport - tighter for better centering
 
 // Zoom limits to keep parcel visible and properly framed
+// Parcel should occupy max 55% of screen (user requirement)
 const MIN_ZOOM = 13; // Maximum zoom out (parcel shows more area)
-const MAX_ZOOM = 17; // Maximum zoom in (parcel shows less area)
+const MAX_ZOOM = 16; // Maximum zoom in (parcel shows max 55% of screen)
 // Note: We allow zoom to go slightly higher during Hero zoom phase for dramatic effect
 
 // ─── Easing functions ─────────────────────────────────────────────────────────
@@ -200,7 +201,7 @@ export class HeroZoomBehavior implements CameraBehavior {
     
     return {
       center,
-      zoom: Math.max(13, Math.min(19, zoom)),
+      zoom: Math.max(13, Math.min(17, zoom)), // Max 17 during Hero phase
       pitch,
       bearing: ((bearing % 360) + 360) % 360,
       altitude: baseState.altitude,
@@ -240,6 +241,7 @@ export class OrbitBehavior implements CameraBehavior {
     const center: [number, number] = [parcelCenter[0], parcelCenter[1]];
     
     // Zoom stays relatively stable during orbit
+    // Keep zoom in safe range to show parcel + context
     const zoomOffset = this.feel === "soft" ? -0.5 : this.feel === "dynamic" ? 0.2 : 0;
     const zoom = this.baseZoom + zoomOffset + Math.sin(normalizedProgress * Math.PI * 2) * 0.3;
     
@@ -251,7 +253,7 @@ export class OrbitBehavior implements CameraBehavior {
     
     return {
       center,
-      zoom: Math.max(13, Math.min(19, zoom)),
+      zoom: Math.max(13, Math.min(16, zoom)), // Max 16 to keep parcel under 55% screen
       pitch,
       bearing: ((bearing % 360) + 360) % 360,
       altitude: baseState.altitude,
@@ -288,8 +290,9 @@ export class RevealBehavior implements CameraBehavior {
     const center: [number, number] = [parcelCenter[0], parcelCenter[1]];
     
     // Zoom to show parcel clearly with tighter bounds
-    const zoomMin = this.feel === "soft" ? 14.5 : this.feel === "dynamic" ? 15 : 14.8;
-    const zoomMax = this.feel === "soft" ? 16 : this.feel === "dynamic" ? 17 : 16.5;
+    // Parcel should occupy max 55% of screen
+    const zoomMin = this.feel === "soft" ? 14 : this.feel === "dynamic" ? 14.5 : 14.2;
+    const zoomMax = this.feel === "soft" ? 15.5 : this.feel === "dynamic" ? 16.5 : 16;
     const zoom = zoomMin + (zoomMax - zoomMin) * Math.sin(normalizedProgress * Math.PI * 0.7);
     
     // Pitch transitions from high (60°) to top-down (15-25°)
@@ -303,7 +306,7 @@ export class RevealBehavior implements CameraBehavior {
     
     return {
       center,
-      zoom: Math.max(13, Math.min(19, zoom)),
+      zoom: Math.max(13, Math.min(16, zoom)), // Max 16 to keep parcel under 55% screen
       pitch,
       bearing: ((bearing % 360) + 360) % 360,
       altitude: baseState.altitude,
@@ -339,6 +342,7 @@ export class FinalOrbitBehavior implements CameraBehavior {
     const center: [number, number] = parcelCenter;
     
     // Slight zoom out at end for dramatic effect
+    // Keep zoom in safe range to show parcel + context
     const zoomOffset = this.feel === "soft" ? -1.0 : this.feel === "dynamic" ? 0.5 : -0.3;
     const zoom = this.baseZoom + zoomOffset + Math.sin(normalizedProgress * Math.PI * 0.5) * 0.5;
     
@@ -350,7 +354,7 @@ export class FinalOrbitBehavior implements CameraBehavior {
     
     return {
       center,
-      zoom: Math.max(13, Math.min(19, zoom)),
+      zoom: Math.max(13, Math.min(16, zoom)), // Max 16 to keep parcel under 55% screen
       pitch,
       bearing: ((bearing % 360) + 360) % 360,
       altitude: baseState.altitude,
@@ -459,11 +463,11 @@ export class CameraBlendingEngine {
     // But enforce stricter limits during Orbit/Reveal/Final phases
     let constrainedZoom = blendedZoom;
     if (p > 0.20) {
-      // After Hero phase, enforce stricter zoom limits
+      // After Hero phase, enforce stricter zoom limits (max 55% screen)
       constrainedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, blendedZoom));
     } else {
-      // During Hero phase, allow zoom up to 18 for dramatic zoom-in effect
-      constrainedZoom = Math.max(MIN_ZOOM, Math.min(18, blendedZoom));
+      // During Hero phase, allow zoom up to 17 for dramatic zoom-in effect
+      constrainedZoom = Math.max(MIN_ZOOM, Math.min(17, blendedZoom));
     }
     
     return {

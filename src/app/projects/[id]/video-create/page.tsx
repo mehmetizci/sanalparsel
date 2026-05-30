@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useParcelStore } from "@/lib/parcel-store";
-import { buildCameraSequence } from "@/lib/camera-sequence";
 import { CameraBlendingEngine, calculateBaseZoom } from "@/lib/camera-blending-engine";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
@@ -57,7 +56,6 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
   const preparationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const startTimeRef = useRef<number>(0);
-  const cameraSequenceRef = useRef<ReturnType<typeof buildCameraSequence> | null>(null);
 
   const totalDuration = droneSettings?.duration || 30;
 
@@ -460,24 +458,50 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
     // All checks passed - build camera sequence and start recording
     console.log("[VideoCreate] All checks passed - building camera sequence");
     
-    // Build camera sequence from drone settings
-    if (!droneSettings) {
-      console.log("[WebRecorder] No drone settings found - using defaults");
+    // CRITICAL: Set initial camera position to parcelCenter BEFORE recording starts
+    // This ensures the first frame shows parcel centered
+    if (center) {
+      const baseZoom = calculateBaseZoom(droneSettings.startHeight);
+      console.log("[VideoCreate] Setting initial camera position:", {
+        center: [center.lon, center.lat],
+        zoom: baseZoom,
+        pitch: 60,
+        bearing: 0
+      });
+      
+      map.jumpTo({
+        center: [center.lon, center.lat],
+        zoom: baseZoom,
+        pitch: 60,
+        bearing: 0,
+      });
+      
+      // Wait for map to settle on initial position and for tiles to fully load
+      // Check if map is idle before starting recording
+      const waitForIdle = () => {
+        if (!mountedRef.current) return;
+        
+        // Check if map is in idle state (all tiles loaded, no pending requests)
+        
+        const tilesLoaded = map.areTilesLoaded();
+        
+        if (tilesLoaded) {
+          console.log("[VideoCreate] Map idle - starting recording");
+          startRecording(map, center);
+        } else {
+          console.log("[VideoCreate] Waiting for map idle...");
+          setTimeout(waitForIdle, 500); // Check again in 500ms
+        }
+      };
+      
+      // Start checking after initial settle time
+      setTimeout(waitForIdle, 1500);
     } else {
-      console.log("[WebRecorder] drone settings used:", JSON.stringify(droneSettings, null, 2));
+      console.error("[VideoCreate] No center available - cannot start recording");
+      setErrorMessage("Parsel merkezi hesaplanamadı");
+      setRenderState("error");
     }
-    
-    cameraSequenceRef.current = buildCameraSequence(
-      droneSettings || {
-        duration: 30,
-        startHeight: 300,
-        cameraFeel: "cinematic",
-      }
-    );
-    
-    console.log("[VideoCreate] Starting recording with camera sequence");
-    startRecording(map, center);
-  }, [droneSettings, uploadedGeoJson, parcelCenter]);
+  }, [checkMediaRecorderSupport, setRecordedVideoUrl, videoSettings, droneSettings]);
 
   // Start recording with canvas capture
   const startRecording = useCallback((map: mapboxgl.Map, center: { lat: number; lon: number }) => {
