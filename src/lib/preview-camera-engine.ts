@@ -26,6 +26,32 @@ export function altitudeToZoom(altitude: number): number {
   return 18 - Math.log2(altitude / 50);
 }
 
+/**
+ * İki nokta arasındaki bearing (pusula yönü) hesapla
+ * @param fromLon Başlangıç boylam
+ * @param fromLat Başlangıç enlem
+ * @param toLon Hedef boylam
+ * @param toLat Hedef enlem
+ * @returns Bearing (0-360°, 0=North, 90=East, 180=South, 270=West)
+ */
+function bearingToTarget(
+  fromLon: number,
+  fromLat: number,
+  toLon: number,
+  toLat: number
+): number {
+  const dLon = (toLon - fromLon) * (Math.PI / 180);
+  const lat1 = fromLat * (Math.PI / 180);
+  const lat2 = toLat * (Math.PI / 180);
+
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+
+  return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+
 // ─── TİPLER ────────────────────────────────────────────────────────────────
 
 export interface CameraState {
@@ -183,12 +209,9 @@ export class SimpleCameraEngine {
     const centerLon = parcelCenter[0] + (orbitLon - parcelCenter[0]) * offsetFactor;
     const centerLat = parcelCenter[1] + (orbitLat - parcelCenter[1]) * offsetFactor;
     
-    // Bearing - orbit yönünde (tangent'e uyumlu)
-    // Kamera hareket yönüne bakar
-    // bearing = 0° North, 90° East, 180° South, 270° West
-    const tangentAngleRad = currentAngleRad + Math.PI / 2; // 90° ahead
-    let bearing = this.radToDeg(tangentAngleRad);
-    bearing = ((bearing % 360) + 360) % 360;
+    // Bearing - kameranın parsel merkezine bakması
+    // Her zaman parsel merkezine doğru
+    const bearing = bearingToTarget(centerLon, centerLat, parcelCenter[0], parcelCenter[1]);
     
     return {
       center: [centerLon, centerLat],
