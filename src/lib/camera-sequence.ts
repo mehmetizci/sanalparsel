@@ -361,38 +361,35 @@ export function interpolateCameraStep(
 
   switch (step.mode) {
     case "heroZoom": {
-      // Google Earth Studio Hero Shot: Camera locked to parcel center, only zoom changes
-      // Start from 800-1000m, approach to 150m, parcel stays centered
+      // Google Earth Studio Hero Shot: Camera locked to parcel center, direct zoom interpolation
+      // Start wide (zoom 13), end close (zoom 18), parcel stays centered
       const progress = easedT;
       
-      // Slow down in last 20% for cinematic feel
-      const adjustedProgress = progress < 0.8 
-        ? progress 
-        : 0.8 + (progress - 0.8) * 0.25; // Ease out last 20%
+      // Ease out in last 20% for cinematic slow-down effect
+      let adjustedProgress = progress;
+      if (progress > 0.8) {
+        const t = (progress - 0.8) / 0.2; // 0 to 1 in last 20%
+        adjustedProgress = 0.8 + 0.2 * (1 - Math.pow(1 - t, 3)); // Cubic ease out
+      }
       
-      // Start distance: 1000m, End distance: 150m
-      const startDistanceMeters = 1000;
-      const endDistanceMeters = 150;
-      const currentDistanceMeters = startDistanceMeters - (startDistanceMeters - endDistanceMeters) * adjustedProgress;
+      // Direct zoom interpolation: 13 → 18 (wide to close)
+      const startZoom = 13;
+      const endZoom = 18;
+      zoom = startZoom + (endZoom - startZoom) * adjustedProgress;
       
-      // Convert distance to zoom level (MapLibre/Mapbox formula)
-      // At 1000m altitude, zoom ~13; at 150m, zoom ~17
-      const currentZoom = 20 - Math.log2(currentDistanceMeters);
-      
-      // Pitch: Start at 65° (high angle), slightly increase during approach
-      const startPitch = 65;
+      // Pitch: 60° → 70° (slight increase for dramatic effect)
+      const startPitch = 60;
       const endPitch = 70;
       pitch = startPitch + (endPitch - startPitch) * adjustedProgress;
       
-      // Bearing stays fixed (or very slight rotation for cinematic effect)
-      bearing = step.bearingFrom + (step.bearingTo - step.bearingFrom) * progress * 0.1;
+      // Bearing: almost fixed, only +8 degrees max for subtle cinematic movement
+      const startBearing = step.bearingFrom || 0;
+      const endBearing = startBearing + 8;
+      bearing = startBearing + (endBearing - startBearing) * Math.min(adjustedProgress * 1.5, 1);
       
-      // NO center offset - camera stays locked on parcel center
-      // This is the key difference: no X/Y drift
+      // CRITICAL: No center offset - camera stays locked on parcel center
+      // This creates the true "lookAt" effect where only zoom changes
       centerOffset = { lon: 0, lat: 0 };
-      
-      // Zoom with cinematic feel
-      zoom = currentZoom;
       
       break;
     }

@@ -398,10 +398,24 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         id: "parcel-fill",
         type: "fill",
         source: "parcel",
-        paint: { "fill-color": "#ff2d55", "fill-opacity": 0.15 },
+        paint: { "fill-color": "#ff2d55", "fill-opacity": 0.1 },
       });
 
-      // Red outline with glow effect
+      // Outer glow (wide, faint)
+      map.addLayer({
+        id: "parcel-outline-glow-outer",
+        type: "line",
+        source: "parcel",
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": "#ff2d55",
+          "line-width": 16,
+          "line-opacity": 0.2,
+          "line-blur": 8,
+        },
+      });
+
+      // Inner glow (medium)
       map.addLayer({
         id: "parcel-outline-glow",
         type: "line",
@@ -409,13 +423,13 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-color": "#ff2d55",
-          "line-width": 8,
-          "line-opacity": 0.4,
+          "line-width": 10,
+          "line-opacity": 0.5,
           "line-blur": 4,
         },
       });
 
-      // Main red outline
+      // Main red outline (sharp, bright)
       map.addLayer({
         id: "parcel-outline",
         type: "line",
@@ -423,7 +437,7 @@ const CinematicMapRenderer = forwardRef<CinematicMapRendererRef, CinematicMapRen
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
           "line-color": "#ff2d55",
-          "line-width": 3,
+          "line-width": 4,
           "line-opacity": 1,
         },
       });
