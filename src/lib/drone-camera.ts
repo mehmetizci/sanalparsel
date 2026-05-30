@@ -325,25 +325,18 @@ export class DroneCamera {
 
       case "final": {
         // ═══════════════════════════════════════════════════════════════
-        // FINAL - Sakin hover, parsel üzerinde
+        // FINAL - Stabil hover, parsel üzerinde
         // ═══════════════════════════════════════════════════════════════
-        // Yavaşça stabilize ol
-        // Çok az zoom in (sadece hissiyat için)
-        // Çok az bearing devam
+        // TÜM DEĞERLER SABİT - bearing dönmez
+        // Sadece çok hafif zoom
         
-        const eased = driftEase(sceneProgress);
-        
-        // Hafif zoom in (sadece %15)
-        const finalZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + eased * 0.8));
-        
-        // Yavaş bearing devamı
-        bearing = startBearing + 360 + eased * 30;
+        const finalZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + sceneProgress * 0.5));
         
         return {
           center,
           zoom: finalZoom,
           pitch,
-          bearing: ((bearing % 360) + 360) % 360,
+          bearing: startBearing + 360, // SABİT - dönmez
           altitude,
         };
       }
