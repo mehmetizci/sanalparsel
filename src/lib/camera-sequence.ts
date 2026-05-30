@@ -164,132 +164,216 @@ function calculateFourCornerShots(center: { lat: number; lon: number }, distance
 }
 
 /**
+ * Auto-generated camera sequences based on camera feel
+ * Each feel has a predefined flight plan that creates a cohesive video
+ */
+interface FeelSequenceConfig {
+  modes: Array<{
+    mode: CameraSequenceMode;
+    startPhase: number;  // 0-1, when this mode starts (% of total duration)
+    endPhase: number;    // 0-1, when this mode ends (% of total duration)
+  }>;
+}
+
+const FEEL_SEQUENCES: Record<CameraFeel, FeelSequenceConfig> = {
+  /**
+   * Yumuşak: Slow and calm transitions
+   * 0-10s: Slow Hero Zoom
+   * 10-20s: Slow Orbit
+   * 20-30s: Final Hero Shot
+   */
+  soft: {
+    modes: [
+      { mode: "heroZoom", startPhase: 0, endPhase: 0.33 },
+      { mode: "orbit360", startPhase: 0.33, endPhase: 0.66 },
+      { mode: "heroZoom", startPhase: 0.66, endPhase: 1 }, // Final shot
+    ],
+  },
+  /**
+   * Sinematik: The default, most professional look
+   * 0-5s: Hero Zoom
+   * 5-15s: Orbit360
+   * 15-22s: Reveal Shot (top view approach)
+   * 22-30s: Final Orbit
+   */
+  cinematic: {
+    modes: [
+      { mode: "heroZoom", startPhase: 0, endPhase: 0.17 },
+      { mode: "orbit360", startPhase: 0.17, endPhase: 0.5 },
+      { mode: "topView", startPhase: 0.5, endPhase: 0.73 }, // Reveal shot
+      { mode: "orbit360", startPhase: 0.73, endPhase: 1 }, // Final orbit
+    ],
+  },
+  /**
+   * Dinamik: Fast and energetic for social media
+   * 0-4s: Fast Hero Zoom
+   * 4-10s: Orbit360 (faster)
+   * 10-18s: Flyover (low pass)
+   * 18-30s: Final Orbit
+   */
+  dynamic: {
+    modes: [
+      { mode: "heroZoom", startPhase: 0, endPhase: 0.13 },
+      { mode: "orbit360", startPhase: 0.13, endPhase: 0.33 },
+      { mode: "lowPass", startPhase: 0.33, endPhase: 0.6 }, // Flyover
+      { mode: "orbit360", startPhase: 0.6, endPhase: 1 }, // Final orbit
+    ],
+  },
+};
+
+/**
+ * Get transition parameters between two modes to ensure smooth interpolation
+ * CRITICAL: Each step inherits its starting values from the previous step's ending values
+ */
+function getTransitionParams(
+  feel: CameraFeel,
+  fromMode: CameraSequenceMode | null,
+  toMode: CameraSequenceMode,
+  baseHeight: number,
+  stepIndex: number
+): {
+  startPitch: number;
+  startBearing: number;
+  startZoom: number;
+} {
+  const baseZoom = 16 - Math.log2(baseHeight / 100);
+  
+  // Default starting point (hero zoom style)
+  const defaultStart = {
+    startPitch: feel === "soft" ? 30 : feel === "dynamic" ? 35 : 25,
+    startBearing: stepIndex * 45, // Rotate for variety
+    startZoom: baseZoom - 1.5,
+  };
+  
+  if (!fromMode) {
+    return defaultStart;
+  }
+  
+  // Calculate what the ending values would be for the fromMode
+  const fromPitch = getPitchPitch(feel, fromMode);
+  const fromBearing = stepIndex === 0 ? 0 : stepIndex * 45;
+  const fromZoom = getZoomEnd(feel, fromMode, baseHeight);
+  
+  return {
+    startPitch: fromPitch,
+    startBearing: fromBearing,
+    startZoom: fromZoom,
+  };
+}
+
+function getPitchPitch(feel: CameraFeel, mode: CameraSequenceMode): number {
+  const dynamic = feel === "dynamic" ? 1 : 0;
+  const soft = feel === "soft" ? 1 : 0;
+  
+  switch (mode) {
+    case "heroZoom": return soft ? 30 : dynamic ? 35 : 25;
+    case "orbit360": return soft ? 50 : dynamic ? 62 : 57;
+    case "topView": return soft ? 8 : dynamic ? 15 : 10;
+    case "lowPass": return soft ? 70 : dynamic ? 75 : 72;
+    case "spiralDescend": return soft ? 55 : dynamic ? 65 : 60;
+    case "fourCorners": return soft ? 50 : dynamic ? 58 : 53;
+    default: return 55;
+  }
+}
+
+function getZoomEnd(feel: CameraFeel, mode: CameraSequenceMode, baseHeight: number): number {
+  const baseZoom = 16 - Math.log2(baseHeight / 100);
+  
+  switch (mode) {
+    case "heroZoom": return baseZoom + 0.5;
+    case "orbit360": return baseZoom;
+    case "topView": return baseZoom + 0.5;
+    case "lowPass": return baseZoom + 0.8;
+    case "spiralDescend": return baseZoom + 1;
+    case "fourCorners": return baseZoom + 0.6;
+    default: return baseZoom;
+  }
+}
+
+/**
  * Build camera sequence based on drone settings and parcel geometry
  * 
- * Duration distribution:
- * - Total video duration is divided equally among selected modes
- * - Four Corners mode internally splits its time into 4 equal cardinal directions
- * - Each direction gets (fourCornersDuration / 4) seconds
+ * Now automatically generates camera modes based on cameraFeel setting.
+ * The system creates a cohesive flight plan where:
+ * - Each mode transitions smoothly from the previous
+ * - Starting values of each step = Ending values of previous step
+ * - No sudden jumps in zoom, pitch, or bearing
  */
 export function buildCameraSequence(
   droneSettings: DroneSettingsState, 
   geoJson?: GeoJSON.Feature
 ): CameraSequence {
-  const { duration, startHeight, cameraFeel, cameraModes } = droneSettings;
-
-  if (!cameraModes || cameraModes.length === 0) {
-    return { steps: [], totalDuration: 0 };
+  const { duration, startHeight, cameraFeel } = droneSettings;
+  
+  // Get the auto-generated sequence for this feel
+  const feelConfig = FEEL_SEQUENCES[cameraFeel];
+  if (!feelConfig) {
+    console.warn(`Unknown cameraFeel: ${cameraFeel}, defaulting to cinematic`);
+    return buildCameraSequence({ ...droneSettings, cameraFeel: "cinematic" }, geoJson);
   }
-
-  // Distribute duration evenly among selected modes
-  const numModes = cameraModes.length;
-  const durationPerMode = Math.floor(duration / numModes);
   
-  // Calculate parcel center from geoJson
   const parcelCenter = geoJson ? computeParcelCenter(geoJson) : null;
-  
-  // Calculate cardinal approach positions for Four Corners
   const fourCornerShots = parcelCenter ? calculateFourCornerShots(parcelCenter) : [];
-
+  
   const steps: CameraSequenceStep[] = [];
-  let accumulatedDuration = 0;
-
-  for (let index = 0; index < cameraModes.length; index++) {
-    const mode = cameraModes[index];
-    const pitchRange = getPitchRange(cameraFeel, mode);
-    const zoomRange = getZoomRange(cameraFeel, mode, startHeight);
+  let previousMode: CameraSequenceMode | null = null;
+  
+  for (let index = 0; index < feelConfig.modes.length; index++) {
+    const modeConfig = feelConfig.modes[index];
+    const modeDuration = Math.round((modeConfig.endPhase - modeConfig.startPhase) * duration);
     
-    // Rotate start bearing for variety if multiple modes
-    const startBearing = index * 45;
-    const bearingRange = getBearingRange(mode, cameraFeel, startBearing);
+    // CRITICAL: Get transition params to ensure smooth interpolation
+    const transition = getTransitionParams(cameraFeel, previousMode, modeConfig.mode, startHeight, index);
     
-    // Calculate height change per mode
-    const heightDropPerMode = mode === "spiralDescend" 
-      ? (startHeight - 120) / numModes  // Spiral descends significantly
-      : mode === "fourCorners"
-        ? (startHeight - 150) / numModes  // Moderate descent
-        : (startHeight - 200) / numModes; // Other modes moderate descent
+    const pitchRange = getPitchRange(cameraFeel, modeConfig.mode);
+    const zoomRange = getZoomRange(cameraFeel, modeConfig.mode, startHeight);
+    const bearingRange = getBearingRange(modeConfig.mode, cameraFeel, transition.startBearing);
     
-    const currentStartHeight = startHeight - (heightDropPerMode * index);
-    const currentEndHeight = Math.max(100, currentStartHeight - heightDropPerMode);
+    // Calculate height range for this step
+    const heightLossPerStep = (startHeight - 150) / feelConfig.modes.length;
+    const currentStartHeight = startHeight - (heightLossPerStep * index);
+    const currentEndHeight = Math.max(100, startHeight - (heightLossPerStep * (index + 1)));
     
-    if (mode === "fourCorners") {
-      // Four Corners mode: split into 4 separate steps (N, S, E, W)
-      const cornerDuration = Math.floor(durationPerMode / 4);
-      
-      for (let cornerIndex = 0; cornerIndex < fourCornerShots.length; cornerIndex++) {
-        const shot = fourCornerShots[cornerIndex];
-        
-        const cornerStep: CameraSequenceStep = {
-          mode: "fourCorners",
-          subMode: shot.id as "north" | "south" | "east" | "west",
-          duration: cornerDuration,
-          startHeight: currentStartHeight,
-          endHeight: currentEndHeight,
-          pitch: pitchRange.start,
-          pitchEnd: pitchRange.end,
-          bearingFrom: startBearing,
-          bearingTo: bearingRange.to,
-          zoomFrom: zoomRange.from,
-          zoomTo: zoomRange.to,
-          easing: cameraFeel,
-          pauseAtStart: 0,
-          // Four Corners specific: approach from cardinal direction
-          approachFrom: shot,
-          approachTo: { lon: parcelCenter?.lon || 0, lat: parcelCenter?.lat || 0 },
-        };
-
-        console.log(`[CameraSequence] Four Corners ${shot.label} (${shot.id}):`, {
-          duration: cornerStep.duration,
-          startPos: `(${shot.startLon.toFixed(5)}, ${shot.startLat.toFixed(5)})`,
-          endPos: `(${parcelCenter?.lon.toFixed(5)}, ${parcelCenter?.lat.toFixed(5)})`,
-          height: `${cornerStep.startHeight}m → ${cornerStep.endHeight}m`,
-        });
-
-        steps.push(cornerStep);
-      }
-    } else {
-      const step: CameraSequenceStep = {
-        mode,
-        duration: durationPerMode,
-        startHeight: currentStartHeight,
-        endHeight: currentEndHeight,
-        pitch: pitchRange.start,
-        pitchEnd: pitchRange.end,
-        bearingFrom: bearingRange.from,
-        bearingTo: bearingRange.to,
-        zoomFrom: zoomRange.from,
-        zoomTo: zoomRange.to,
-        easing: cameraFeel,
-        pauseAtStart: 0,
+    // For hero zoom at the end (final shot), ensure strong zoom in
+    const isFinalHeroShot = index === feelConfig.modes.length - 1 && modeConfig.mode === "heroZoom";
+    const baseZoom = 16 - Math.log2(startHeight / 100);
+    
+    const step: CameraSequenceStep = {
+      mode: modeConfig.mode,
+      duration: modeDuration,
+      startHeight: currentStartHeight,
+      endHeight: currentEndHeight,
+      pitch: transition.startPitch, // Use transitioning value
+      pitchEnd: isFinalHeroShot ? 65 : pitchRange.end, // Final hero shot looks more down
+      bearingFrom: transition.startBearing,
+      bearingTo: bearingRange.to,
+      zoomFrom: transition.startZoom, // Use transitioning value
+      zoomTo: isFinalHeroShot ? baseZoom + 1.5 : zoomRange.to, // Strong zoom for final shot
+      easing: cameraFeel,
+    };
+    
+    // Enable approach mode for four corners
+    if (modeConfig.mode === "fourCorners" && fourCornerShots.length > 0) {
+      const shot = fourCornerShots[0];
+      step.approachFrom = {
+        id: shot.id,
+        startLon: shot.startLon,
+        startLat: shot.startLat,
       };
-
-      console.log(`[CameraSequence] Step ${index} (${mode}):`, {
-        duration: step.duration,
-        height: `${step.startHeight}m → ${step.endHeight}m`,
-        pitch: `${step.pitch}° → ${step.pitchEnd}°`,
-      });
-
-      steps.push(step);
+      step.approachTo = {
+        lon: shot.endLon,
+        lat: shot.endLat,
+      };
     }
     
-    accumulatedDuration += mode === "fourCorners" 
-      ? (fourCornerShots.length * Math.floor(durationPerMode / 4))
-      : durationPerMode;
+    steps.push(step);
+    previousMode = modeConfig.mode;
   }
-
-  const sequence: CameraSequence = {
+  
+  return {
     steps,
-    totalDuration: accumulatedDuration,
+    totalDuration: duration,
   };
-
-  console.log("[CameraSequence] Generated sequence:", {
-    totalDuration: sequence.totalDuration,
-    stepCount: steps.length,
-    modes: cameraModes,
-  });
-
-  return sequence;
 }
 
 /**
@@ -333,7 +417,6 @@ export const defaultDroneSettings: DroneSettingsState = {
   duration: 30,
   startHeight: 300,
   cameraFeel: "cinematic",
-  cameraModes: ["heroZoom", "orbit360", "spiralDescend", "topView"],
 };
 
 /**

@@ -41,7 +41,9 @@ export interface DroneSettingsState {
   duration: 30 | 45 | 60;
   startHeight: 100 | 200 | 300 | 400;
   cameraFeel: CameraFeel;
-  cameraModes: CameraSequenceMode[];
+  // cameraModes removed - sequence is now auto-generated from cameraFeel
+  // keeping for backward compatibility with existing projects
+  cameraModes?: CameraSequenceMode[];
 }
 
 // Extended step type with mode-specific parameters
@@ -355,7 +357,6 @@ export const useParcelStore = create<ParcelState>()(
         duration: 30,
         startHeight: 300,
         cameraFeel: "cinematic",
-        cameraModes: ["orbit360", "spiralDescend"],
       },
       cameraSequence: null,
       // Video settings
@@ -531,7 +532,6 @@ export const useParcelStore = create<ParcelState>()(
           duration: 30,
           startHeight: 300,
           cameraFeel: "cinematic",
-          cameraModes: ["heroZoom", "orbit360", "spiralDescend", "topView"],
         },
         cameraSequence: null,
       }),

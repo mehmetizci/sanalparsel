@@ -457,7 +457,6 @@ function VideoCreatePageInner({ params }: { params: { id: string } }) {
         duration: 30,
         startHeight: 300,
         cameraFeel: "cinematic",
-        cameraModes: ["orbit360"],
       },
       uploadedGeoJson || undefined
     );

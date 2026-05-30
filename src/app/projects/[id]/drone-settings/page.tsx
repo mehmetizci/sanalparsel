@@ -5,43 +5,55 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import AppShell from "@/components/AppShell";
 import StepHeader from "@/components/StepHeader";
-import DroneModeCard from "@/components/DroneModeCard";
 import PrimaryButton from "@/components/PrimaryButton";
 import GlassCard from "@/components/GlassCard";
-import { useParcelStore, CameraSequenceMode, CameraFeel } from "@/lib/parcel-store";
+import { useParcelStore, CameraFeel } from "@/lib/parcel-store";
 import { buildCameraSequence } from "@/lib/camera-sequence";
-
-// Map old camera modes to new sequence modes
-const MODE_MAP: Record<string, CameraSequenceMode> = {
-  "hero_zoom": "heroZoom",
-  "orbit_360": "orbit360",
-  "spiral_descent": "spiralDescend",
-  "top_view": "topView",
-  "low_fly": "lowPass",
-  "four_corners": "fourCorners",
-};
 
 const DURATIONS = [30, 45, 60] as const;
 const HEIGHTS = [100, 200, 300, 400] as const;
-const CAMERA_STYLES: { value: CameraFeel; label: string; description: string }[] = [
-  { value: "soft", label: "Yumuşak", description: "Akıcı geçişler" },
-  { value: "cinematic", label: "Sinematik", description: "Dramatik hareketler" },
-  { value: "dynamic", label: "Dinamik", description: "Hızlı geçişler" },
-];
 
-interface CameraModeOption {
-  mode: string;
+// Enhanced camera feel options with detailed descriptions
+const CAMERA_STYLES: {
+  value: CameraFeel;
   label: string;
-  selected: boolean;
-}
-
-const CAMERA_MODE_OPTIONS: CameraModeOption[] = [
-  { mode: "hero_zoom", label: "Hero Zoom", selected: true },
-  { mode: "orbit_360", label: "Orbit 360", selected: true },
-  { mode: "spiral_descent", label: "Spiral Alçalış", selected: true },
-  { mode: "top_view", label: "Tepe Görünüm", selected: true },
-  { mode: "low_fly", label: "Alçak Geçiş", selected: false },
-  { mode: "four_corners", label: "4 Köşe", selected: false },
+  description: string;
+  goals: string[];
+  default?: boolean;
+}[] = [
+  {
+    value: "soft",
+    label: "Yumuşak",
+    description: "Akıcı ve sakin geçişler",
+    goals: [
+      "Daha stabil hareketler",
+      "Daha az dönüş",
+      "Premium görünüm",
+      "Uzun izleme deneyimi",
+    ],
+  },
+  {
+    value: "cinematic",
+    label: "Sinematik",
+    description: "Drone reklam filmi hissi",
+    goals: [
+      "En etkileyici sonuç",
+      "Gayrimenkul tanıtımı için önerilen",
+      "Sinematik geçişler",
+      "Profesyonel drone görüntüsü",
+    ],
+    default: true,
+  },
+  {
+    value: "dynamic",
+    label: "Dinamik",
+    description: "Hızlı ve enerjik hareketler",
+    goals: [
+      "Sosyal medya odaklı",
+      "Daha hareketli kamera",
+      "Daha fazla açı değişimi",
+    ],
+  },
 ];
 
 export default function DroneSettingsPage({ params }: { params: { id: string } }) {
@@ -54,10 +66,8 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
   const setCameraSequence = useParcelStore((state) => state.setCameraSequence);
   
   // Local UI state
-  const [cameraModes, setCameraModes] = useState<CameraModeOption[]>(CAMERA_MODE_OPTIONS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProject = async () => {
@@ -81,58 +91,24 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
         return;
       }
       
-      // Sync camera modes from store
-      const storeModes = droneSettings.cameraModes;
-      setCameraModes(CAMERA_MODE_OPTIONS.map((opt) => ({
-        ...opt,
-        selected: storeModes.includes(MODE_MAP[opt.mode] as CameraSequenceMode),
-      })));
-
       setLoading(false);
     };
 
     fetchProject();
-  }, [id, router, droneSettings.cameraModes]);
-
-  const handleToggleCameraMode = (mode: string) => {
-    setWarningMessage(null);
-    
-    setCameraModes((prev) => {
-      const updated = prev.map((cm) =>
-        cm.mode === mode ? { ...cm, selected: !cm.selected } : cm
-      );
-      
-      // Check if we're unchecking the last mode
-      const selectedCount = updated.filter((cm) => cm.selected).length;
-      const isLastMode = updated.find((cm) => cm.mode === mode)?.selected === true && selectedCount === 0;
-      
-      if (isLastMode) {
-        setWarningMessage("En az bir kamera modu seçmelisiniz.");
-        return prev; // Don't apply the change
-      }
-      
-      return updated;
-    });
-  };
+  }, [id, router]);
 
   const handleSaveAndContinue = async () => {
     setSaving(true);
     try {
-      // Get selected mode strings
-      const selectedModes = cameraModes
-        .filter((cm) => cm.selected)
-        .map((cm) => MODE_MAP[cm.mode] as CameraSequenceMode);
-      
-      // Build drone settings from UI state
+      // Build drone settings from UI state (no camera modes anymore)
       const newDroneSettings = {
         ...droneSettings,
-        cameraModes: selectedModes,
       };
       
-      // Update store with new settings
+      // Update store with settings
       setDroneSettings(newDroneSettings);
       
-      // Build camera sequence
+      // Build camera sequence based only on cameraFeel
       const sequence = buildCameraSequence(newDroneSettings);
       
       // Save sequence to store
@@ -168,18 +144,6 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
         />
 
         <div className="space-y-6">
-          {/* Warning message */}
-          {warningMessage && (
-            <div className="bg-warning/10 border border-warning/20 rounded-xl p-4">
-              <div className="flex items-center gap-3">
-                <svg className="w-5 h-5 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <p className="text-warning font-medium">{warningMessage}</p>
-              </div>
-            </div>
-          )}
-
           {/* Duration */}
           <GlassCard>
             <label className="text-white font-semibold mb-3 block">Video Süresi</label>
@@ -220,51 +184,81 @@ export default function DroneSettingsPage({ params }: { params: { id: string } }
             </div>
           </GlassCard>
 
-          {/* Camera Feel */}
-          <GlassCard>
-            <label className="text-white font-semibold mb-3 block">Kamera Hissi</label>
-            <div className="grid grid-cols-3 gap-3">
+          {/* Camera Feel - Main Control */}
+          <GlassCard className="!p-6">
+            <div className="mb-4">
+              <label className="text-white font-semibold text-lg mb-2 block">Kamera Hissi</label>
+              <p className="text-gray-400 text-sm">Bu profilin video karakterini belirler</p>
+            </div>
+            <div className="space-y-4">
               {CAMERA_STYLES.map((style) => {
                 const isSelected = droneSettings.cameraFeel === style.value;
                 return (
                   <button
                     key={style.value}
-                    onClick={() => {
-                      console.log(`cameraFeel selected: ${style.value}`);
-                      setDroneSettings({ cameraFeel: style.value });
-                    }}
+                    onClick={() => setDroneSettings({ cameraFeel: style.value })}
                     className={`
-                      relative rounded-xl p-4 text-center transition-all duration-200
+                      w-full text-left rounded-xl p-5 transition-all duration-300
                       ${isSelected 
-                        ? "border-2 border-blue-500 bg-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.5)]" 
-                        : "border border-white/20 bg-card/50 hover:bg-card hover:border-white/30"
+                        ? "border-2 border-blue-500 bg-blue-500/20 shadow-[0_0_20px_rgba(59,130,246,0.4)]" 
+                        : "border border-white/10 bg-card/30 hover:bg-card/50 hover:border-white/20"
                       }
                     `}
                   >
-                    {isSelected && (
-                      <div className="absolute -top-2 -right-2 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
-                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
+                    <div className="flex items-start gap-4">
+                      {/* Icon indicator */}
+                      <div className={`
+                        w-10 h-10 rounded-xl flex items-center justify-center shrink-0
+                        ${isSelected ? "bg-blue-500 text-white" : "bg-white/10 text-gray-400"}
+                      `}>
+                        {isSelected ? (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="9" strokeWidth="2" />
+                          </svg>
+                        )}
                       </div>
-                    )}
-                    <p className={`font-medium ${isSelected ? "text-blue-400" : "text-white"}`}>
-                      {style.label}
-                    </p>
-                    <p className={`text-xs mt-1 ${isSelected ? "text-blue-300/70" : "text-gray-400"}`}>
-                      {style.description}
-                    </p>
+                      
+                      {/* Content */}
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-1">
+                          <h3 className={`font-semibold text-lg ${isSelected ? "text-blue-400" : "text-white"}`}>
+                            {style.label}
+                          </h3>
+                          {style.default && !isSelected && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-gray-400">
+                              Önerilen
+                            </span>
+                          )}
+                          {isSelected && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/30 text-blue-400">
+                              Seçili
+                            </span>
+                          )}
+                        </div>
+                        <p className={`text-sm mb-3 ${isSelected ? "text-blue-300/80" : "text-gray-400"}`}>
+                          {style.description}
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {style.goals.map((goal, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <div className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-blue-400" : "bg-gray-500"}`} />
+                              <span className={`text-xs ${isSelected ? "text-blue-200/70" : "text-gray-500"}`}>
+                                {goal}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   </button>
                 );
               })}
             </div>
           </GlassCard>
-
-          {/* Camera Modes */}
-          <DroneModeCard
-            modes={cameraModes}
-            onToggle={handleToggleCameraMode}
-          />
         </div>
 
         <div className="mt-8 flex gap-3">
