@@ -361,31 +361,33 @@ export function interpolateCameraStep(
 
   switch (step.mode) {
     case "heroZoom": {
-      // Google Earth Studio Hero Shot: Camera locked to parcel center
-      // Fixed, deterministic values - no jitter
+      // Google Earth Studio Hero Shot: Pure zoom movement only
+      // Camera is LOCKED to parcel center - no jitter, no drift
+      // Only zoom changes from start to end
       const progress = easedT;
       
-      // Final hover: last 10% of time, camera stays fixed
-      const hoverThreshold = 0.9;
+      // Final hover: max 2 seconds at end (calculated from step duration)
+      // At 30fps and typical step duration, hoverThreshold will be ~0.93-0.97
+      const hoverDurationSeconds = 2;
+      const hoverThreshold = Math.max(0.85, (step.duration - hoverDurationSeconds) / step.duration);
       const actualProgress = progress > hoverThreshold 
-        ? hoverThreshold  // Freeze at end
+        ? hoverThreshold  // Freeze at end for 2 seconds max
         : progress;
       
-      // Direct zoom interpolation: 13 → 16.8 (keeping parcel in frame)
-      // End zoom 16.8 ensures parcel is ~60-70% of screen, no edges cut
+      // Pure zoom interpolation: 13 → 16.5 (keeping parcel in frame)
+      // endZoom 16.5 ensures parcel is ~60-70% of screen, no edges cut
       const startZoom = 13;
-      const endZoom = 16.8;
+      const endZoom = 16.5;
+      
+      // Single easing application - no double easing
       zoom = startZoom + (endZoom - startZoom) * actualProgress;
       
-      // Pitch: nearly fixed at 65° (slight decrease for stability)
-      const fixedPitch = 65;
-      pitch = fixedPitch;
+      // FIXED VALUES - no interpolation, no drift, no jitter
+      pitch = 65;           // Fixed pitch at 65°
+      bearing = 0;          // Fixed bearing at 0° (or use step.bearingFrom)
       
-      // Bearing: completely fixed (0 rotation) for DJI-like stability
-      bearing = step.bearingFrom || 0; // No rotation at all
-      
-      // CRITICAL: Camera stays locked on parcel center - no drift
-      // centerOffset is always 0 - no X/Y movement
+      // CRITICAL: Camera is LOCKED on parcel center - no X/Y movement whatsoever
+      // centerOffset is ALWAYS 0 - this prevents all jitter
       centerOffset = { lon: 0, lat: 0 };
       
       break;

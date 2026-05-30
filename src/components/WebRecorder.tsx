@@ -128,48 +128,62 @@ export default function WebRecorder({
 
       // Check if map is already loaded
       if (map.loaded() && map.isStyleLoaded()) {
-        console.log("[WebRecorder] Map already loaded, waiting for tiles...");
+        console.log("[WebRecorder] Map style loaded, checking resources...");
         
-        // Check if tiles are already loaded
-        if (map.areTilesLoaded()) {
-          console.log("[WebRecorder] All tiles loaded");
+        // Check if parcel source and layers are ready
+        const sourceReady = map.getSource("parcel") !== undefined;
+        const layerReady = map.getLayer("parcel-fill") !== undefined;
+        const tilesReady = map.areTilesLoaded();
+        
+        console.log("[WebRecorder] Readiness check:", { sourceReady, layerReady, tilesReady });
+        
+        if (sourceReady && layerReady && tilesReady) {
+          console.log("[WebRecorder] All resources ready");
           resolve(true);
           return;
         }
-
-        // Wait for tiles to load
-        const tileChecker = setInterval(() => {
-          if (map.areTilesLoaded()) {
-            clearInterval(tileChecker);
-            console.log("[WebRecorder] All tiles loaded (via checker)");
+        
+        // Wait for source/layer to be added + tiles
+        const resourceChecker = setInterval(() => {
+          const srcReady = map.getSource("parcel") !== undefined;
+          const lyrReady = map.getLayer("parcel-fill") !== undefined;
+          const tReady = map.areTilesLoaded();
+          
+          if (srcReady && lyrReady && tReady) {
+            clearInterval(resourceChecker);
+            console.log("[WebRecorder] All resources ready (via checker)");
             resolve(true);
           }
         }, 100);
-
+        
         // Timeout after 30 seconds
         setTimeout(() => {
-          clearInterval(tileChecker);
-          console.log("[WebRecorder] Tile load timeout, proceeding anyway");
+          clearInterval(resourceChecker);
+          console.log("[WebRecorder] Resource load timeout, proceeding anyway");
           resolve(true);
         }, 30000);
       } else {
         // Wait for map to load
         const loadHandler = () => {
           map.off("load", loadHandler);
-          console.log("[WebRecorder] Map style loaded");
+          console.log("[WebRecorder] Map style loaded, waiting for resources...");
           
-          // Now wait for tiles
-          const tileChecker = setInterval(() => {
-            if (map.areTilesLoaded()) {
-              clearInterval(tileChecker);
-              console.log("[WebRecorder] All tiles loaded (after load event)");
+          // Wait for source/layer/tiles
+          const resourceChecker = setInterval(() => {
+            const srcReady = map.getSource("parcel") !== undefined;
+            const lyrReady = map.getLayer("parcel-fill") !== undefined;
+            const tReady = map.areTilesLoaded();
+            
+            if (srcReady && lyrReady && tReady) {
+              clearInterval(resourceChecker);
+              console.log("[WebRecorder] All resources ready (after load)");
               resolve(true);
             }
           }, 100);
-
+          
           setTimeout(() => {
-            clearInterval(tileChecker);
-            console.log("[WebRecorder] Tile load timeout, proceeding anyway");
+            clearInterval(resourceChecker);
+            console.log("[WebRecorder] Resource load timeout, proceeding anyway");
             resolve(true);
           }, 30000);
         };
