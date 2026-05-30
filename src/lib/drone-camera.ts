@@ -29,11 +29,11 @@ const MAX_ZOOM = 17;
 // Sahne süreleri (toplam = 1.00)
 const SCENE_DURATIONS = {
   intro: 0.05,
-  orbit: 0.10,
+  orbit: 0.15,    // Yavaş tanıtım dönüşü
   north: 0.20,
   south: 0.20,
   east: 0.20,
-  west: 0.20,
+  west: 0.15,    // Daha kısa (final yaklaşımı ile birlikte)
   final: 0.05,
 };
 
@@ -237,18 +237,14 @@ export class DroneCamera {
 
       case "orbit": {
         // ═══════════════════════════════════════════════════════════════
-        // ORBIT - Kısa tur
+        // ORBIT - Yavaş, sinematik tanıtım dönüşü
         // ═══════════════════════════════════════════════════════════════
-        // ZOOM KESİNLİKLE SABİT - sadece bearing döner
+        // Sadece 75° yavaş dönüş (360° yerine)
+        // Easing ile yumuşak başlangıç ve bitiş
         
-        // Son %20'de yavaşla (hover effect)
-        if (sceneProgress > 0.8) {
-          const hoverProgress = (sceneProgress - 0.8) / 0.2;
-          const preHoverBearing = startBearing + 0.8 * 360;
-          bearing = preHoverBearing + hoverProgress * 72;
-        } else {
-          bearing = startBearing + sceneProgress * 360;
-        }
+        const ORBIT_ANGLE = 75;
+        const eased = easeInOutCubic(sceneProgress);
+        bearing = startBearing + eased * ORBIT_ANGLE;
         
         zoom = baseZoom + 0.5; // ZOOM SABİT
         
